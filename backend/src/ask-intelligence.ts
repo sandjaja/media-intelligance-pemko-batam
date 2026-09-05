@@ -4,7 +4,6 @@ import { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 
 type User = { id: string; role: 'admin'|'operator'|'viewer'; opdId: string | null };
-
 type Row = { title:string; summary:string|null; source_name:string|null; published_at:string|null; sentiment:string|null; risk_level:string; risk_score:number; impact_score:number; importance_score:number; velocity_score:number; opd_name:string|null };
 
 function fallback(question:string, rows:Row[], alertCount:number) {
@@ -18,7 +17,13 @@ function fallback(question:string, rows:Row[], alertCount:number) {
   else if(q.includes('opd')) answer=`Sinyal teratas berasal dari konteks OPD ${top.opd_name||'belum terpetakan'}. Gunakan filter OPD untuk mempersempit analisis.`;
   else if(q.includes('2 jam')||q.includes('harus dilakukan')||q.includes('lakukan')) answer=`Dalam 2 jam ke depan, fokus pada validasi fakta untuk “${top.title}”, koordinasi OPD terkait, dan penyiapan satu key message yang konsisten.`;
   else if(q.includes('holding')) answer=`Holding statement yang aman: “Pemko sedang melakukan verifikasi fakta dan koordinasi dengan OPD terkait. Informasi resmi akan disampaikan melalui kanal pemerintah setelah data terverifikasi.”`;
-  return { mode:'deterministic-fallback', answer, evidence:rows.slice(0,5).map(r=>({title:r.title,source:r.source_name,risk:r.risk_score,impact:r.impact_score,sentiment:r.sentiment})), actions:critical.length?['Validasi fakta lintas OPD.','Tetapkan juru bicara.','Siapkan holding statement dan Q&A.','Pantau eskalasi media.']:['Monitor perkembangan.','Siapkan konteks dan data pendukung.'], priority:critical.some(r=>String(r.risk_level).toLowerCase()==='critical')?'IMMEDIATE':critical.length?'HIGH':negative.length?'MEDIUM':'WATCH', active_alerts:alertCount };
+  return {
+    mode:'deterministic-fallback', answer,
+    evidence:rows.slice(0,5).map(r=>({title:r.title,source:r.source_name,risk:r.risk_score,impact:r.impact_score,sentiment:r.sentiment})),
+    actions:critical.length?['Validasi fakta lintas OPD.','Tetapkan juru bicara.','Siapkan holding statement dan Q&A.','Pantau eskalasi media.']:['Monitor perkembangan.','Siapkan konteks dan data pendukung.'],
+    priority:critical.some(r=>String(r.risk_level).toLowerCase()==='critical')?'IMMEDIATE':critical.length?'HIGH':negative.length?'MEDIUM':'WATCH',
+    active_alerts:alertCount
+  };
 }
 
 async function ai(question:string, rows:Row[]) {
@@ -51,7 +56,7 @@ export async function registerAskIntelligence(app:FastifyInstance, pool:Pool, jw
     const alertsParams:unknown[]=[]; const alertWhere:string[]=[`aa.status IN ('open','acknowledged')`];
     if(opdId){alertsParams.push(opdId);alertWhere.push(`a.opd_id=$${alertsParams.length}`);}
     const alerts=await pool.query(`SELECT COUNT(*)::int count FROM article_alerts aa JOIN articles a ON a.id=aa.article_id WHERE ${alertWhere.join(' AND ')}`,alertsParams);
-    const data=rows.map(r=>({...r,risk_score:Number(r.risk_score||0),impact_score:Number(r.impact_score||0),importance_score:Number(r.importance_score||0),velocity_score:Number(r.velocity_score||0})) as Row);
+    const data=rows.map(r=>({...r,risk_score:Number(r.risk_score||0),impact_score:Number(r.impact_score||0),importance_score:Number(r.importance_score||0),velocity_score:Number(r.velocity_score||0)})) as Row[];
     try { return await ai(parsed.data.question,data) ?? fallback(parsed.data.question,data,Number(alerts.rows[0]?.count||0)); } catch { return {...fallback(parsed.data.question,data,Number(alerts.rows[0]?.count||0)),provider_error:true}; }
   });
 }
