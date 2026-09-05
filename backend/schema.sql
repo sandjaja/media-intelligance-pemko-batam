@@ -1,6 +1,11 @@
 -- Media Intelligence v2 schema (PostgreSQL)
 CREATE TABLE IF NOT EXISTS opd (id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE, code TEXT UNIQUE, active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
 CREATE TABLE IF NOT EXISTS media_sources (id BIGSERIAL PRIMARY KEY, name TEXT NOT NULL UNIQUE, category TEXT NOT NULL CHECK(category IN ('online','print','social')), tier SMALLINT NOT NULL DEFAULT 2, url TEXT, active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMPTZ NOT NULL DEFAULT now());
+ALTER TABLE media_sources ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMPTZ;
+ALTER TABLE media_sources ADD COLUMN IF NOT EXISTS last_success_at TIMESTAMPTZ;
+ALTER TABLE media_sources ADD COLUMN IF NOT EXISTS last_error TEXT;
+ALTER TABLE media_sources ADD COLUMN IF NOT EXISTS last_fetched_count INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE media_sources ADD COLUMN IF NOT EXISTS last_inserted_count INTEGER NOT NULL DEFAULT 0;
 CREATE TABLE IF NOT EXISTS keywords (id BIGSERIAL PRIMARY KEY, opd_id BIGINT REFERENCES opd(id) ON DELETE CASCADE, keyword TEXT NOT NULL, active BOOLEAN NOT NULL DEFAULT TRUE, UNIQUE(opd_id, keyword));
 CREATE TABLE IF NOT EXISTS articles (id BIGSERIAL PRIMARY KEY, source_id BIGINT REFERENCES media_sources(id) ON DELETE SET NULL, opd_id BIGINT REFERENCES opd(id) ON DELETE SET NULL, title TEXT NOT NULL, url TEXT, published_at TIMESTAMPTZ, author TEXT, content TEXT, summary TEXT, sentiment TEXT CHECK(sentiment IN ('positive','neutral','negative')), importance_score NUMERIC(5,2) NOT NULL DEFAULT 0, impact_score NUMERIC(5,2) NOT NULL DEFAULT 0, velocity_score NUMERIC(5,2) NOT NULL DEFAULT 0, risk_score NUMERIC(5,2) NOT NULL DEFAULT 0, risk_level TEXT NOT NULL DEFAULT 'low' CHECK(risk_level IN ('low','medium','high','critical')), is_highlight BOOLEAN NOT NULL DEFAULT FALSE, created_at TIMESTAMPTZ NOT NULL DEFAULT now(), UNIQUE(url));
 ALTER TABLE articles ADD COLUMN IF NOT EXISTS risk_score NUMERIC(5,2) NOT NULL DEFAULT 0;
