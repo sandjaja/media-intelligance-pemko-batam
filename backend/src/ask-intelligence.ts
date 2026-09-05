@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { generateDailyIntelligence } from './daily-intelligence.js';
+import { registerAdminRoutes } from './admin-routes.js';
 
 type User = { id: string; role: 'admin'|'operator'|'viewer'; opdId: string | null };
 type Row = { title:string; summary:string|null; source_name:string|null; published_at:string|null; sentiment:string|null; risk_level:string; risk_score:number; impact_score:number; importance_score:number; velocity_score:number; opd_name:string|null };
@@ -39,6 +40,8 @@ export async function registerAskIntelligence(app:FastifyInstance, pool:Pool, jw
     if(!token) return reply.code(401).send({error:'UNAUTHENTICATED'});
     try { const d=jwt.verify(token,jwtSecret) as jwt.JwtPayload; if(typeof d.sub!=='string'||!['admin','operator','viewer'].includes(String(d.role))) throw new Error('invalid'); request.user={id:d.sub,email:String(d.email),role:d.role as any,opdId:d.opdId?String(d.opdId):null}; } catch { return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'}); }
   };
+
+  await registerAdminRoutes(app,pool,jwtSecret);
 
   app.post('/api/ask',{preHandler:auth},async(request,reply)=>{
     const parsed=z.object({question:z.string().trim().min(3).max(1000),opdId:z.string().regex(/^\d+$/).optional()}).safeParse(request.body);
