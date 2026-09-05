@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="id" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Media Intelligence Command Center</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    .glass {
+      background: rgba(15, 23, 42, 0.8);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+    .tab.active {
+      @apply bg-slate-700 text-white;
+    }
+    body {
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    }
+  </style>
+</head>
+<body class="text-slate-100">
+  <!-- Header -->
+  <header class="fixed top-0 left-0 right-0 bg-slate-950/95 border-b border-slate-700/50 backdrop-blur z-40">
+    <div class="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-cyan-500 to-purple-500 flex items-center justify-center">
+          <i class="fa-solid fa-radar text-white"></i>
+        </div>
+        <div>
+          <h1 class="text-xl font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400">Media Intelligence</h1>
+          <p class="text-xs text-slate-500">Command Center - Pemko Batam</p>
+        </div>
+      </div>
+      <div id="userHeader" class="flex items-center gap-4"></div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="mt-24 mb-8 max-w-7xl mx-auto px-6">
+    <!-- Top Controls -->
+    <div class="flex flex-col md:flex-row items-center justify-between gap-4 mb-6">
+      <div class="flex items-center gap-4">
+        <label class="text-sm font-semibold text-slate-300">Filter OPD:</label>
+        <select id="opdSelect" class="px-4 py-2 bg-slate-950 border border-slate-700 rounded-lg text-white text-sm focus:outline-none focus:border-cyan-500">
+          <option value="all">Semua OPD</option>
+        </select>
+      </div>
+      <div class="flex gap-2">
+        <button id="modeBtn" class="px-4 py-2 rounded-lg border border-slate-700 hover:border-slate-500 text-slate-400 hover:text-slate-200 text-sm font-semibold">
+          <i class="fa-solid fa-rocket mr-2"></i>Power Mode
+        </button>
+        <button id="runIngestion" class="px-4 py-2 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 hover:bg-emerald-500/30 text-sm font-semibold">
+          <i class="fa-solid fa-play mr-1"></i>Run Ingestion
+        </button>
+      </div>
+    </div>
+
+    <!-- Tabs Navigation -->
+    <nav id="tabs" class="flex gap-2 mb-6 overflow-x-auto pb-2 border-b border-slate-700/30"></nav>
+
+    <!-- Tab Content Sections -->
+    <div id="dashboard" class="hidden"></div>
+    <div id="highlights" class="hidden"></div>
+    <div id="scan" class="hidden"></div>
+    <div id="sowhat" class="hidden"></div>
+    <div id="sources" class="hidden"></div>
+    <div id="alerts" class="hidden"></div>
+    <div id="ask" class="hidden"></div>
+  </main>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="hidden fixed top-4 right-4 bg-slate-950 border border-slate-700 text-white px-4 py-3 rounded-lg shadow-lg z-50"></div>
+
+  <!-- Scripts -->
+  <script src="app.js"></script>
+  <script src="sowhat-engine.js"></script>
+</body>
+</html>
