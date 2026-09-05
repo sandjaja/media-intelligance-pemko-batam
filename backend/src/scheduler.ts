@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { Pool } from 'pg';
 import { ingestEnabledSources } from './ingestion.js';
+import { generateDailyIntelligence } from './daily-intelligence.js';
 
 const databaseUrl = process.env.DATABASE_URL ?? '';
 if (!databaseUrl) throw new Error('DATABASE_URL is required');
@@ -21,19 +22,28 @@ async function runCycle() {
 
   try {
     const results = await ingestEnabledSources(pool);
+    const dailyIntelligence = await generateDailyIntelligence(pool);
     const finishedAt = Date.now();
     console.log(JSON.stringify({
-      event: 'ingestion_cycle_completed',
+      event: 'intelligence_cycle_completed',
       startedAt: startedIso,
       finishedAt: new Date(finishedAt).toISOString(),
       durationMs: finishedAt - startedAt,
       intervalMinutes: minutes,
-      results
+      results,
+      dailyIntelligence: {
+        date: dailyIntelligence.date,
+        status: dailyIntelligence.status,
+        totalArticles: dailyIntelligence.metrics.totalArticles,
+        negativeCount: dailyIntelligence.metrics.negativeCount,
+        highRiskCount: dailyIntelligence.metrics.highRiskCount,
+        topIssue: dailyIntelligence.topIssue?.title ?? null
+      }
     }));
   } catch (error) {
     const finishedAt = Date.now();
     console.error(JSON.stringify({
-      event: 'ingestion_cycle_failed',
+      event: 'intelligence_cycle_failed',
       startedAt: startedIso,
       finishedAt: new Date(finishedAt).toISOString(),
       durationMs: finishedAt - startedAt,
