@@ -8,7 +8,8 @@
     "start": "node dist/server.js",
     "build": "tsc",
     "check": "tsc --noEmit",
-    "ingest": "tsx src/run-ingestion.ts"
+    "ingest": "tsx src/run-ingestion.ts",
+    "scheduler": "tsx src/scheduler.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
