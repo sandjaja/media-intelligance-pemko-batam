@@ -1,7 +1,7 @@
 import { Pool } from 'pg';
 import { analyzeArticle, rankDailyHighlights, topNarrativeTerms, type IntelligenceArticle } from './media-intelligence-core.js';
 
-type DailyRow = { id:string|number; title:string; summary:string|null; content:string|null; url:string|null; published_at:string|null; sentiment:string|null; risk_score:number|null; risk_level:string|null; impact_score:number|null; velocity_score:number|null; importance_score:number|null; source_name:string|null; source_tier:number|null; media_kind:'online'|'print'|'social'|null; opd_name:string|null };
+type DailyRow = { id:string|number; title:string; summary:string|null; content:string|null; url:string|null; published_at:string|null; sentiment:string|null; risk_score:number|null; risk_level:string|null; impact_score:number|null; velocity_score:number|null; importance_score:number|null; source_name:string|null; source_tier:number|null; media_kind:'online'|'print'|'social'|null; opd_id:string|number|null; opd_name:string|null };
 
 function statusFromRisk(score:number){ return score>=80?'CRITICAL':score>=60?'ESCALATING':score>=35?'WATCH':'NORMAL'; }
 function responseWindow(score:number){ return score>=80?'0–1 JAM':score>=60?'1–6 JAM':score>=35?'6–24 JAM':'MONITOR'; }
@@ -15,10 +15,10 @@ async function syncDailyIncident(pool:Pool, result:any, topArticle:DailyRow|unde
   const existing=await pool.query(`SELECT id,status,severity FROM incidents WHERE incident_key=$1`,[incidentKey]);
   if(existing.rows.length){
     const current=existing.rows[0];
-    await pool.query(`UPDATE incidents SET signal_article_id=$2,severity=$3,decision_required=$4,updated_at=NOW(),status=CASE WHEN status='RESOLVED' THEN status ELSE CASE WHEN $3='CRITICAL' THEN 'ESCALATED' ELSE 'ESCALATED' END END WHERE id=$1`,[current.id,topArticle.id,severity,decisionRequired]);
+    await pool.query(`UPDATE incidents SET signal_article_id=$2,severity=$3,decision_required=$4,updated_at=NOW(),status=CASE WHEN status='RESOLVED' THEN status ELSE 'ESCALATED' END WHERE id=$1`,[current.id,topArticle.id,severity,decisionRequired]);
     return {id:current.id,key:incidentKey,created:false,severity};
   }
-  const inserted=await pool.query(`INSERT INTO incidents(incident_key,opd_id,signal_article_id,severity,status,decision_required,first_detected_at,created_by,updated_at,created_at) VALUES($1,$2,$3,$4,'ESCALATED',$5,NOW(),NULL,NOW(),NOW()) RETURNING id`,[incidentKey,opdId??null,topArticle.id,severity,decisionRequired]);
+  const inserted=await pool.query(`INSERT INTO incidents(incident_key,opd_id,signal_article_id,severity,status,decision_required,first_detected_at,created_by,updated_at,created_at) VALUES($1,$2,$3,$4,'ESCALATED',$5,NOW(),NULL,NOW(),NOW()) RETURNING id`,[incidentKey,opdId??topArticle.opd_id??null,topArticle.id,severity,decisionRequired]);
   const incidentId=inserted.rows[0]?.id;
   if(incidentId){
     const tasks=[['VERIFY','Validasi fakta, angka, dan sumber utama.'],['COORDINATE','Koordinasikan OPD terkait dan tetapkan PIC.'],['MESSAGE','Siapkan holding statement, key message, dan Q&A.'],['MONITOR','Pantau amplifikasi media dan perubahan risk.']];
@@ -31,7 +31,7 @@ async function syncDailyIncident(pool:Pool, result:any, topArticle:DailyRow|unde
 export async function generateDailyIntelligence(pool:Pool,date=new Date().toISOString().slice(0,10),opdId?:string|null){
   const params:unknown[]=[date]; const where=[`a.published_at >= $1::date`,`a.published_at < ($1::date + INTERVAL '1 day')`];
   if(opdId){params.push(opdId);where.push(`a.opd_id=$${params.length}`);}
-  const {rows}=await pool.query(`SELECT a.id,a.title,a.summary,a.content,a.url,a.published_at,a.sentiment,a.risk_score,a.risk_level,a.impact_score,a.velocity_score,a.importance_score,ms.name source_name,ms.tier source_tier,ms.category media_kind,o.name opd_name FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id LEFT JOIN opd o ON o.id=a.opd_id WHERE ${where.join(' AND ')} ORDER BY a.published_at DESC`,params);
+  const {rows}=await pool.query(`SELECT a.id,a.opd_id,a.title,a.summary,a.content,a.url,a.published_at,a.sentiment,a.risk_score,a.risk_level,a.impact_score,a.velocity_score,a.importance_score,ms.name source_name,ms.tier source_tier,ms.category media_kind,o.name opd_name FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id LEFT JOIN opd o ON o.id=a.opd_id WHERE ${where.join(' AND ')} ORDER BY a.published_at DESC`,params);
   const articles=rows as DailyRow[];
   const intelligence=articles.map((a):IntelligenceArticle=>({id:a.id,title:a.title,summary:a.summary,content:a.content,sourceName:a.source_name,sourceTier:a.source_tier,mediaKind:a.media_kind,opdId:a.opd_id??null,publishedAt:a.published_at}));
   const analyses=articles.map((a,i)=>({
