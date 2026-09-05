@@ -26,6 +26,8 @@ export async function applyRisk(pool: Pool, articleId: string) {
   await pool.query(`UPDATE articles SET risk_score=$2,risk_level=$3 WHERE id=$1`, [articleId, result.score, result.level]);
   if (result.alertType) {
     await pool.query(`INSERT INTO article_alerts(article_id,alert_type,severity,reason,status) VALUES($1,$2,$3,$4,'open') ON CONFLICT(article_id,alert_type) DO UPDATE SET severity=EXCLUDED.severity,reason=EXCLUDED.reason,status='open'`, [articleId, result.alertType, result.level, result.reasons.join(' · ')]);
+  } else {
+    await pool.query(`UPDATE article_alerts SET status='resolved' WHERE article_id=$1 AND status <> 'resolved'`, [articleId]);
   }
   return { ...result, articleId };
 }
