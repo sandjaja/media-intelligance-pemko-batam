@@ -14,51 +14,17 @@ export type IntelligenceArticle = {
   publishedAt?: string | Date | null;
 };
 
-export type KeywordQuery = {
-  and: string[];
-  or: string[];
-  not: string[];
-  exact: string[];
-};
+export type KeywordQuery = { and: string[]; or: string[]; not: string[]; exact: string[] };
+export type ArticleAnalysis = { sentiment: Sentiment; sentimentScore: number; impactScore: number; riskScore: number; riskLevel: RiskLevel; importanceScore: number; velocityScore: number; matchedKeywords: string[]; entities: string[]; duplicateFingerprint: string };
 
-export type ArticleAnalysis = {
-  sentiment: Sentiment;
-  sentimentScore: number;
-  impactScore: number;
-  riskScore: number;
-  riskLevel: RiskLevel;
-  importanceScore: number;
-  velocityScore: number;
-  matchedKeywords: string[];
-  entities: string[];
-  duplicateFingerprint: string;
-};
+const STOPWORDS = new Set(['yang','dan','atau','dengan','untuk','dari','pada','dalam','ini','itu','akan','telah','oleh','karena','sebagai','tidak','ada','lebih','juga','sudah','agar','jadi','kepada','bagi','dapat','bisa','sebuah','para','kami','kita','mereka','menjadi','tentang','setelah','sebelum','saat','hari','di','ke','the','of','and','to','in','on','a','an']);
+const NEGATIVE = new Map([['korupsi',18],['suap',20],['gagal',12],['kriminal',16],['kecelakaan',14],['banjir',14],['macet',10],['protes',14],['keluhan',10],['kritik',8],['masalah',8],['terlambat',9],['lambat',7],['kebakaran',15],['ancaman',15],['sengketa',13],['krisis',18],['darurat',18],['kerugian',14],['cacat',10],['polemik',11]]);
+const POSITIVE = new Map([['berhasil',12],['sukses',12],['prestasi',12],['penghargaan',10],['meningkat',8],['investasi',12],['terobosan',10],['apresiasi',10],['aman',7],['lancar',7],['kolaborasi',8],['pertumbuhan',10],['inovasi',9],['pelayanan',5],['perbaikan',7]]);
 
-const STOPWORDS = new Set([
-  'yang','dan','atau','dengan','untuk','dari','pada','dalam','ini','itu','akan','telah','oleh','karena','sebagai','tidak','ada','lebih','juga','sudah','agar','jadi','kepada','bagi','dapat','bisa','sebuah','para','kami','kita','mereka','menjadi','tentang','setelah','sebelum','saat','hari','di','ke','dengan','the','of','and','to','in','on','a','an'
-]);
-
-const NEGATIVE = new Map([
-  ['korupsi', 18], ['suap', 20], ['gagal', 12], ['kriminal', 16], ['kecelakaan', 14], ['banjir', 14], ['macet', 10], ['protes', 14], ['keluhan', 10], ['kritik', 8], ['masalah', 8], ['terlambat', 9], ['lambat', 7], ['kebakaran', 15], ['ancaman', 15], ['sengketa', 13], ['krisis', 18], ['darurat', 18], ['kerugian', 14], ['cacat', 10], ['polemik', 11]
-]);
-
-const POSITIVE = new Map([
-  ['berhasil', 12], ['sukses', 12], ['prestasi', 12], ['penghargaan', 10], ['meningkat', 8], ['investasi', 12], ['terobosan', 10], ['apresiasi', 10], ['aman', 7], ['lancar', 7], ['kolaborasi', 8], ['pertumbuhan', 10], ['inovasi', 9], ['pelayanan', 5], ['perbaikan', 7]
-]);
-
-function normalize(value: string) {
-  return value.toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function tokens(value: string) {
-  return normalize(value).split(/\s+/).filter(Boolean);
-}
-
-function containsTerm(haystack: string, term: string) {
-  const normalized = normalize(term);
-  if (!normalized) return false;
-  return normalized.includes(' ') ? haystack.includes(normalized) : new RegExp(`(?:^|\\s)${normalized.replace(/[.*+?^${}()|[\\]\\]/g, '\\$&')}(?:$|\\s)`, 'u').test(haystack);
-}
+function normalize(value: string) { return value.toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim(); }
+function tokens(value: string) { return normalize(value).split(/\s+/).filter(Boolean); }
+function escapeRegExp(value: string) { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function containsTerm(haystack: string, term: string) { const normalized = normalize(term); if (!normalized) return false; return normalized.includes(' ') ? haystack.includes(normalized) : new RegExp(`(?:^|\\s)${escapeRegExp(normalized)}(?:$|\\s)`, 'u').test(haystack); }
 
 export function parseKeywordQuery(input: string): KeywordQuery {
   const result: KeywordQuery = { and: [], or: [], not: [], exact: [] };
@@ -77,29 +43,19 @@ export function parseKeywordQuery(input: string): KeywordQuery {
 
 export function matchesKeywordQuery(article: IntelligenceArticle, query: KeywordQuery) {
   const haystack = normalize([article.title, article.summary ?? '', article.content ?? ''].join(' '));
-  const andOk = query.and.every(term => containsTerm(haystack, term));
-  const orOk = query.or.length === 0 || query.or.some(term => containsTerm(haystack, term));
-  const exactOk = query.exact.every(term => haystack.includes(normalize(term)));
-  const notOk = query.not.every(term => !containsTerm(haystack, term));
-  return andOk && orOk && exactOk && notOk;
+  return query.and.every(term => containsTerm(haystack, term)) && (query.or.length === 0 || query.or.some(term => containsTerm(haystack, term))) && query.exact.every(term => haystack.includes(normalize(term))) && query.not.every(term => !containsTerm(haystack, term));
 }
-
-export function matchedKeywords(article: IntelligenceArticle, query: KeywordQuery) {
-  const haystack = normalize([article.title, article.summary ?? '', article.content ?? ''].join(' '));
-  return [...new Set([...query.and, ...query.or, ...query.exact].filter(term => containsTerm(haystack, term)))];
-}
-
+export function matchedKeywords(article: IntelligenceArticle, query: KeywordQuery) { const haystack = normalize([article.title, article.summary ?? '', article.content ?? ''].join(' ')); return [...new Set([...query.and, ...query.or, ...query.exact].filter(term => containsTerm(haystack, term)))]; }
 function clamp(value: number) { return Math.max(0, Math.min(100, Math.round(value))); }
 
 export function fingerprintArticle(article: IntelligenceArticle) {
-  const value = normalize(`${article.title} ${article.sourceName ?? ''}`).replace(/\s+/g, ' ');
-  return value.split(' ').filter(t => t.length > 2).sort().join('|');
+  const title = tokens(article.title).filter(t => t.length > 2 && !STOPWORDS.has(t)).slice(0, 24).sort();
+  return title.join('|');
 }
 
 export function analyzeArticle(article: IntelligenceArticle, query: KeywordQuery = { and: [], or: [], not: [], exact: [] }, peerCount = 1): ArticleAnalysis {
   const text = normalize([article.title, article.summary ?? '', article.content ?? ''].join(' '));
-  let positive = 0;
-  let negative = 0;
+  let positive = 0; let negative = 0;
   for (const [term, weight] of POSITIVE) if (containsTerm(text, term)) positive += weight;
   for (const [term, weight] of NEGATIVE) if (containsTerm(text, term)) negative += weight;
   const total = positive + negative;
@@ -121,30 +77,6 @@ export function extractEntities(article: IntelligenceArticle) {
   const matches = text.match(/\b(?:Pemko|Pemerintah Kota|Dinas|Badan|DPMPTSP|Diskominfo|Dinkes|Dishub|Disdik|Batam|Wali Kota|Wakil Wali Kota)\b(?:\s+[A-Z][\p{L}\-]+){0,4}/gu) ?? [];
   return [...new Set(matches.map(v => v.trim()))].slice(0, 20);
 }
-
-export function detectDuplicates(articles: IntelligenceArticle[]) {
-  const groups = new Map<string, IntelligenceArticle[]>();
-  for (const article of articles) {
-    const key = fingerprintArticle(article);
-    if (!key) continue;
-    const group = groups.get(key) ?? [];
-    group.push(article);
-    groups.set(key, group);
-  }
-  return [...groups.entries()].filter(([, group]) => group.length > 1).map(([fingerprint, group]) => ({ fingerprint, articles: group }));
-}
-
-export function rankDailyHighlights(articles: IntelligenceArticle[], analyses: ArticleAnalysis[]) {
-  return articles.map((article, index) => ({ article, analysis: analyses[index] }))
-    .sort((a, b) => (b.analysis.riskScore + b.analysis.impactScore + b.analysis.velocityScore) - (a.analysis.riskScore + a.analysis.impactScore + a.analysis.velocityScore))
-    .slice(0, 10);
-}
-
-export function topNarrativeTerms(articles: IntelligenceArticle[], limit = 15) {
-  const counts = new Map<string, number>();
-  for (const article of articles) {
-    const unique = new Set(tokens([article.title, article.summary ?? ''].join(' ')).filter(t => t.length >= 4 && !STOPWORDS.has(t)));
-    for (const token of unique) counts.set(token, (counts.get(token) ?? 0) + 1);
-  }
-  return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([term, count]) => ({ term, count }));
-}
+export function detectDuplicates(articles: IntelligenceArticle[]) { const groups = new Map<string, IntelligenceArticle[]>(); for (const article of articles) { const key = fingerprintArticle(article); if (!key) continue; const group = groups.get(key) ?? []; group.push(article); groups.set(key, group); } return [...groups.entries()].filter(([, group]) => group.length > 1).map(([fingerprint, group]) => ({ fingerprint, articles: group })); }
+export function rankDailyHighlights(articles: IntelligenceArticle[], analyses: ArticleAnalysis[]) { return articles.map((article, index) => ({ article, analysis: analyses[index] })).sort((a, b) => (b.analysis.riskScore + b.analysis.impactScore + b.analysis.velocityScore) - (a.analysis.riskScore + a.analysis.impactScore + a.analysis.velocityScore)).slice(0, 10); }
+export function topNarrativeTerms(articles: IntelligenceArticle[], limit = 15) { const counts = new Map<string, number>(); for (const article of articles) { const unique = new Set(tokens([article.title, article.summary ?? ''].join(' ')).filter(t => t.length >= 4 && !STOPWORDS.has(t))); for (const token of unique) counts.set(token, (counts.get(token) ?? 0) + 1); } return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([term, count]) => ({ term, count })); }
