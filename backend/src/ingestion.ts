@@ -53,14 +53,26 @@ export async function ingestSource(pool: Pool, source: FeedSource): Promise<{ fe
 export async function ingestEnabledSources(pool: Pool): Promise<Record<string, unknown>[]> {
   const lock = await pool.query(`SELECT pg_try_advisory_lock(78124501) AS acquired`);
   if (!lock.rows[0]?.acquired) return [{ skipped: true, reason: 'another ingestion run is already active' }];
+  const startedAt = new Date();
+  let runId: string | null = null;
   try {
     const { rows } = await pool.query(`SELECT id,name,url,tier,active FROM media_sources WHERE active=true AND url IS NOT NULL`);
+    const run = await pool.query(`INSERT INTO ingestion_runs (started_at,source_count,status) VALUES ($1,$2,'running') RETURNING id`, [startedAt, rows.length]);
+    runId = String(run.rows[0].id);
     const results: Record<string, unknown>[] = [];
     for (const source of rows) {
       try { results.push({ source: source.name, ...(await ingestSource(pool, source)) }); }
       catch (error) { results.push({ source: source.name, error: error instanceof Error ? error.message : String(error) }); }
     }
+    const successfulSources = results.filter(r => !r.error).length;
+    const failedSources = results.length - successfulSources;
+    const fetchedCount = results.reduce((sum, r) => sum + (typeof r.fetched === 'number' ? r.fetched : 0), 0);
+    const insertedCount = results.reduce((sum, r) => sum + (typeof r.inserted === 'number' ? r.inserted : 0), 0);
+    await pool.query(`UPDATE ingestion_runs SET finished_at=NOW(),status=$2,successful_sources=$3,failed_sources=$4,fetched_count=$5,inserted_count=$6,details=$7 WHERE id=$1`, [runId, failedSources ? 'completed' : 'completed', successfulSources, failedSources, fetchedCount, insertedCount, JSON.stringify(results)]);
     return results;
+  } catch (error) {
+    if (runId) await pool.query(`UPDATE ingestion_runs SET finished_at=NOW(),status='failed',error_message=$2 WHERE id=$1`, [runId, error instanceof Error ? error.message : String(error)]).catch(() => undefined);
+    throw error;
   } finally {
     await pool.query(`SELECT pg_advisory_unlock(78124501)`).catch(() => undefined);
   }
