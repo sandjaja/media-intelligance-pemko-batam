@@ -1,5 +1,5 @@
 import { Pool } from 'pg';
-import { analyzeArticle, parseKeywordQuery } from './media-intelligence-core.js';
+import { analyzeArticle as analyzeCoreArticle, parseKeywordQuery } from './media-intelligence-core.js';
 import { applyRisk } from './risk.js';
 
 function normalize(value: string) { return value.toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim(); }
@@ -22,7 +22,7 @@ export async function analyzeArticle(pool: Pool, articleId: string) {
   const peerResult = await pool.query(`SELECT COUNT(*)::int count FROM articles WHERE id<>$1 AND (title ILIKE $2 OR summary ILIKE $2)`, [articleId, `%${String(article.title).slice(0, 80)}%`]);
   const peerCount = Number(peerResult.rows[0]?.count ?? 1) + 1;
 
-  const analysis = analyzeArticle({
+  const analysis = analyzeCoreArticle({
     id: article.id,
     title: article.title,
     summary: article.summary,
