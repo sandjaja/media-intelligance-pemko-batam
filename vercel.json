@@ -4,10 +4,7 @@
   "installCommand": "echo 'No dependencies'",
   "framework": "static",
   "env": {
-    "MEDIA_INTELLIGENCE_API": {
-      "description": "API Base URL for Media Intelligence",
-      "example": "https://api.example.com"
-    }
+    "MEDIA_INTELLIGENCE_API": "https://api.example.com"
   },
   "routes": [
     {
