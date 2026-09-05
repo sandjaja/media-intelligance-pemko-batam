@@ -8,6 +8,7 @@
     "start": "node dist/server.js",
     "build": "tsc",
     "check": "tsc --noEmit",
+    "test": "node --import tsx --test src/risk.test.ts",
     "ingest": "tsx src/run-ingestion.ts",
     "scheduler": "tsx src/scheduler.ts"
   },
@@ -20,7 +21,7 @@
     "dotenv": "^17.2.1",
     "fastify": "^5.4.0",
     "fast-xml-parser": "^5.3.0",
-    "jsonwebtoken": "^9.0.2",
+    "jsonwebtoken": "^9.0.0",
     "pg": "^8.16.3",
     "zod": "^4.0.17"
   },
