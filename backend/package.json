@@ -8,7 +8,7 @@
     "start": "node dist/server.js",
     "build": "tsc",
     "check": "tsc --noEmit",
-    "test": "node --import tsx --test src/risk.test.ts src/security.test.ts src/e2e-security.test.ts src/qa-matrix.test.ts src/media-intelligence-core.test.ts",
+    "test": "node --import tsx --test src/risk.test.ts src/security.test.ts src/e2e-security.test.ts src/qa-matrix.test.ts src/media-intelligence-core.test.ts src/daily-intelligence.test.ts",
     "ingest": "tsx src/run-ingestion.ts",
     "scheduler": "tsx src/scheduler.ts"
   },
