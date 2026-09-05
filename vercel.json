@@ -2,7 +2,6 @@
   "buildCommand": "echo 'Static site - no build needed'",
   "outputDirectory": ".",
   "installCommand": "echo 'No dependencies'",
-  "framework": "static",
   "env": {
     "MEDIA_INTELLIGENCE_API": "https://api.example.com"
   },
