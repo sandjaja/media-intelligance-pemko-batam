@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { analyzeArticle, rankDailyHighlights, topNarrativeTerms, type IntelligenceArticle } from './media-intelligence-core.js';
-import { normalizePrintScan, printToIntelligenceArticle, type PrintDailyScan } from './print-daily-intelligence.js';
+import { normalizePrintScan } from './print-daily-intelligence.js';
 
 type DailyRow = { id:string|number; title:string; summary:string|null; content:string|null; url:string|null; published_at:string|null; sentiment:string|null; risk_score:number|null; risk_level:string|null; impact_score:number|null; velocity_score:number|null; importance_score:number|null; source_name:string|null; source_tier:number|null; media_kind:'online'|'print'|'social'|null; opd_id:string|number|null; opd_name:string|null };
 function statusFromRisk(score:number){ return score>=80?'CRITICAL':score>=60?'ESCALATING':score>=35?'WATCH':'NORMAL'; }
@@ -11,8 +11,8 @@ async function syncDailyIncident(pool:Pool,result:any,topArticle:DailyRow|undefi
  const incidentKey=`DAILY-${result.date}-${opdId??'ALL'}`,severity=incidentSeverity(result.status);
  const decisionRequired=`Validasi isu “${topArticle.title}”, tetapkan PIC lintas-OPD, dan siapkan narasi resmi.`;
  const existing=await pool.query(`SELECT id,status,severity FROM incidents WHERE incident_key=$1`,[incidentKey]);
- if(existing.rows.length){const current=existing.rows[0];await pool.query(`UPDATE incidents SET signal_article_id=$2,severity=$3,decision_required=$4,updated_at=NOW(),status=CASE WHEN status='RESOLVED' THEN status ELSE 'ESCALATED' END WHERE id=$1`,[current.id,typeof topArticle.id==='string'&&topArticle.id.startsWith('print-')?null:topArticle.id,severity,decisionRequired]);return{id:current.id,key:incidentKey,created:false,severity};}
  const signalId=typeof topArticle.id==='string'&&topArticle.id.startsWith('print-')?null:topArticle.id;
+ if(existing.rows.length){const current=existing.rows[0];await pool.query(`UPDATE incidents SET signal_article_id=$2,severity=$3,decision_required=$4,updated_at=NOW(),status=CASE WHEN status='RESOLVED' THEN status ELSE 'ESCALATED' END WHERE id=$1`,[current.id,signalId,severity,decisionRequired]);return{id:current.id,key:incidentKey,created:false,severity};}
  const inserted=await pool.query(`INSERT INTO incidents(incident_key,opd_id,signal_article_id,severity,status,decision_required,first_detected_at,created_by,updated_at,created_at) VALUES($1,$2,$3,$4,'ESCALATED',$5,NOW(),NULL,NOW(),NOW()) RETURNING id`,[incidentKey,opdId??topArticle.opd_id??null,signalId,severity,decisionRequired]);
  const incidentId=inserted.rows[0]?.id;
  if(incidentId){for(const [taskKey,label] of [['VERIFY','Validasi fakta, angka, dan sumber utama.'],['COORDINATE','Koordinasikan OPD terkait dan tetapkan PIC.'],['MESSAGE','Siapkan holding statement, key message, dan Q&A.'],['MONITOR','Pantau amplifikasi media dan perubahan risk.']])await pool.query(`INSERT INTO incident_tasks(incident_id,task_key,label,status) VALUES($1,$2,$3,'OPEN') ON CONFLICT(incident_id,task_key) DO NOTHING`,[incidentId,taskKey,label]);await pool.query(`INSERT INTO incident_events(incident_id,event_type,payload,created_by) VALUES($1,'DAILY_INTELLIGENCE_ESCALATION',$2,NULL)`,[incidentId,{date:result.date,status:result.status,risk:result.topIssue?.riskScore,responseWindow:result.responseWindow,title:topArticle.title,sourceKind:topArticle.media_kind}]);}
