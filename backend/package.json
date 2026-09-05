@@ -1,0 +1,34 @@
+{
+  "name": "media-intelligence-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "test": "node --import tsx --test src/risk.test.ts src/security.test.ts src/e2e-security.test.ts src/qa-matrix.test.ts src/media-intelligence-core.test.ts src/daily-intelligence.test.ts src/print-daily-intelligence.test.ts src/incident-opd-scope.test.ts src/incident-scope-policy.test.ts",
+    "ingest": "tsx src/run-ingestion.ts",
+    "scheduler": "tsx src/scheduler.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/cors": "^11.0.1",
+    "@fastify/helmet": "^13.0.2",
+    "@fastify/rate-limit": "^10.2.2",
+    "argon2": "^0.44.0",
+    "dotenv": "^17.2.1",
+    "fast-xml-parser": "^5.3.0",
+    "fastify": "^5.4.0",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.16.3",
+    "zod": "^4.0.17"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/node": "^24.3.0",
+    "@types/pg": "^8.15.5",
+    "tsx": "^4.20.3"
+  }
+}

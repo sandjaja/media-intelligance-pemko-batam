@@ -1,0 +1,25 @@
+{
+  "buildCommand": "echo 'Static site - no build needed'",
+  "outputDirectory": ".",
+  "installCommand": "echo 'No dependencies'",
+  "headers": [
+    {
+      "source": "/login.html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/dashboard.html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store, no-cache, must-revalidate"
+        }
+      ]
+    }
+  ]
+}
