@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { applyRisk } from './risk.js';
 
 const POSITIVE = ['berhasil', 'sukses', 'prestasi', 'penghargaan', 'meningkat', 'investasi', 'terobosan', 'apresiasi', 'aman', 'lancar', 'kolaborasi', 'pertumbuhan', 'positif'];
 const NEGATIVE = ['gagal', 'korupsi', 'suap', 'kriminal', 'kecelakaan', 'banjir', 'macet', 'protes', 'keluhan', 'kritik', 'masalah', 'terlambat', 'lambat', 'negatif', 'kebakaran', 'ancaman', 'sengketa'];
@@ -31,8 +32,9 @@ export async function analyzeArticle(pool: Pool, articleId: string) {
   const velocity = Math.min(100, 100 / (1 + recencyHours / 6));
   const highlight = importance >= 65 || (sentiment === 'negative' && matches.length > 0 && importance >= 50);
 
-  await pool.query(`UPDATE articles SET opd_id=$2,sentiment=$3,importance_score=$4,impact_score=$5,velocity_score=$6,is_highlight=$7 WHERE id=$1`, [articleId, opdId, sentiment, importance.toFixed(2), impact.toFixed(2), velocity.toFixed(2), highlight]);
+  await pool.query(`UPDATE articles SET opd_id=$2,sentiment=$3,importance_score=$4,impact_score=$5,velocity_score=$6,is_highlight=$7,summary=COALESCE(NULLIF(summary,''),$8) WHERE id=$1`, [articleId, opdId, sentiment, importance.toFixed(2), impact.toFixed(2), velocity.toFixed(2), highlight, String(article.content ?? article.title).slice(0, 300)]);
   await pool.query(`DELETE FROM article_entities WHERE article_id=$1`, [articleId]);
   for (const match of matches.slice(0, 20)) await pool.query(`INSERT INTO article_entities(article_id,entity_type,entity_name) VALUES($1,'keyword',$2)`, [articleId, match.keyword]);
-  return { articleId, opdId, sentiment, importance, impact, velocity, highlight, keywordMatches: matches.length };
+  const risk = await applyRisk(pool, articleId);
+  return { articleId, opdId, sentiment, importance, impact, velocity, highlight, keywordMatches: matches.length, risk };
 }
