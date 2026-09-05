@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { XMLParser } from 'fast-xml-parser';
 import { Pool } from 'pg';
+import { analyzeArticle } from './analyzer.js';
 
 export type FeedSource = { id: string; name: string; url: string; tier?: number; active?: boolean };
 export type IngestedArticle = { sourceId: string; title: string; url: string; publishedAt: Date; excerpt?: string };
@@ -24,18 +25,28 @@ export async function fetchFeed(source: FeedSource): Promise<IngestedArticle[]> 
   }).filter(Boolean) as IngestedArticle[];
 }
 
-export async function ingestSource(pool: Pool, source: FeedSource): Promise<{ fetched: number; inserted: number }> {
-  const articles = await fetchFeed(source); let inserted = 0;
+export async function ingestSource(pool: Pool, source: FeedSource): Promise<{ fetched: number; inserted: number; analyzed: number }> {
+  const articles = await fetchFeed(source); let inserted = 0; let analyzed = 0;
   for (const article of articles) {
     const fp = fingerprint(article.title, article.url);
-    const result = await pool.query(`INSERT INTO articles (source_id,title,url,published_at,content,sentiment,importance_score) VALUES ($1,$2,$3,$4,$5,'neutral',0) ON CONFLICT (url) DO NOTHING RETURNING id`, [article.sourceId, article.title, article.url, article.publishedAt, article.excerpt ?? null]);
-    if (result.rowCount) { inserted++; await pool.query(`INSERT INTO audit_logs (action,metadata) VALUES ('INGEST_ARTICLE',$1)`, [{ fingerprint: fp, articleId: result.rows[0].id, sourceId: source.id }]); }
+    const result = await pool.query(`INSERT INTO articles (source_id,title,url,published_at,content,summary,sentiment,importance_score) VALUES ($1,$2,$3,$4,$5,$5,'neutral',0) ON CONFLICT (url) DO NOTHING RETURNING id`, [article.sourceId, article.title, article.url, article.publishedAt, article.excerpt ?? null]);
+    if (result.rowCount) {
+      inserted++;
+      const articleId = String(result.rows[0].id);
+      const analysis = await analyzeArticle(pool, articleId);
+      if (analysis) analyzed++;
+      await pool.query(`INSERT INTO audit_logs (action,metadata) VALUES ('INGEST_ARTICLE',$1)`, [{ fingerprint: fp, articleId, sourceId: source.id, analysis }]);
+    }
   }
-  return { fetched: articles.length, inserted };
+  return { fetched: articles.length, inserted, analyzed };
 }
 
 export async function ingestEnabledSources(pool: Pool): Promise<Record<string, unknown>[]> {
-  const { rows } = await pool.query(`SELECT id,name,url,tier,active FROM media_sources WHERE active=true AND url IS NOT NULL`); const results: Record<string, unknown>[] = [];
-  for (const source of rows) { try { results.push({ source: source.name, ...(await ingestSource(pool, source)) }); } catch (error) { results.push({ source: source.name, error: error instanceof Error ? error.message : String(error) }); } }
+  const { rows } = await pool.query(`SELECT id,name,url,tier,active FROM media_sources WHERE active=true AND url IS NOT NULL`);
+  const results: Record<string, unknown>[] = [];
+  for (const source of rows) {
+    try { results.push({ source: source.name, ...(await ingestSource(pool, source)) }); }
+    catch (error) { results.push({ source: source.name, error: error instanceof Error ? error.message : String(error) }); }
+  }
   return results;
 }
