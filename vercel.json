@@ -2,22 +2,13 @@
   "buildCommand": "echo 'Static site - no build needed'",
   "outputDirectory": ".",
   "installCommand": "echo 'No dependencies'",
-  "env": {
-    "MEDIA_INTELLIGENCE_API": "https://api.example.com"
-  },
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/"
-    }
-  ],
   "headers": [
     {
       "source": "/login.html",
       "headers": [
         {
           "key": "Cache-Control",
-          "value": "public, max-age=3600"
+          "value": "no-store, no-cache, must-revalidate"
         }
       ]
     },
@@ -26,7 +17,7 @@
       "headers": [
         {
           "key": "Cache-Control",
-          "value": "public, max-age=3600"
+          "value": "no-store, no-cache, must-revalidate"
         }
       ]
     }
