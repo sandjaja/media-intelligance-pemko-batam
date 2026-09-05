@@ -10,6 +10,7 @@ import { Pool } from 'pg';
 import { randomBytes, createHash } from 'node:crypto';
 import { z } from 'zod';
 import { ingestEnabledSources } from './ingestion.js';
+import { registerAskIntelligence } from './ask-intelligence.js';
 
 const env = { port: Number(process.env.PORT ?? 8080), databaseUrl: process.env.DATABASE_URL ?? '', jwtSecret: process.env.JWT_SECRET ?? '', accessTtl: process.env.ACCESS_TOKEN_TTL ?? '15m', refreshDays: Number(process.env.REFRESH_TOKEN_DAYS ?? 7), corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:3000', cookieSecure: process.env.COOKIE_SECURE === 'true' };
 if (!env.databaseUrl || !env.jwtSecret) throw new Error('DATABASE_URL and JWT_SECRET are required');
@@ -38,5 +39,6 @@ app.get('/api/dashboard',{preHandler:requireAuth},async(request,reply)=>{const q
 app.get('/api/ingestion/status',{preHandler:requireAuth},async()=>{const {rows}=await pool.query(`SELECT COUNT(*)::int sources,COUNT(*) FILTER(WHERE active=true)::int active_sources,COUNT(*) FILTER(WHERE active=true AND url IS NOT NULL)::int feed_sources,COUNT(*) FILTER(WHERE active=true AND url IS NOT NULL AND last_success_at IS NOT NULL)::int healthy_feeds,COUNT(*) FILTER(WHERE active=true AND url IS NOT NULL AND last_error IS NOT NULL)::int failed_feeds,MAX(last_success_at) last_success_at FROM media_sources`);const sources=await pool.query(`SELECT id,name,category,tier,url,active,last_checked_at,last_success_at,last_error,last_fetched_count,last_inserted_count FROM media_sources ORDER BY tier ASC,name ASC`);return{status:rows[0],sources:sources.rows};});
 app.get('/api/ingestion/history',{preHandler:requireAuth},async(request,reply)=>{const q=z.object({limit:z.coerce.number().int().min(1).max(100).default(20)}).safeParse(request.query);if(!q.success)return reply.code(400).send({error:'INVALID_QUERY'});const {rows}=await pool.query(`SELECT id,started_at,finished_at,status,source_count,successful_sources,failed_sources,fetched_count,inserted_count,details,error_message FROM ingestion_runs ORDER BY started_at DESC LIMIT $1`,[q.data.limit]);return{data:rows};});
 app.post('/api/ingestion/run',{preHandler:[requireAuth,requireRole('admin','operator')]},async()=>({results:await ingestEnabledSources(pool)}));
+await registerAskIntelligence(app,pool,env.jwtSecret);
 app.setErrorHandler((error,_request,reply)=>{app.log.error(error);return reply.code(error.statusCode??500).send({error:'INTERNAL_SERVER_ERROR'});});
 app.addHook('onClose',async()=>pool.end()); await app.listen({port:env.port,host:'0.0.0.0'});
