@@ -3,16 +3,12 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Media Intelligence - Redirect</title>
+  <title>Media Intelligence</title>
 </head>
 <body>
   <script>
-    // Check if user is authenticated
-    if (localStorage.getItem('isAuthenticated') === 'true') {
-      window.location.href = 'dashboard.html';
-    } else {
-      window.location.href = 'login.html';
-    }
+    // Authentication is cookie-based. Always start at the real login page.
+    window.location.replace('login.html');
   </script>
 </body>
 </html>
