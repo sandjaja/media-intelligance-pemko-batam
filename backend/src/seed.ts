@@ -5,8 +5,8 @@ import { dirname, join } from 'node:path';
 import argon2 from 'argon2';
 import { Pool } from 'pg';
 
-const databaseUrl = process.env.DATABASE_URL ?? '';
-if (!databaseUrl) throw new Error('DATABASE_URL is required');
+const databaseUrl = process.env.DATABASE_URL ?? process.env.POSTGRES_URL ?? '';
+if (!databaseUrl) throw new Error('DATABASE_URL or POSTGRES_URL is required');
 
 const email = (process.env.ADMIN_EMAIL ?? 'admin@pemko.go.id').trim().toLowerCase();
 const defaultPasswordHash = '$argon2id$v=19$m=65536,t=3,p=4$tepMpLF24U4LMg1WWD+5GA$gi0NNGLxxhe5jfHV+mSArggmN4oJKYsooLd1UhdBVKA';
