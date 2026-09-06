@@ -3,8 +3,8 @@ import { Pool } from 'pg';
 import { ingestEnabledSources } from './ingestion.js';
 import { generateDailyIntelligence } from './daily-intelligence.js';
 
-const databaseUrl = process.env.DATABASE_URL ?? '';
-if (!databaseUrl) throw new Error('DATABASE_URL is required');
+const databaseUrl = process.env.DATABASE_URL ?? process.env.POSTGRES_URL ?? '';
+if (!databaseUrl) throw new Error('DATABASE_URL or POSTGRES_URL is required');
 
 const minutes = Math.max(1, Number(process.env.RUN_INTERVAL_MINUTES ?? 30));
 const runOnStart = process.env.RUN_ON_START !== 'false';
