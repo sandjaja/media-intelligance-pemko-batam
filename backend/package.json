@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/server.ts",
-    "start": "node dist/server.js",
+    "dev": "tsx watch src/start.ts",
+    "start": "node dist/start.js",
     "build": "tsc",
     "check": "tsc --noEmit",
     "test": "node --import tsx --test src/risk.test.ts src/security.test.ts src/e2e-security.test.ts src/qa-matrix.test.ts src/media-intelligence-core.test.ts src/daily-intelligence.test.ts src/print-daily-intelligence.test.ts src/incident-opd-scope.test.ts src/incident-scope-policy.test.ts",
