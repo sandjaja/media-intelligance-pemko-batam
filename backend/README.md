@@ -27,6 +27,29 @@ The frontend is intentionally kept separate from secrets and data ingestion. Imp
 7. Rate-limit login and AI endpoints; audit authentication, uploads and privileged actions.
 8. AI providers, crawler credentials and database credentials must be environment variables/server-side secrets.
 
+## Database bootstrap / admin seed
+
+V2 now has an idempotent database seed command:
+
+```bash
+npm run db:seed
+```
+
+The command first applies `schema.sql`, then creates or repairs the bootstrap admin account. Running it repeatedly will not create duplicate users and will not overwrite an existing admin password unless `ADMIN_PASSWORD` is explicitly supplied.
+
+Default bootstrap credentials:
+
+- **Email:** `admin@pemko.go.id`
+- **Password:** `Admin@PemkoBatam2026!`
+
+For production, set a private password through the deployment environment instead of using the bootstrap password:
+
+```bash
+ADMIN_EMAIL=admin@pemko.go.id ADMIN_PASSWORD='your-strong-private-password' npm run db:seed
+```
+
+`ADMIN_PASSWORD` is hashed with Argon2id before it is stored. No plaintext password is stored in PostgreSQL.
+
 ## Ingestion pipeline
 
 `source scheduler -> fetch/RSS/parser -> normalize -> deduplicate(url/hash) -> keyword/entity match -> sentiment/importance -> articles -> highlight/alert aggregates`.
