@@ -1,5 +1,6 @@
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { bootstrapInitialAdmin } from './bootstrap-admin.js';
 
 const INTERNAL_PORT = 18787;
 let backendReady: Promise<void> | null = null;
@@ -11,6 +12,7 @@ async function ensureBackend() {
         process.env.DATABASE_URL = process.env.POSTGRES_URL;
       }
       process.env.PORT = String(INTERNAL_PORT);
+      await bootstrapInitialAdmin();
       await import('./server.js');
     })();
   }
