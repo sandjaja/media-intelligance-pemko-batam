@@ -70,9 +70,10 @@ CREATE TABLE IF NOT EXISTS user_roles (
   user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   role_id BIGINT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
   opd_id BIGINT REFERENCES opd(id) ON DELETE CASCADE,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  PRIMARY KEY(user_id, role_id, opd_id)
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+CREATE UNIQUE INDEX IF NOT EXISTS uq_user_roles_scope
+  ON user_roles(user_id, role_id, COALESCE(opd_id,0));
 CREATE INDEX IF NOT EXISTS idx_user_roles_user ON user_roles(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_roles_opd ON user_roles(opd_id);
 
