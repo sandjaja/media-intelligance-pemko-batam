@@ -12,6 +12,15 @@ declare module 'fastify' {
 }
 
 const roleEnum = z.enum(NORMALIZED_ROLES);
+const ROLE_DESCRIPTIONS: Record<string,string> = {
+  super_admin: 'Akses penuh platform, konfigurasi, pengguna dan seluruh data Command Center.',
+  command_center_analyst: 'Analisis lintas media, isu, sosial, strategi dan laporan Command Center.',
+  humas: 'Operasional komunikasi, konten, strategi, media dan respons kehumasan.',
+  executive: 'Akses baca executive intelligence, isu strategis, strategi dan laporan.',
+  opd_admin: 'Administrasi dan komunikasi untuk OPD yang menjadi scope pengguna.',
+  opd_analyst: 'Analisis media, isu dan laporan untuk OPD yang menjadi scope pengguna.',
+  viewer: 'Akses baca terbatas untuk monitoring dan laporan.',
+};
 
 export async function registerRbacRoutes(app: FastifyInstance, pool: Pool, jwtSecret: string) {
   const authz = async (request: FastifyRequest, reply: any) => {
@@ -45,17 +54,18 @@ export async function registerRbacRoutes(app: FastifyInstance, pool: Pool, jwtSe
 
   app.get('/api/admin/rbac/roles', { preHandler: [authz, requirePermission('users.manage')] }, async () => {
     const { rows } = await pool.query(
-      `SELECT r.id,r.code,r.name,r.description,
+      `SELECT r.id,r.code,r.name,r.scope,r.active,
               COALESCE(array_agg(p.code ORDER BY p.code) FILTER (WHERE p.code IS NOT NULL), ARRAY[]::text[]) permissions
          FROM roles r
          LEFT JOIN role_permissions rp ON rp.role_id=r.id
          LEFT JOIN permissions p ON p.id=rp.permission_id
-        GROUP BY r.id,r.code,r.name,r.description
+        WHERE r.active=true
+        GROUP BY r.id,r.code,r.name,r.scope,r.active
         ORDER BY CASE r.code
           WHEN 'super_admin' THEN 1 WHEN 'command_center_analyst' THEN 2 WHEN 'humas' THEN 3
           WHEN 'executive' THEN 4 WHEN 'opd_admin' THEN 5 WHEN 'opd_analyst' THEN 6 ELSE 7 END`,
     );
-    return { data: rows };
+    return { data: rows.map(row => ({ ...row, description: ROLE_DESCRIPTIONS[row.code] ?? '' })) };
   });
 
   app.get('/api/admin/rbac/users', { preHandler: [authz, requirePermission('users.manage')] }, async () => {
