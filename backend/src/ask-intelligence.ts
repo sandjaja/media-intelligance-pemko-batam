@@ -4,6 +4,7 @@ import { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { generateDailyIntelligence } from './daily-intelligence.js';
 import { registerAdminRoutes } from './admin-routes.js';
+import { registerRbacRoutes } from './rbac-routes.js';
 
 type User = { id: string; role: 'admin'|'operator'|'viewer'; opdId: string | null };
 type Row = { title:string; summary:string|null; source_name:string|null; published_at:string|null; sentiment:string|null; risk_level:string; risk_score:number; impact_score:number; importance_score:number; velocity_score:number; opd_name:string|null };
@@ -42,6 +43,7 @@ export async function registerAskIntelligence(app:FastifyInstance, pool:Pool, jw
   };
 
   await registerAdminRoutes(app,pool,jwtSecret);
+  await registerRbacRoutes(app,pool,jwtSecret);
 
   app.post('/api/ask',{preHandler:auth},async(request,reply)=>{
     const parsed=z.object({question:z.string().trim().min(3).max(1000),opdId:z.string().regex(/^\d+$/).optional()}).safeParse(request.body);
