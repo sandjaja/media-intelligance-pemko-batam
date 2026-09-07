@@ -1,5 +1,6 @@
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { Pool } from 'pg';
 import { bootstrapInitialAdmin } from './bootstrap-admin.js';
 
 const INTERNAL_PORT = 18787;
@@ -19,8 +20,61 @@ async function ensureBackend() {
   return backendReady;
 }
 
+async function handleDatabaseHealth(res: ServerResponse) {
+  const databaseUrl = process.env.DATABASE_URL ?? process.env.POSTGRES_URL ?? '';
+  if (!databaseUrl) {
+    res.statusCode = 500;
+    res.setHeader('content-type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({ ok: false, error: 'DATABASE_URL_MISSING' }));
+    return;
+  }
+
+  const parsed = new URL(databaseUrl);
+  const pool = new Pool({ connectionString: databaseUrl, max: 1 });
+  try {
+    const result = await pool.query(`
+      SELECT
+        current_database() AS database_name,
+        current_user AS database_user,
+        (SELECT COUNT(*)::int FROM users) AS users_count,
+        (SELECT COUNT(*)::int FROM roles) AS roles_count,
+        (SELECT COUNT(*)::int FROM schema_migrations) AS migration_count
+    `);
+    res.statusCode = 200;
+    res.setHeader('content-type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({
+      ok: true,
+      host: parsed.hostname,
+      database: result.rows[0]?.database_name ?? null,
+      databaseUser: result.rows[0]?.database_user ?? null,
+      users: Number(result.rows[0]?.users_count ?? 0),
+      roles: Number(result.rows[0]?.roles_count ?? 0),
+      migrations: Number(result.rows[0]?.migration_count ?? 0),
+      adminPasswordConfigured: Boolean(process.env.ADMIN_PASSWORD),
+      jwtSecretConfigured: Boolean(process.env.JWT_SECRET),
+      vercelEnv: process.env.VERCEL_ENV ?? null,
+    }));
+  } catch (error) {
+    console.error('Database health check failed', error);
+    res.statusCode = 500;
+    res.setHeader('content-type', 'application/json; charset=utf-8');
+    res.end(JSON.stringify({
+      ok: false,
+      host: parsed.hostname,
+      error: 'DATABASE_HEALTH_CHECK_FAILED',
+    }));
+  } finally {
+    await pool.end();
+  }
+}
+
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   try {
+    if ((req.url || '').startsWith('/health/database')) {
+      await handleDatabaseHealth(res);
+      return;
+    }
+
     await ensureBackend();
 
     await new Promise<void>((resolve, reject) => {
