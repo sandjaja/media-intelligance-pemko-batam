@@ -4,15 +4,40 @@ import jwt from 'jsonwebtoken';
 import argon2 from 'argon2';
 import { z } from 'zod';
 
-type AdminUser = { id: string; email: string; role: 'admin'|'operator'|'viewer'; opdId: string | null };
+type AdminUser = { id: string; email: string; role: 'admin'; opdId: string | null; normalizedRoles: string[] };
 declare module 'fastify' { interface FastifyRequest { adminUser?: AdminUser } }
 
 export async function registerAdminRoutes(app: FastifyInstance, pool: Pool, jwtSecret: string) {
   const adminAuth = async (request: FastifyRequest, reply: any) => {
     const token = request.cookies.access_token;
     if (!token) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
-    try { const d = jwt.verify(token, jwtSecret) as jwt.JwtPayload; if (typeof d.sub !== 'string' || d.role !== 'admin') throw new Error('forbidden'); request.adminUser = { id: d.sub, email: String(d.email), role: 'admin', opdId: d.opdId ? String(d.opdId) : null }; }
-    catch { return reply.code(403).send({ error: 'ADMIN_REQUIRED' }); }
+    try {
+      const d = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
+      if (typeof d.sub !== 'string') throw new Error('invalid_subject');
+      const { rows } = await pool.query(
+        `SELECT u.id,u.email,u.role,u.opd_id,u.active,
+                COALESCE(array_agg(DISTINCT r.code) FILTER (WHERE r.code IS NOT NULL), ARRAY[]::text[]) AS normalized_roles
+         FROM users u
+         LEFT JOIN user_roles ur ON ur.user_id=u.id
+         LEFT JOIN roles r ON r.id=ur.role_id
+         WHERE u.id=$1
+         GROUP BY u.id,u.email,u.role,u.opd_id,u.active`,
+        [d.sub],
+      );
+      const dbUser = rows[0];
+      const normalizedRoles = Array.isArray(dbUser?.normalized_roles) ? dbUser.normalized_roles.map(String) : [];
+      const isAdmin = dbUser?.active === true && (dbUser.role === 'admin' || normalizedRoles.includes('super_admin'));
+      if (!isAdmin) return reply.code(403).send({ error: 'ADMIN_REQUIRED' });
+      request.adminUser = {
+        id: String(dbUser.id),
+        email: String(dbUser.email),
+        role: 'admin',
+        opdId: dbUser.opd_id == null ? null : String(dbUser.opd_id),
+        normalizedRoles,
+      };
+    } catch {
+      return reply.code(403).send({ error: 'ADMIN_REQUIRED' });
+    }
   };
   const idParam = z.object({ id: z.string().regex(/^\d+$/) });
   const opdInput = z.object({ name: z.string().trim().min(2).max(200), code: z.string().trim().min(2).max(50), active: z.boolean().default(true) });
