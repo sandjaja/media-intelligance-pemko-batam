@@ -14,7 +14,7 @@
     { "src": "*.ico", "use": "@vercel/static" }
   ],
   "routes": [
-    { "src": "/health", "dest": "/backend/src/vercel.ts" },
+    { "src": "/health(?:/.*)?", "dest": "/backend/src/vercel.ts" },
     { "src": "/api(?:/.*)?", "dest": "/backend/src/vercel.ts" },
     { "handle": "filesystem" },
     { "src": "/", "dest": "/index.html" }
