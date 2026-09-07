@@ -1,6 +1,6 @@
 -- Foundation RBAC permissions for Batam Media & Communication Command Center
 
-INSERT INTO permissions(code, description) VALUES
+INSERT INTO permissions(code, name) VALUES
   ('platform.admin','Full platform administration'),
   ('users.manage','Create, update and deactivate users'),
   ('rbac.manage','Manage roles and permissions'),
@@ -24,16 +24,13 @@ INSERT INTO permissions(code, description) VALUES
   ('executive.read','Read executive command center'),
   ('opd.read','Read OPD-scoped intelligence'),
   ('opd.manage_scoped','Manage OPD-scoped configuration')
-ON CONFLICT (code) DO NOTHING;
+ON CONFLICT (code) DO UPDATE SET name=EXCLUDED.name;
 
--- Super Admin receives every permission.
 INSERT INTO role_permissions(role_id, permission_id)
-SELECT r.id, p.id
-FROM roles r CROSS JOIN permissions p
+SELECT r.id, p.id FROM roles r CROSS JOIN permissions p
 WHERE r.code='super_admin'
 ON CONFLICT DO NOTHING;
 
--- Command Center Analyst: cross-source intelligence and analysis.
 INSERT INTO role_permissions(role_id, permission_id)
 SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN (
   'media.read','media.analyze','social.read','social.analyze','issues.read','issues.manage',
@@ -42,7 +39,6 @@ SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN (
 ) WHERE r.code='command_center_analyst'
 ON CONFLICT DO NOTHING;
 
--- Humas: communications, content, media relations and response operations.
 INSERT INTO role_permissions(role_id, permission_id)
 SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN (
   'media.read','social.read','issues.read','strategy.read','strategy.manage',
@@ -50,14 +46,12 @@ SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN (
 ) WHERE r.code='humas'
 ON CONFLICT DO NOTHING;
 
--- Executive: read-only executive intelligence.
 INSERT INTO role_permissions(role_id, permission_id)
 SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN (
   'media.read','social.read','issues.read','strategy.read','crisis.read','reports.read','executive.read','opd.read'
 ) WHERE r.code='executive'
 ON CONFLICT DO NOTHING;
 
--- OPD Admin: scoped operational access.
 INSERT INTO role_permissions(role_id, permission_id)
 SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN (
   'media.read','social.read','issues.read','strategy.read','strategy.manage','content.read','content.manage',
@@ -65,7 +59,6 @@ SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN (
 ) WHERE r.code='opd_admin'
 ON CONFLICT DO NOTHING;
 
--- OPD Analyst: scoped analysis and reporting.
 INSERT INTO role_permissions(role_id, permission_id)
 SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN (
   'media.read','media.analyze','social.read','social.analyze','issues.read','strategy.read',
@@ -73,7 +66,6 @@ SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN (
 ) WHERE r.code='opd_analyst'
 ON CONFLICT DO NOTHING;
 
--- Viewer: basic read-only intelligence.
 INSERT INTO role_permissions(role_id, permission_id)
 SELECT r.id, p.id FROM roles r JOIN permissions p ON p.code IN (
   'media.read','social.read','issues.read','strategy.read','reports.read','opd.read'
