@@ -1,1 +1,1 @@
-(()=>{const s=document.createElement('script');s.src='./admin-core.js?v=20260907-rbac2';document.body.appendChild(s)})();
+(()=>{const s=document.createElement('script');s.src='./admin-core.js?v=20260907-district1';document.body.appendChild(s)})();
