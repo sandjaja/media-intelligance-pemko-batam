@@ -62,6 +62,10 @@ export async function loadAuthorizationContext(pool: Pool, userId: string): Prom
 }
 
 export function hasPermission(context: AuthorizationContext, permission: string) {
+  // Backward compatibility: legacy admin accounts are super-admin equivalents.
+  // Some existing accounts were created before normalized user_roles were introduced,
+  // so their roles[] array can legitimately be empty while users.role === 'admin'.
+  if (context.legacyRole === 'admin') return true;
   if (context.roles.includes('super_admin')) return true;
   // Humas is the operational role for the print-media workflow: upload, review,
   // correct metadata/OCR, verify, and advance clipping status for intelligence processing.
