@@ -11,6 +11,16 @@ type Candidate={engine:string;issueId:number;issueTitle:string;score:number;seve
 const clamp=(n:number)=>Math.max(0,Math.min(100,Math.round(n)));
 const severity=(s:number):Candidate['severity']=>s>=85?'CRITICAL':s>=70?'HIGH':s>=50?'ELEVATED':'WATCH';
 
+async function resolveOrganizationId(pool:Pool,ctx:AuthorizationContext){
+ if(ctx.opdId){
+  const r=await pool.query('SELECT organization_id FROM opd WHERE id=$1',[ctx.opdId]);
+  const id=Number(r.rows[0]?.organization_id||0);
+  if(id)return id;
+ }
+ const r=await pool.query('SELECT id FROM organizations ORDER BY id LIMIT 2');
+ return r.rowCount===1?Number(r.rows[0].id):0;
+}
+
 async function aggregate(pool:Pool,organizationId:number,limit:number):Promise<Candidate[]>{
  const issues=(await pool.query(`SELECT i.id,i.title FROM issues i WHERE i.organization_id=$1 AND lower(i.status) IN ('active','watch') ORDER BY i.updated_at DESC LIMIT $2`,[organizationId,limit])).rows;
  const out:Candidate[]=[];
@@ -26,7 +36,6 @@ async function aggregate(pool:Pool,organizationId:number,limit:number):Promise<C
   if(high>=2){score+=15;reasons.push(`${high} clipping high/critical risk: +15`)}else if(high===1){score+=7;reasons.push('1 clipping high/critical risk: +7')}
   if(critical>=1){score+=10;reasons.push(`${critical} clipping critical risk: +10`)}
   const final=clamp(score);
-  // Corroboration gate: generic volume alone is insufficient. A candidate requires >=2 linked evidence plus a negative/high-risk pattern, or one critical-risk evidence corroborated by another linked clipping.
   const corroborated=n>=2&&(negative>=2||high>=1||critical>=1);
   out.push({engine:ENGINE,issueId:Number(issue.id),issueTitle:String(issue.title),score:final,severity:severity(final),candidateAlert:corroborated&&final>=50,linkedEvidenceCount:n,negativeCount:negative,highRiskCount:high,criticalRiskCount:critical,avgRisk:Math.round(avgRisk),maxRisk:Math.round(maxRisk),avgImportance:Math.round(avgImportance),evidenceSourceCount,printArticleIds:rows.map(r=>Number(r.id)),reasons,note:corroborated&&final>=50?'Pola lintas evidence memenuhi ambang kandidat alert. Belum menjadi alert aktif; perlu validasi Humas/Super Admin.':'Belum ada pola risiko terkoroborasi yang cukup untuk kandidat alert.'});
  }
@@ -35,5 +44,5 @@ async function aggregate(pool:Pool,organizationId:number,limit:number):Promise<C
 
 export async function registerPhase2fCandidateAlertRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
  const auth=async(request:FastifyRequest,reply:any)=>{const token=request.cookies.access_token;if(!token)return reply.code(401).send({error:'UNAUTHENTICATED'});try{const d=jwt.verify(token,jwtSecret) as jwt.JwtPayload;if(typeof d.sub!=='string')throw new Error('invalid');const ctx=await loadAuthorizationContext(pool,d.sub);if(!ctx?.active)return reply.code(403).send({error:'ACCOUNT_INACTIVE'});request.phase2fCandidateAuth=ctx}catch{return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'})}};
- app.get('/api/intelligence/candidate-alerts',{preHandler:auth},async(request,reply)=>{const q=z.object({limit:z.coerce.number().int().min(1).max(100).default(30)}).safeParse(request.query);if(!q.success)return reply.code(400).send({error:'INVALID_QUERY'});const ctx=request.phase2fCandidateAuth!;let organizationId=Number(ctx.organizationId||0);if(!organizationId&&ctx.opdId){const r=await pool.query('SELECT organization_id FROM opd WHERE id=$1',[ctx.opdId]);organizationId=Number(r.rows[0]?.organization_id||0)}if(!organizationId){const r=await pool.query('SELECT id FROM organizations ORDER BY id LIMIT 2');if(r.rowCount===1)organizationId=Number(r.rows[0].id)}if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});if(!(hasPermission(ctx,'platform.admin')||hasPermission(ctx,'intelligence.read.all')||ctx.opdId))return reply.code(403).send({error:'FORBIDDEN'});const candidates=await aggregate(pool,organizationId,q.data.limit);return{data:{engine:ENGINE,total:candidates.length,candidateAlertCount:candidates.filter(x=>x.candidateAlert).length,candidates}}});
+ app.get('/api/intelligence/candidate-alerts',{preHandler:auth},async(request,reply)=>{const q=z.object({limit:z.coerce.number().int().min(1).max(100).default(30)}).safeParse(request.query);if(!q.success)return reply.code(400).send({error:'INVALID_QUERY'});const ctx=request.phase2fCandidateAuth!;const organizationId=await resolveOrganizationId(pool,ctx);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});if(!(hasPermission(ctx,'platform.admin')||hasPermission(ctx,'intelligence.read.all')||ctx.opdId))return reply.code(403).send({error:'FORBIDDEN'});const candidates=await aggregate(pool,organizationId,q.data.limit);return{data:{engine:ENGINE,total:candidates.length,candidateAlertCount:candidates.filter(x=>x.candidateAlert).length,candidates}}});
 }
