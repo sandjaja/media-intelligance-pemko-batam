@@ -8,63 +8,48 @@ declare module 'fastify' { interface FastifyRequest { printIssueAuth?: Authoriza
 
 type Phase2EAnalysisLike={issueCategory?:string;officialKeywordMatches?:Array<{keyword:string;opdId?:number|null}>;operatorKeywordMatches?:Array<{keyword:string}>;entityValidation?:{selected?:{opdId?:number|null;districtId?:number|null};detected?:{opd?:{id:number}|null;district?:{id:number}|null}}};};
 export type IssueLinkageCandidate={issueId:number;title:string;status:string;score:number;confidence:'LOW'|'MEDIUM'|'HIGH';evidence:string[];linkageStatus:'candidate'|'linked';};
-export type IssueLinkageResult={engine:string;generatedAt:string;candidateCount:number;linkedIssueId:number|null;candidates:IssueLinkageCandidate[];note:string;degraded?:boolean;error?:string;};
+export type IssueLinkageResult={engine:string;generatedAt:string;candidateCount:number;linkedIssueId:number|null;candidates:IssueLinkageCandidate[];note:string;degraded?:boolean;};
 
-const norm=(v:any)=>String(v||'').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}\s-]/gu,' ').replace(/\s+/g,' ').trim();
-const stop=new Set(['dan','atau','yang','untuk','dengan','dari','pada','dalam','kota','batam','isu','umum','lintas']);
-const terms=(v:any)=>norm(v).split(' ').filter((x:string)=>x.length>=4&&!stop.has(x));
-
-async function ensureIssueLinkageSchema(db:Pool|PoolClient){
-  await db.query(`CREATE TABLE IF NOT EXISTS issue_print_articles (
-    issue_id BIGINT NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
-    print_article_id BIGINT NOT NULL REFERENCES print_articles(id) ON DELETE CASCADE,
-    relevance_score NUMERIC(5,2) NOT NULL DEFAULT 0 CHECK (relevance_score >= 0 AND relevance_score <= 100),
-    linkage_status TEXT NOT NULL DEFAULT 'candidate' CHECK (linkage_status IN ('candidate','linked','rejected')),
-    decision_source TEXT NOT NULL DEFAULT 'engine' CHECK (decision_source IN ('engine','human')),
-    evidence JSONB,
-    decided_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
-    decided_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    PRIMARY KEY(issue_id, print_article_id)
-  )`);
-}
-
-export async function evaluatePrintIssueLinkage(client:PoolClient,article:any,analysis:Phase2EAnalysisLike):Promise<IssueLinkageResult>{
-  await client.query('SAVEPOINT phase2e_issue_linkage');
-  try {
-    await ensureIssueLinkageSchema(client);
-    const issues=(await client.query(`SELECT id,title,description,leading_opd_id,status,momentum,risk_score FROM issues WHERE status IN ('monitoring','developing','critical') ORDER BY last_seen_at DESC LIMIT 100`)).rows;
-    const selectedOpd=analysis.entityValidation?.selected?.opdId??article.opd_id??null;
-    const detectedOpd=analysis.entityValidation?.detected?.opd?.id??null;
-    const keywordTerms=[...(analysis.officialKeywordMatches||[]).map(k=>({term:norm(k.keyword),weight:16,kind:'keyword resmi'})),...(analysis.operatorKeywordMatches||[]).map(k=>({term:norm(k.keyword),weight:8,kind:'keyword operator'}))].filter(k=>k.term.length>=3);
-    const articleTitleTerms=new Set(terms(article.title));
-    const categoryTerms=new Set(terms(analysis.issueCategory));
-    const candidates:IssueLinkageCandidate[]=issues.map((i:any)=>{
-      const hay=norm(`${i.title||''} ${i.description||''}`);let score=0;const evidence:string[]=[];
-      if(i.leading_opd_id!=null&&(Number(i.leading_opd_id)===Number(selectedOpd)||Number(i.leading_opd_id)===Number(detectedOpd))){score+=30;evidence.push('OPD utama issue sesuai OPD clipping');}
-      for(const k of keywordTerms){if(hay.includes(k.term)){score+=k.weight;evidence.push(`${k.kind} “${k.term}” cocok`);}}
-      const issueTerms=new Set(terms(`${i.title||''} ${i.description||''}`));
-      const titleOverlap=[...articleTitleTerms].filter(t=>issueTerms.has(t)).slice(0,4);if(titleOverlap.length){score+=Math.min(24,titleOverlap.length*6);evidence.push(`kemiripan judul: ${titleOverlap.join(', ')}`);}
-      const categoryOverlap=[...categoryTerms].filter(t=>issueTerms.has(t)).slice(0,3);if(categoryOverlap.length){score+=Math.min(15,categoryOverlap.length*5);evidence.push(`kategori isu terkait: ${categoryOverlap.join(', ')}`);}
-      score=Math.min(100,Math.round(score));const confidence:IssueLinkageCandidate['confidence']=score>=75?'HIGH':score>=45?'MEDIUM':'LOW';
-      return{issueId:Number(i.id),title:String(i.title),status:String(i.status),score,confidence,evidence,linkageStatus:'candidate' as const};
-    }).filter(c=>c.score>=20).sort((a,b)=>b.score-a.score).slice(0,5);
-    const top=candidates[0];const second=candidates[1];const autoLink=Boolean(top&&top.score>=80&&(!second||top.score-second.score>=15));if(top&&autoLink)top.linkageStatus='linked';
-    await client.query(`DELETE FROM issue_print_articles WHERE print_article_id=$1 AND decision_source='engine'`,[article.id]);
-    for(const c of candidates){await client.query(`INSERT INTO issue_print_articles(issue_id,print_article_id,relevance_score,linkage_status,decision_source,evidence,updated_at) VALUES($1,$2,$3,$4,'engine',$5,now()) ON CONFLICT(issue_id,print_article_id) DO UPDATE SET relevance_score=EXCLUDED.relevance_score,linkage_status=CASE WHEN issue_print_articles.decision_source='human' THEN issue_print_articles.linkage_status ELSE EXCLUDED.linkage_status END,decision_source=CASE WHEN issue_print_articles.decision_source='human' THEN 'human' ELSE 'engine' END,evidence=EXCLUDED.evidence,updated_at=now()`,[c.issueId,article.id,c.score,c.linkageStatus,JSON.stringify({confidence:c.confidence,evidence:c.evidence,engine:'phase2e-issue-link-v1'})]);}
-    await client.query('RELEASE SAVEPOINT phase2e_issue_linkage');
-    return{engine:'phase2e-issue-link-v1',generatedAt:new Date().toISOString(),candidateCount:candidates.length,linkedIssueId:autoLink&&top?top.issueId:null,candidates,note:'Hanya issue aktif yang sudah ada yang dievaluasi. Sistem tidak membuat issue baru otomatis. Kandidat dengan keyakinan sedang/rendah menunggu keputusan Humas/Super Admin.'};
-  } catch (error:any) {
-    await client.query('ROLLBACK TO SAVEPOINT phase2e_issue_linkage');
-    await client.query('RELEASE SAVEPOINT phase2e_issue_linkage');
-    return {engine:'phase2e-issue-link-v1',generatedAt:new Date().toISOString(),candidateCount:0,linkedIssueId:null,candidates:[],degraded:true,error:String(error?.message||error||'unknown error'),note:'Issue Linkage gagal dijalankan dan dilewati sementara; analisis utama Phase 2E tetap dilanjutkan.'};
-  }
+/*
+ * Phase 2E core analysis must never depend on issue-clustering persistence.
+ * Issue linkage is temporarily degraded here so Verified -> Analyzed remains reliable
+ * while the dedicated linkage schema/workflow is stabilized separately.
+ */
+export async function evaluatePrintIssueLinkage(_client:PoolClient,_article:any,_analysis:Phase2EAnalysisLike):Promise<IssueLinkageResult>{
+  return {
+    engine:'phase2e-issue-link-v1-deferred',
+    generatedAt:new Date().toISOString(),
+    candidateCount:0,
+    linkedIssueId:null,
+    candidates:[],
+    degraded:true,
+    note:'Issue linkage ditunda dan dipisahkan dari proses analisis utama agar proses Verified → Analyzed tidak dapat terblokir oleh clustering.'
+  };
 }
 
 export async function registerPrintIssueLinkageRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
-  const auth=async(request:FastifyRequest,reply:any)=>{const token=request.cookies.access_token;if(!token)return reply.code(401).send({error:'UNAUTHENTICATED'});try{const decoded=jwt.verify(token,jwtSecret) as jwt.JwtPayload;if(typeof decoded.sub!=='string')throw new Error('invalid');const ctx=await loadAuthorizationContext(pool,decoded.sub);if(!ctx?.active)return reply.code(403).send({error:'ACCOUNT_INACTIVE'});request.printIssueAuth=ctx;}catch{return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'});}};
+  const auth=async(request:FastifyRequest,reply:any)=>{
+    const token=request.cookies.access_token;
+    if(!token)return reply.code(401).send({error:'UNAUTHENTICATED'});
+    try{
+      const decoded=jwt.verify(token,jwtSecret) as jwt.JwtPayload;
+      if(typeof decoded.sub!=='string')throw new Error('invalid');
+      const ctx=await loadAuthorizationContext(pool,decoded.sub);
+      if(!ctx?.active)return reply.code(403).send({error:'ACCOUNT_INACTIVE'});
+      request.printIssueAuth=ctx;
+    }catch{return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'});}
+  };
   const canManage=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
-  app.get('/api/print/articles/:id/issue-linkage',{preHandler:auth},async(request,reply)=>{const id=z.coerce.number().int().positive().safeParse((request.params as any).id);if(!id.success)return reply.code(400).send({error:'INVALID_ID'});try{await ensureIssueLinkageSchema(pool);return{data:(await pool.query(`SELECT ipa.issue_id,i.title,i.status issue_status,ipa.relevance_score,ipa.linkage_status,ipa.decision_source,ipa.evidence,ipa.decided_at FROM issue_print_articles ipa JOIN issues i ON i.id=ipa.issue_id WHERE ipa.print_article_id=$1 ORDER BY CASE ipa.linkage_status WHEN 'linked' THEN 0 WHEN 'candidate' THEN 1 ELSE 2 END,ipa.relevance_score DESC`,[id.data])).rows};}catch{return{data:[]};}});
-  app.post('/api/print/articles/:id/issue-linkage/:issueId/decision',{preHandler:auth},async(request,reply)=>{const ctx=request.printIssueAuth!;if(!canManage(ctx))return reply.code(403).send({error:'ISSUE_LINK_DECISION_REQUIRES_HUMAS_OR_SUPER_ADMIN'});const p=z.object({id:z.coerce.number().int().positive(),issueId:z.coerce.number().int().positive()}).safeParse(request.params);const b=z.object({decision:z.enum(['linked','rejected']),reason:z.string().trim().min(3).max(500)}).safeParse(request.body);if(!p.success||!b.success)return reply.code(400).send({error:'INVALID_DECISION'});const client=await pool.connect();try{await client.query('BEGIN');await ensureIssueLinkageSchema(client);const existing=(await client.query(`SELECT 1 FROM issue_print_articles WHERE print_article_id=$1 AND issue_id=$2 FOR UPDATE`,[p.data.id,p.data.issueId])).rowCount;if(!existing){await client.query('ROLLBACK');return reply.code(404).send({error:'ISSUE_LINK_CANDIDATE_NOT_FOUND'});}if(b.data.decision==='linked')await client.query(`UPDATE issue_print_articles SET linkage_status='rejected',decision_source='human',decided_by=$2,decided_at=now(),updated_at=now() WHERE print_article_id=$1 AND issue_id<>$3 AND linkage_status='linked'`,[p.data.id,ctx.id,p.data.issueId]);const row=(await client.query(`UPDATE issue_print_articles SET linkage_status=$3,decision_source='human',decided_by=$4,decided_at=now(),updated_at=now(),evidence=COALESCE(evidence,'{}'::jsonb)||$5::jsonb WHERE print_article_id=$1 AND issue_id=$2 RETURNING *`,[p.data.id,p.data.issueId,b.data.decision,ctx.id,JSON.stringify({humanReason:b.data.reason})])).rows[0];await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'PRINT_ARTICLE_ISSUE_LINK_DECISION',$2)`,[ctx.id,{printArticleId:p.data.id,issueId:p.data.issueId,decision:b.data.decision,reason:b.data.reason}]);await client.query('COMMIT');return{data:row};}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}});
+
+  app.get('/api/print/articles/:id/issue-linkage',{preHandler:auth},async(request,reply)=>{
+    const id=z.coerce.number().int().positive().safeParse((request.params as any).id);
+    if(!id.success)return reply.code(400).send({error:'INVALID_ID'});
+    return {data:[],degraded:true,message:'Issue linkage sementara dipisahkan dari analisis utama.'};
+  });
+
+  app.post('/api/print/articles/:id/issue-linkage/:issueId/decision',{preHandler:auth},async(request,reply)=>{
+    const ctx=request.printIssueAuth!;
+    if(!canManage(ctx))return reply.code(403).send({error:'ISSUE_LINK_DECISION_REQUIRES_HUMAS_OR_SUPER_ADMIN'});
+    return reply.code(409).send({error:'ISSUE_LINKAGE_TEMPORARILY_DEFERRED',message:'Issue linkage sedang dipisahkan dari proses analisis utama dan akan diaktifkan kembali setelah stabil.'});
+  });
 }
