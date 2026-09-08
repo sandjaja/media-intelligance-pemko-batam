@@ -1,53 +1,48 @@
 import { FastifyInstance, FastifyRequest } from 'fastify';
-import { Pool } from 'pg';
+import { Pool, PoolClient } from 'pg';
 import jwt from 'jsonwebtoken';
+import { z } from 'zod';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 
-const ENGINE='phase2f-candidate-issue-v1.1-anchor-family';
+const ENGINE='phase2f-candidate-issue-v1.2-human-validation';
 declare module 'fastify' { interface FastifyRequest { phase2fCandidateIssueAuth?: AuthorizationContext } }
 const STOP=new Set(['yang','dengan','untuk','dari','pada','dalam','pemko','batam','pemerintah','dinas','kota','daerah','berita','halaman','koran','batampos','kepri','provinsi','jalan','kembali','akibat','hingga','setelah']);
 const norm=(v:any)=>String(v||'').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}\s-]/gu,' ').replace(/\s+/g,' ').trim();
 const tokens=(v:any)=>[...new Set(norm(v).split(' ').filter(x=>x.length>=4&&/[a-z]/.test(x)&&!STOP.has(x)))];
-const FAMILY:Record<string,Set<string>>={
- FLOOD:new Set(['banjir','genangan','tergenang','terendam','rendam','meluap','luapan']),
- TRAFFIC:new Set(['macet','kemacetan']),
- DISASTER:new Set(['longsor','kebakaran','kecelakaan','darurat','krisis']),
- ENVIRONMENT:new Set(['sampah','pencemaran','limbah']),
- PUBLIC_COMPLAINT:new Set(['keluhan','protes','demonstrasi','gangguan']),
-};
+const FAMILY:Record<string,Set<string>>={FLOOD:new Set(['banjir','genangan','tergenang','terendam','rendam','meluap','luapan']),TRAFFIC:new Set(['macet','kemacetan']),DISASTER:new Set(['longsor','kebakaran','kecelakaan','darurat','krisis']),ENVIRONMENT:new Set(['sampah','pencemaran','limbah']),PUBLIC_COMPLAINT:new Set(['keluhan','protes','demonstrasi','gangguan'])};
 const families=(ts:string[])=>Object.entries(FAMILY).filter(([,words])=>ts.some(t=>words.has(t))).map(([name])=>name);
 const familyTerms=(ts:string[],family:string)=>ts.filter(t=>FAMILY[family]?.has(t));
-
-async function resolveOrganizationId(pool:Pool,ctx:AuthorizationContext){
- if(ctx.opdId){
-  const r=await pool.query('SELECT organization_id FROM opd WHERE id=$1',[ctx.opdId]);
-  const id=Number(r.rows[0]?.organization_id||0);
-  if(id)return id;
- }
- const r=await pool.query('SELECT id FROM organizations ORDER BY id LIMIT 2');
- return r.rowCount===1?Number(r.rows[0].id):0;
-}
-
-async function detect(pool:Pool,organizationId:number){
- const rows=(await pool.query(`SELECT pa.id,pa.title,pa.summary,pa.body_text,pa.sentiment,pa.risk_score,pa.importance_score,pa.opd_id,pa.district_id,pa.ai_metadata->'phase2e'->>'issueCategory' issue_category,(SELECT count(*)::int FROM evidence_sources es WHERE es.print_article_id=pa.id) evidence_count FROM print_articles pa JOIN opd o ON o.id=pa.opd_id WHERE o.organization_id=$1 AND lower(pa.status)='analyzed' AND NOT EXISTS(SELECT 1 FROM issue_print_articles ipa WHERE ipa.print_article_id=pa.id AND ipa.linkage_status='linked') ORDER BY pa.created_at DESC LIMIT 100`,[organizationId])).rows;
+const candidateKey=(family:string,ids:number[])=>`${family}:${[...ids].sort((a,b)=>a-b).join(',')}`;
+const canManage=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
+async function resolveOrganizationId(db:Pool|PoolClient,ctx:AuthorizationContext){if(ctx.opdId){const r=await db.query('SELECT organization_id FROM opd WHERE id=$1',[ctx.opdId]);const id=Number(r.rows[0]?.organization_id||0);if(id)return id;}const r=await db.query('SELECT id FROM organizations ORDER BY id LIMIT 2');return r.rowCount===1?Number(r.rows[0].id):0;}
+async function rejectedKeys(db:Pool|PoolClient,organizationId:number){const r=await db.query(`SELECT metadata->>'candidateKey' candidate_key FROM audit_logs WHERE action='PHASE2F_CANDIDATE_ISSUE_REJECTED' AND (metadata->>'organizationId')::bigint=$1`,[organizationId]);return new Set(r.rows.map(x=>String(x.candidate_key||'')).filter(Boolean));}
+async function detect(db:Pool|PoolClient,organizationId:number){
+ const rejected=await rejectedKeys(db,organizationId);
+ const rows=(await db.query(`SELECT pa.id,pa.title,pa.summary,pa.body_text,pa.sentiment,pa.risk_score,pa.importance_score,pa.opd_id,pa.district_id,pa.ai_metadata->'phase2e'->>'issueCategory' issue_category,(SELECT count(*)::int FROM evidence_sources es WHERE es.print_article_id=pa.id) evidence_count FROM print_articles pa JOIN opd o ON o.id=pa.opd_id WHERE o.organization_id=$1 AND lower(pa.status)='analyzed' AND NOT EXISTS(SELECT 1 FROM issue_print_articles ipa WHERE ipa.print_article_id=pa.id AND ipa.linkage_status='linked') ORDER BY pa.created_at DESC LIMIT 100`,[organizationId])).rows;
  const pairs:any[]=[];
  for(let i=0;i<rows.length;i++)for(let j=i+1;j<rows.length;j++){
-  const a=rows[i],b=rows[j];
-  const ta=tokens(`${a.title} ${a.summary} ${a.body_text}`),tb=tokens(`${b.title} ${b.summary} ${b.body_text}`),tbSet=new Set(tb);
-  const shared=ta.filter(x=>tbSet.has(x));
-  const fa=families(ta),fb=new Set(families(tb)),sharedFamilies=fa.filter(x=>fb.has(x));
-  if(!sharedFamilies.length)continue;
-  const sameOpd=Number(a.opd_id)===Number(b.opd_id),sameDistrict=a.district_id!=null&&Number(a.district_id)===Number(b.district_id);
-  const rainA=ta.includes('hujan'),rainB=tb.includes('hujan'),sameCategory=Boolean(a.issue_category)&&a.issue_category===b.issue_category;
-  let score=40+Math.min(25,sharedFamilies.length*20)+Math.min(12,shared.length*2)+(sameOpd?10:0)+(sameDistrict?5:0)+(sameCategory?5:0)+(sharedFamilies.includes('FLOOD')&&rainA&&rainB?5:0);
-  score=Math.min(100,score);if(score<60)continue;
-  const primary=sharedFamilies[0];
+  const a=rows[i],b=rows[j],ta=tokens(`${a.title} ${a.summary} ${a.body_text}`),tb=tokens(`${b.title} ${b.summary} ${b.body_text}`),tbSet=new Set(tb),shared=ta.filter(x=>tbSet.has(x));
+  const fa=families(ta),fb=new Set(families(tb)),sharedFamilies=fa.filter(x=>fb.has(x));if(!sharedFamilies.length)continue;
+  const sameOpd=Number(a.opd_id)===Number(b.opd_id),sameDistrict=a.district_id!=null&&Number(a.district_id)===Number(b.district_id),rainA=ta.includes('hujan'),rainB=tb.includes('hujan'),sameCategory=Boolean(a.issue_category)&&a.issue_category===b.issue_category;
+  let score=40+Math.min(25,sharedFamilies.length*20)+Math.min(12,shared.length*2)+(sameOpd?10:0)+(sameDistrict?5:0)+(sameCategory?5:0)+(sharedFamilies.includes('FLOOD')&&rainA&&rainB?5:0);score=Math.min(100,score);if(score<60)continue;
+  const primary=sharedFamilies[0],ids=[Number(a.id),Number(b.id)],key=candidateKey(primary,ids);if(rejected.has(key))continue;
   const anchors=[...new Set([...familyTerms(ta,primary),...familyTerms(tb,primary)])];
-  pairs.push({engine:ENGINE,score,candidateIssue:true,printArticleIds:[Number(a.id),Number(b.id)],titles:[a.title,b.title],anchorFamily:primary,anchors,sharedTerms:shared.slice(0,12),sameOpd,sameDistrict,sameCategory,opdId:sameOpd?Number(a.opd_id):null,districtId:sameDistrict?Number(a.district_id):null,evidenceSourceCount:Number(a.evidence_count||0)+Number(b.evidence_count||0),suggestedLabel:primary==='FLOOD'?'Banjir/Genangan':primary==='TRAFFIC'?'Kemacetan':primary==='DISASTER'?'Kejadian Darurat/Bencana':primary==='ENVIRONMENT'?'Lingkungan':primary==='PUBLIC_COMPLAINT'?'Keluhan/Gangguan Publik':`Isu ${primary}`,reasons:[`Keluarga anchor sama: ${primary}`,sameOpd?'OPD sama':null,sameDistrict?'Kecamatan sama':null,sameCategory?'Kategori isu sama':null,sharedFamilies.includes('FLOOD')&&rainA&&rainB?'Konteks hujan muncul pada kedua evidence':null].filter(Boolean),note:'Kandidat issue berbasis keluarga anchor dan corroborating evidence. Sistem tidak membuat Issue aktif/watch otomatis; Humas/Super Admin harus memvalidasi.'});
+  pairs.push({engine:ENGINE,candidateKey:key,score,candidateIssue:true,printArticleIds:ids,titles:[a.title,b.title],anchorFamily:primary,anchors,sharedTerms:shared.slice(0,12),sameOpd,sameDistrict,sameCategory,opdId:sameOpd?Number(a.opd_id):null,districtId:sameDistrict?Number(a.district_id):null,evidenceSourceCount:Number(a.evidence_count||0)+Number(b.evidence_count||0),suggestedLabel:primary==='FLOOD'?'Banjir/Genangan':primary==='TRAFFIC'?'Kemacetan':primary==='DISASTER'?'Kejadian Darurat/Bencana':primary==='ENVIRONMENT'?'Lingkungan':primary==='PUBLIC_COMPLAINT'?'Keluhan/Gangguan Publik':`Isu ${primary}`,reasons:[`Keluarga anchor sama: ${primary}`,sameOpd?'OPD sama':null,sameDistrict?'Kecamatan sama':null,sameCategory?'Kategori isu sama':null,sharedFamilies.includes('FLOOD')&&rainA&&rainB?'Konteks hujan muncul pada kedua evidence':null].filter(Boolean),note:'Kandidat issue. Keputusan akhir Humas/Super Admin.'});
  }
  return pairs.sort((a,b)=>b.score-a.score).slice(0,30);
 }
 export async function registerPhase2fCandidateIssueRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
  const auth=async(request:FastifyRequest,reply:any)=>{const token=request.cookies.access_token;if(!token)return reply.code(401).send({error:'UNAUTHENTICATED'});try{const d=jwt.verify(token,jwtSecret) as jwt.JwtPayload;if(typeof d.sub!=='string')throw new Error('invalid');const ctx=await loadAuthorizationContext(pool,d.sub);if(!ctx?.active)return reply.code(403).send({error:'ACCOUNT_INACTIVE'});request.phase2fCandidateIssueAuth=ctx}catch{return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'})}};
  app.get('/api/intelligence/candidate-issues',{preHandler:auth},async(request,reply)=>{const ctx=request.phase2fCandidateIssueAuth!;const organizationId=await resolveOrganizationId(pool,ctx);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});const candidates=await detect(pool,organizationId);return{data:{engine:ENGINE,total:candidates.length,candidates}}});
+ app.post('/api/intelligence/candidate-issues/decision',{preHandler:auth},async(request,reply)=>{
+  const ctx=request.phase2fCandidateIssueAuth!;if(!canManage(ctx))return reply.code(403).send({error:'CANDIDATE_ISSUE_DECISION_REQUIRES_HUMAS_OR_SUPER_ADMIN'});
+  const p=z.object({candidateKey:z.string().min(3).max(200),decision:z.enum(['watch','rejected']),reason:z.string().trim().min(3).max(500),title:z.string().trim().min(3).max(250).optional()}).safeParse(request.body);if(!p.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+  const client=await pool.connect();try{await client.query('BEGIN');const organizationId=await resolveOrganizationId(client,ctx);if(!organizationId){await client.query('ROLLBACK');return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});}const candidates=await detect(client,organizationId);const c=candidates.find(x=>x.candidateKey===p.data.candidateKey);if(!c){await client.query('ROLLBACK');return reply.code(409).send({error:'CANDIDATE_NOT_AVAILABLE'});}
+   if(p.data.decision==='rejected'){await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'PHASE2F_CANDIDATE_ISSUE_REJECTED',$2)`,[ctx.id,{organizationId,candidateKey:c.candidateKey,printArticleIds:c.printArticleIds,anchorFamily:c.anchorFamily,score:c.score,reason:p.data.reason,engine:ENGINE}]);await client.query('COMMIT');return{ok:true,decision:'rejected',candidateKey:c.candidateKey};}
+   const issueKey=`p2f-${c.anchorFamily.toLowerCase()}-${c.printArticleIds.slice().sort((a:number,b:number)=>a-b).join('-')}`;const existing=await client.query(`SELECT id FROM issues WHERE organization_id=$1 AND issue_key=$2 LIMIT 1`,[organizationId,issueKey]);let issueId:Number;
+   if(existing.rows[0])issueId=Number(existing.rows[0].id);else{const created=await client.query(`INSERT INTO issues(organization_id,issue_key,title,description,status,risk_level,momentum,first_seen_at,last_seen_at) SELECT $1,$2,$3,$4,'watch','medium','low',min(publication_date::timestamptz),max(publication_date::timestamptz) FROM print_articles WHERE id=ANY($5::bigint[]) RETURNING id`,[organizationId,issueKey,p.data.title||c.suggestedLabel,`Dibuat dari Candidate Issue ${c.candidateKey}. ${c.reasons.join('; ')}`,c.printArticleIds]);issueId=Number(created.rows[0].id);}
+   if(c.opdId)await client.query(`INSERT INTO issue_opd(issue_id,opd_id) VALUES($1,$2) ON CONFLICT DO NOTHING`,[issueId,c.opdId]);for(const articleId of c.printArticleIds)await client.query(`INSERT INTO issue_print_articles(issue_id,print_article_id,relevance_score,linkage_status,decided_by,decided_at,evidence) VALUES($1,$2,$3,'linked',$4,now(),$5) ON CONFLICT(issue_id,print_article_id) DO UPDATE SET relevance_score=EXCLUDED.relevance_score,linkage_status='linked',decided_by=EXCLUDED.decided_by,decided_at=now(),evidence=EXCLUDED.evidence,updated_at=now()`,[issueId,articleId,c.score,ctx.id,{engine:ENGINE,candidateKey:c.candidateKey,reasons:c.reasons,humanReason:p.data.reason}]);
+   await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'PHASE2F_CANDIDATE_ISSUE_WATCH_CREATED',$2)`,[ctx.id,{organizationId,issueId,candidateKey:c.candidateKey,printArticleIds:c.printArticleIds,anchorFamily:c.anchorFamily,score:c.score,reason:p.data.reason,engine:ENGINE}]);await client.query('COMMIT');return{ok:true,decision:'watch',issueId,candidateKey:c.candidateKey,linkedPrintArticleIds:c.printArticleIds};
+  }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
+ });
 }
