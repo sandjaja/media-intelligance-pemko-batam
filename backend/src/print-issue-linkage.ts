@@ -31,6 +31,7 @@ async function ensureIssueLinkageSchema(db:Pool|PoolClient){
 }
 
 export async function evaluatePrintIssueLinkage(client:PoolClient,article:any,analysis:Phase2EAnalysisLike):Promise<IssueLinkageResult>{
+  await client.query('SAVEPOINT phase2e_issue_linkage');
   try {
     await ensureIssueLinkageSchema(client);
     const issues=(await client.query(`SELECT id,title,description,leading_opd_id,status,momentum,risk_score FROM issues WHERE status IN ('monitoring','developing','critical') ORDER BY last_seen_at DESC LIMIT 100`)).rows;
@@ -52,9 +53,12 @@ export async function evaluatePrintIssueLinkage(client:PoolClient,article:any,an
     const top=candidates[0];const second=candidates[1];const autoLink=Boolean(top&&top.score>=80&&(!second||top.score-second.score>=15));if(top&&autoLink)top.linkageStatus='linked';
     await client.query(`DELETE FROM issue_print_articles WHERE print_article_id=$1 AND decision_source='engine'`,[article.id]);
     for(const c of candidates){await client.query(`INSERT INTO issue_print_articles(issue_id,print_article_id,relevance_score,linkage_status,decision_source,evidence,updated_at) VALUES($1,$2,$3,$4,'engine',$5,now()) ON CONFLICT(issue_id,print_article_id) DO UPDATE SET relevance_score=EXCLUDED.relevance_score,linkage_status=CASE WHEN issue_print_articles.decision_source='human' THEN issue_print_articles.linkage_status ELSE EXCLUDED.linkage_status END,decision_source=CASE WHEN issue_print_articles.decision_source='human' THEN 'human' ELSE 'engine' END,evidence=EXCLUDED.evidence,updated_at=now()`,[c.issueId,article.id,c.score,c.linkageStatus,JSON.stringify({confidence:c.confidence,evidence:c.evidence,engine:'phase2e-issue-link-v1'})]);}
+    await client.query('RELEASE SAVEPOINT phase2e_issue_linkage');
     return{engine:'phase2e-issue-link-v1',generatedAt:new Date().toISOString(),candidateCount:candidates.length,linkedIssueId:autoLink&&top?top.issueId:null,candidates,note:'Hanya issue aktif yang sudah ada yang dievaluasi. Sistem tidak membuat issue baru otomatis. Kandidat dengan keyakinan sedang/rendah menunggu keputusan Humas/Super Admin.'};
   } catch (error:any) {
-    return {engine:'phase2e-issue-link-v1',generatedAt:new Date().toISOString(),candidateCount:0,linkedIssueId:null,candidates:[],degraded:true,error:String(error?.message||error||'unknown error'),note:'Issue Linkage gagal dijalankan, tetapi kegagalan ini tidak boleh menggagalkan analisis utama Phase 2E.'};
+    await client.query('ROLLBACK TO SAVEPOINT phase2e_issue_linkage');
+    await client.query('RELEASE SAVEPOINT phase2e_issue_linkage');
+    return {engine:'phase2e-issue-link-v1',generatedAt:new Date().toISOString(),candidateCount:0,linkedIssueId:null,candidates:[],degraded:true,error:String(error?.message||error||'unknown error'),note:'Issue Linkage gagal dijalankan dan dilewati sementara; analisis utama Phase 2E tetap dilanjutkan.'};
   }
 }
 
