@@ -6,140 +6,32 @@ import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 
 declare module 'fastify' { interface FastifyRequest { printReviewAuth?: AuthorizationContext } }
 
-type Phase2EAnalysis = {
-  engine: string;
-  generatedAt: string;
-  sentiment: 'positive' | 'neutral' | 'negative';
-  issueCategory: string;
-  riskScore: number;
-  riskLevel: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
-  importanceScore: number;
-  confidence: 'LOW' | 'MEDIUM' | 'HIGH';
-  signals: string[];
-  note: string;
-};
+type KeywordMatch = { keywordId:number; keyword:string; groupId:number|null; groupName:string|null; opdId:number|null; priority:number; matchType:string; fields:string[]; occurrences:{title:number;summary:number;body:number;total:number}; contribution:{importance:number;risk:number}; };
+type Phase2EAnalysis = { engine:string; generatedAt:string; sentiment:'positive'|'neutral'|'negative'; issueCategory:string; riskScore:number; riskLevel:'LOW'|'MEDIUM'|'HIGH'|'CRITICAL'; importanceScore:number; confidence:'LOW'|'MEDIUM'|'HIGH'; keywordMatches:KeywordMatch[]; signals:string[]; note:string; };
 
-const clamp = (n:number,min=0,max=100)=>Math.max(min,Math.min(max,Math.round(n)));
+const clamp=(n:number,min=0,max=100)=>Math.max(min,Math.min(max,Math.round(n)));
 const hits=(text:string,words:string[])=>words.filter(w=>text.includes(w));
-function analyzePrintArticle(input:{title?:string;summary?:string;body_text?:string;is_headline?:boolean;keyword_count?:number}):Phase2EAnalysis{
-  const text=`${input.title||''} ${input.summary||''} ${input.body_text||''}`.toLowerCase().replace(/\s+/g,' ');
-  const positive=hits(text,['apresiasi','berhasil','meningkat','tumbuh','positif','penghargaan','prestasi','membaik','solusi','dukungan','optimistis','lancar']);
-  const negative=hits(text,['keluhan','gagal','rusak','macet','banjir','sampah','protes','kritik','buruk','terlambat','masalah','konflik','penolakan','kerugian','korban']);
-  const highRisk=hits(text,['darurat','krisis','kecelakaan','kebakaran','korupsi','demonstrasi','unjuk rasa','pencemaran','wabah','longsor','bencana','pidana']);
-  const critical=hits(text,['meninggal','tewas','ledakan','kerusuhan','tersangka','ditangkap','evakuasi','status darurat']);
-  const sentimentDelta=positive.length-negative.length-(highRisk.length*2)-(critical.length*2);
-  const sentiment:Phase2EAnalysis['sentiment']=sentimentDelta>=2?'positive':sentimentDelta<=-2?'negative':'neutral';
-
-  const categories:[string,string[]][]=[
-    ['Infrastruktur & Transportasi',['jalan','jembatan','pelabuhan','transportasi','kemacetan','macet','drainase','lampu jalan','infrastruktur']],
-    ['Pelayanan Publik',['pelayanan','layanan publik','administrasi','perizinan','pengaduan','masyarakat']],
-    ['Ekonomi & Investasi',['ekonomi','investasi','usaha','umkm','inflasi','harga','pertumbuhan','industri','pariwisata']],
-    ['Lingkungan',['sampah','lingkungan','pencemaran','banjir','drainase','limbah','mangrove']],
-    ['Keamanan & Ketertiban',['keamanan','kriminal','pidana','polisi','kerusuhan','demonstrasi','unjuk rasa']],
-    ['Kesehatan',['kesehatan','rumah sakit','puskesmas','wabah','pasien','dokter']],
-    ['Pendidikan',['sekolah','pendidikan','siswa','guru','beasiswa']],
-    ['Pemerintahan',['pemko','pemerintah','walikota','dinas','opd','kebijakan','anggaran']],
-  ];
-  let issueCategory='Umum / Lintas Isu',best=0;
-  for(const [name,words] of categories){const score=hits(text,words).length;if(score>best){best=score;issueCategory=name;}}
-
-  const keywordCount=Number(input.keyword_count||0);
-  let risk=8+(negative.length*7)+(highRisk.length*15)+(critical.length*24)+(input.is_headline?8:0);
-  if(sentiment==='positive')risk-=8;
-  risk=clamp(risk);
-  const riskLevel:Phase2EAnalysis['riskLevel']=risk>=80?'CRITICAL':risk>=60?'HIGH':risk>=35?'MEDIUM':'LOW';
-  const textDepth=Math.min(20,Math.floor(text.length/500)*3);
-  const importance=clamp(15+(input.is_headline?28:0)+(keywordCount*5)+textDepth+(risk*0.32));
-  const evidenceSignals=[...negative,...highRisk,...critical];
-  const confidence:Phase2EAnalysis['confidence']=text.length>=1800&&(evidenceSignals.length+positive.length)>=3?'HIGH':text.length>=600?'MEDIUM':'LOW';
-  const signals=[
-    input.is_headline?'Headline/front-page indicator':null,
-    keywordCount?`${keywordCount} keyword clipping tercatat`:null,
-    negative.length?`Sinyal negatif: ${negative.join(', ')}`:null,
-    highRisk.length?`Sinyal risiko: ${highRisk.join(', ')}`:null,
-    critical.length?`Sinyal kritis: ${critical.join(', ')}`:null,
-  ].filter(Boolean) as string[];
-  if(!signals.length)signals.push('Tidak ada sinyal risiko eksplisit yang kuat pada teks terverifikasi.');
-  return {engine:'phase2e-rule-v1',generatedAt:new Date().toISOString(),sentiment,issueCategory,riskScore:risk,riskLevel,importanceScore:importance,confidence,signals,note:'Analisis deterministik Phase 2E berdasarkan teks clipping terverifikasi; bukan generasi fakta baru. Hasil harus ditinjau manusia bila confidence LOW.'};
+const norm=(v:any)=>String(v||'').toLowerCase().normalize('NFKC').replace(/\s+/g,' ').trim();
+const countTerm=(text:string,term:string)=>{if(!term)return 0;let n=0,pos=0;while((pos=text.indexOf(term,pos))!==-1){n++;pos+=Math.max(1,term.length);}return n;};
+function officialKeywordMatches(input:{title?:string;summary?:string;body_text?:string},keywords:any[]):KeywordMatch[]{const title=norm(input.title),summary=norm(input.summary),body=norm(input.body_text);return keywords.map(k=>{const term=norm(k.keyword);const tc=countTerm(title,term),sc=countTerm(summary,term),bc=countTerm(body,term),total=tc+sc+bc;if(!total)return null;const priority=Math.max(1,Math.min(3,Number(k.priority||2)));const fields=[tc?'title':null,sc?'summary':null,bc?'body':null].filter(Boolean) as string[];const importance=clamp(priority*3+(tc?5:0)+(sc?2:0)+Math.min(5,total),0,18);return{keywordId:Number(k.id),keyword:String(k.keyword),groupId:k.group_id==null?null:Number(k.group_id),groupName:k.group_name||null,opdId:k.opd_id==null?null:Number(k.opd_id),priority,matchType:k.match_type||'contains',fields,occurrences:{title:tc,summary:sc,body:bc,total},contribution:{importance,risk:0}} as KeywordMatch;}).filter(Boolean) as KeywordMatch[];}
+function analyzePrintArticle(input:any,keywordMatches:KeywordMatch[]):Phase2EAnalysis{
+ const text=norm(`${input.title||''} ${input.summary||''} ${input.body_text||''}`);
+ const positive=hits(text,['apresiasi','berhasil','meningkat','tumbuh','positif','penghargaan','prestasi','membaik','solusi','dukungan','optimistis','lancar']);
+ const negative=hits(text,['keluhan','gagal','rusak','macet','banjir','sampah','protes','kritik','buruk','terlambat','masalah','konflik','penolakan','kerugian','korban']);
+ const highRisk=hits(text,['darurat','krisis','kecelakaan','kebakaran','korupsi','demonstrasi','unjuk rasa','pencemaran','wabah','longsor','bencana','pidana']);
+ const critical=hits(text,['meninggal','tewas','ledakan','kerusuhan','tersangka','ditangkap','evakuasi','status darurat']);
+ const delta=positive.length-negative.length-highRisk.length*2-critical.length*2;const sentiment:Phase2EAnalysis['sentiment']=delta>=2?'positive':delta<=-2?'negative':'neutral';
+ const categories:[string,string[]][]=[['Infrastruktur & Transportasi',['jalan','jembatan','pelabuhan','transportasi','kemacetan','macet','drainase','lampu jalan','infrastruktur']],['Pelayanan Publik',['pelayanan','layanan publik','administrasi','perizinan','pengaduan','masyarakat']],['Ekonomi & Investasi',['ekonomi','investasi','usaha','umkm','inflasi','harga','pertumbuhan','industri','pariwisata']],['Lingkungan',['sampah','lingkungan','pencemaran','banjir','drainase','limbah','mangrove']],['Keamanan & Ketertiban',['keamanan','kriminal','pidana','polisi','kerusuhan','demonstrasi','unjuk rasa']],['Kesehatan',['kesehatan','rumah sakit','puskesmas','wabah','pasien','dokter']],['Pendidikan',['sekolah','pendidikan','siswa','guru','beasiswa']],['Pemerintahan',['pemko','pemerintah','walikota','dinas','opd','kebijakan','anggaran']]];let issueCategory='Umum / Lintas Isu',best=0;for(const [name,words] of categories){const score=hits(text,words).length;if(score>best){best=score;issueCategory=name;}}
+ let risk=8+negative.length*7+highRisk.length*15+critical.length*24+(input.is_headline?8:0);if(sentiment==='positive')risk-=8;risk=clamp(risk);const riskLevel:Phase2EAnalysis['riskLevel']=risk>=80?'CRITICAL':risk>=60?'HIGH':risk>=35?'MEDIUM':'LOW';
+ const textDepth=Math.min(20,Math.floor(text.length/500)*3);const keywordImportance=Math.min(30,keywordMatches.reduce((s,k)=>s+k.contribution.importance,0));const importance=clamp(15+(input.is_headline?28:0)+keywordImportance+textDepth+risk*.32);const evidence=[...negative,...highRisk,...critical];const confidence:Phase2EAnalysis['confidence']=text.length>=1800&&(evidence.length+positive.length+keywordMatches.length)>=3?'HIGH':text.length>=600?'MEDIUM':'LOW';
+ const signals=[input.is_headline?'Headline/front-page indicator':null,keywordMatches.length?`Keyword resmi terdeteksi: ${keywordMatches.map(k=>k.keyword).join(', ')}`:null,negative.length?`Sinyal negatif: ${negative.join(', ')}`:null,highRisk.length?`Sinyal risiko: ${highRisk.join(', ')}`:null,critical.length?`Sinyal kritis: ${critical.join(', ')}`:null].filter(Boolean) as string[];if(!signals.length)signals.push('Tidak ada sinyal risiko eksplisit yang kuat pada teks terverifikasi.');return{engine:'phase2e-rule-v2-keyword-intelligence',generatedAt:new Date().toISOString(),sentiment,issueCategory,riskScore:risk,riskLevel,importanceScore:importance,confidence,keywordMatches,signals,note:'Keyword resmi dipisahkan dari sinyal analisis. Keyword resmi memengaruhi importance berdasarkan priority, field, dan occurrence; tidak otomatis menaikkan risk.'};
 }
 
-export async function registerPrintReviewRoutes(app: FastifyInstance, pool: Pool, jwtSecret: string) {
-  const auth = async (request: FastifyRequest, reply: any) => {
-    const token = request.cookies.access_token;
-    if (!token) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
-    try {
-      const decoded = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
-      if (typeof decoded.sub !== 'string') throw new Error('invalid');
-      const ctx = await loadAuthorizationContext(pool, decoded.sub);
-      if (!ctx?.active) return reply.code(403).send({ error: 'ACCOUNT_INACTIVE' });
-      request.printReviewAuth = ctx;
-    } catch {
-      return reply.code(401).send({ error: 'INVALID_ACCESS_TOKEN' });
-    }
-  };
-
-  const canReview = (ctx: AuthorizationContext) =>
-    ctx.legacyRole === 'admin' || ctx.roles.includes('super_admin') || ctx.roles.includes('humas');
-
-  app.get('/api/print/review-capability', { preHandler: auth }, async (request) => ({
-    data: {
-      canReviewAndVerify: canReview(request.printReviewAuth!),
-      canAdvanceAnalysis: canReview(request.printReviewAuth!),
-      canReopenAnalyzed: canReview(request.printReviewAuth!),
-    },
-  }));
-
-  app.post('/api/print/articles/:id/review-verify', { preHandler: auth }, async (request, reply) => {
-    const ctx = request.printReviewAuth!;
-    if (!canReview(ctx)) return reply.code(403).send({ error: 'REVIEW_VERIFY_REQUIRES_HUMAS_OR_SUPER_ADMIN' });
-    const id = z.coerce.number().int().positive().safeParse((request.params as any).id);
-    if (!id.success) return reply.code(400).send({ error: 'INVALID_ID' });
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const current = (await client.query(`SELECT id,title,status FROM print_articles WHERE id=$1 FOR UPDATE`,[id.data])).rows[0];
-      if (!current) {await client.query('ROLLBACK');return reply.code(404).send({ error: 'NOT_FOUND' });}
-      if (!['needs_review', 'verified'].includes(String(current.status))) {await client.query('ROLLBACK');return reply.code(409).send({error:'INVALID_REVIEW_STATE',message:`Clipping berstatus ${current.status} tidak dapat diverifikasi dari alur review.`});}
-      const verified = (await client.query(`UPDATE print_articles SET status='verified', verified_by=$2, verified_at=now(), updated_at=now() WHERE id=$1 RETURNING id,title,status,verified_by,verified_at,updated_at`,[id.data, ctx.id])).rows[0];
-      await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'PRINT_ARTICLE_REVIEW_VERIFIED',$2)`,[ctx.id, { printArticleId: id.data, previousStatus: current.status }]);
-      await client.query('COMMIT');return { data: verified };
-    } catch (error) {await client.query('ROLLBACK');throw error;} finally {client.release();}
-  });
-
-  app.post('/api/print/articles/:id/mark-analyzed', { preHandler: auth }, async (request, reply) => {
-    const ctx = request.printReviewAuth!;
-    if (!canReview(ctx)) return reply.code(403).send({ error: 'ANALYSIS_REQUIRES_HUMAS_OR_SUPER_ADMIN' });
-    const id = z.coerce.number().int().positive().safeParse((request.params as any).id);
-    if (!id.success) return reply.code(400).send({ error: 'INVALID_ID' });
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const current = (await client.query(`SELECT pa.id,pa.title,pa.summary,pa.body_text,pa.is_headline,pa.status,pa.verified_by,pa.verified_at,(SELECT COUNT(*)::int FROM print_article_keywords pak WHERE pak.article_id=pa.id) keyword_count FROM print_articles pa WHERE pa.id=$1 FOR UPDATE`,[id.data])).rows[0];
-      if (!current) {await client.query('ROLLBACK');return reply.code(404).send({ error: 'NOT_FOUND' });}
-      if (String(current.status) !== 'verified') {await client.query('ROLLBACK');return reply.code(409).send({error:'ARTICLE_MUST_BE_VERIFIED_FIRST',message:`Clipping harus berstatus Verified sebelum masuk ke Analyzed. Status saat ini: ${current.status}.`});}
-      const analysis=analyzePrintArticle(current);
-      const analyzed = (await client.query(`UPDATE print_articles SET status='analyzed',sentiment=$2,risk_score=$3,importance_score=$4,ai_metadata=jsonb_set(COALESCE(ai_metadata,'{}'::jsonb),'{phase2e}',$5::jsonb,true),updated_at=now() WHERE id=$1 RETURNING id,title,status,sentiment,risk_score,importance_score,ai_metadata,verified_by,verified_at,updated_at`,[id.data,analysis.sentiment,analysis.riskScore,analysis.importanceScore,JSON.stringify(analysis)])).rows[0];
-      await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'PRINT_ARTICLE_ANALYZED',$2)`,[ctx.id,{printArticleId:id.data,previousStatus:current.status,engine:analysis.engine,sentiment:analysis.sentiment,riskScore:analysis.riskScore,importanceScore:analysis.importanceScore,issueCategory:analysis.issueCategory,confidence:analysis.confidence}]);
-      await client.query('COMMIT');return { data: analyzed, analysis };
-    } catch (error) {await client.query('ROLLBACK');throw error;} finally {client.release();}
-  });
-
-  app.post('/api/print/articles/:id/reopen', { preHandler: auth }, async (request, reply) => {
-    const ctx = request.printReviewAuth!;
-    if (!canReview(ctx)) return reply.code(403).send({ error: 'REOPEN_REQUIRES_HUMAS_OR_SUPER_ADMIN' });
-    const id = z.coerce.number().int().positive().safeParse((request.params as any).id);
-    const body = z.object({ reason: z.string().trim().min(5).max(500) }).safeParse(request.body);
-    if (!id.success || !body.success) return reply.code(400).send({ error: 'INVALID_REOPEN_REQUEST' });
-    const client = await pool.connect();
-    try {
-      await client.query('BEGIN');
-      const current = (await client.query(`SELECT id,title,status,sentiment,risk_score,importance_score,ai_metadata FROM print_articles WHERE id=$1 FOR UPDATE`,[id.data])).rows[0];
-      if (!current) {await client.query('ROLLBACK');return reply.code(404).send({ error: 'NOT_FOUND' });}
-      if (String(current.status) !== 'analyzed') {await client.query('ROLLBACK');return reply.code(409).send({ error:'ARTICLE_NOT_ANALYZED',message:`Hanya clipping berstatus Analyzed yang dapat dibuka kembali. Status saat ini: ${current.status}.` });}
-      const reopened = (await client.query(`UPDATE print_articles SET status='verified',sentiment=NULL,risk_score=0,importance_score=0,ai_metadata=COALESCE(ai_metadata,'{}'::jsonb)-'phase2e',updated_at=now() WHERE id=$1 RETURNING id,title,status,sentiment,risk_score,importance_score,ai_metadata,verified_by,verified_at,updated_at`,[id.data])).rows[0];
-      await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'PRINT_ARTICLE_REOPENED',$2)`,[ctx.id,{printArticleId:id.data,previousStatus:current.status,reason:body.data.reason,previousAnalysis:{sentiment:current.sentiment,riskScore:current.risk_score,importanceScore:current.importance_score,phase2e:current.ai_metadata?.phase2e??null}}]);
-      await client.query('COMMIT');
-      return { data: reopened };
-    } catch (error) {await client.query('ROLLBACK');throw error;} finally {client.release();}
-  });
+export async function registerPrintReviewRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
+ const auth=async(request:FastifyRequest,reply:any)=>{const token=request.cookies.access_token;if(!token)return reply.code(401).send({error:'UNAUTHENTICATED'});try{const decoded=jwt.verify(token,jwtSecret) as jwt.JwtPayload;if(typeof decoded.sub!=='string')throw new Error('invalid');const ctx=await loadAuthorizationContext(pool,decoded.sub);if(!ctx?.active)return reply.code(403).send({error:'ACCOUNT_INACTIVE'});request.printReviewAuth=ctx;}catch{return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'});}};
+ const canReview=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
+ app.get('/api/print/review-capability',{preHandler:auth},async(request)=>({data:{canReviewAndVerify:canReview(request.printReviewAuth!),canAdvanceAnalysis:canReview(request.printReviewAuth!),canReopenAnalyzed:canReview(request.printReviewAuth!)}}));
+ app.post('/api/print/articles/:id/review-verify',{preHandler:auth},async(request,reply)=>{const ctx=request.printReviewAuth!;if(!canReview(ctx))return reply.code(403).send({error:'REVIEW_VERIFY_REQUIRES_HUMAS_OR_SUPER_ADMIN'});const id=z.coerce.number().int().positive().safeParse((request.params as any).id);if(!id.success)return reply.code(400).send({error:'INVALID_ID'});const client=await pool.connect();try{await client.query('BEGIN');const current=(await client.query(`SELECT id,title,status FROM print_articles WHERE id=$1 FOR UPDATE`,[id.data])).rows[0];if(!current){await client.query('ROLLBACK');return reply.code(404).send({error:'NOT_FOUND'});}if(!['needs_review','verified'].includes(String(current.status))){await client.query('ROLLBACK');return reply.code(409).send({error:'INVALID_REVIEW_STATE',message:`Clipping berstatus ${current.status} tidak dapat diverifikasi dari alur review.`});}const verified=(await client.query(`UPDATE print_articles SET status='verified',verified_by=$2,verified_at=now(),updated_at=now() WHERE id=$1 RETURNING id,title,status,verified_by,verified_at,updated_at`,[id.data,ctx.id])).rows[0];await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'PRINT_ARTICLE_REVIEW_VERIFIED',$2)`,[ctx.id,{printArticleId:id.data,previousStatus:current.status}]);await client.query('COMMIT');return{data:verified};}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}});
+ app.post('/api/print/articles/:id/mark-analyzed',{preHandler:auth},async(request,reply)=>{const ctx=request.printReviewAuth!;if(!canReview(ctx))return reply.code(403).send({error:'ANALYSIS_REQUIRES_HUMAS_OR_SUPER_ADMIN'});const id=z.coerce.number().int().positive().safeParse((request.params as any).id);if(!id.success)return reply.code(400).send({error:'INVALID_ID'});const client=await pool.connect();try{await client.query('BEGIN');const current=(await client.query(`SELECT pa.id,pa.title,pa.summary,pa.body_text,pa.is_headline,pa.status,pa.verified_by,pa.verified_at FROM print_articles pa WHERE pa.id=$1 FOR UPDATE`,[id.data])).rows[0];if(!current){await client.query('ROLLBACK');return reply.code(404).send({error:'NOT_FOUND'});}if(String(current.status)!=='verified'){await client.query('ROLLBACK');return reply.code(409).send({error:'ARTICLE_MUST_BE_VERIFIED_FIRST',message:`Clipping harus berstatus Verified sebelum masuk ke Analyzed. Status saat ini: ${current.status}.`});}const official=(await client.query(`SELECT k.id,k.keyword,k.opd_id,k.group_id,k.match_type,k.priority,kg.name group_name FROM keywords k LEFT JOIN keyword_groups kg ON kg.id=k.group_id WHERE k.active=true ORDER BY k.priority DESC,k.id`)).rows;const keywordMatches=officialKeywordMatches(current,official);const analysis=analyzePrintArticle(current,keywordMatches);const analyzed=(await client.query(`UPDATE print_articles SET status='analyzed',sentiment=$2,risk_score=$3,importance_score=$4,ai_metadata=jsonb_set(COALESCE(ai_metadata,'{}'::jsonb),'{phase2e}',$5::jsonb,true),updated_at=now() WHERE id=$1 RETURNING id,title,status,sentiment,risk_score,importance_score,ai_metadata,verified_by,verified_at,updated_at`,[id.data,analysis.sentiment,analysis.riskScore,analysis.importanceScore,JSON.stringify(analysis)])).rows[0];await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'PRINT_ARTICLE_ANALYZED',$2)`,[ctx.id,{printArticleId:id.data,previousStatus:current.status,engine:analysis.engine,sentiment:analysis.sentiment,riskScore:analysis.riskScore,importanceScore:analysis.importanceScore,issueCategory:analysis.issueCategory,confidence:analysis.confidence,officialKeywordMatches:keywordMatches.map(k=>({id:k.keywordId,keyword:k.keyword,fields:k.fields,total:k.occurrences.total,priority:k.priority}))}]);await client.query('COMMIT');return{data:analyzed,analysis};}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}});
+ app.post('/api/print/articles/:id/reopen',{preHandler:auth},async(request,reply)=>{const ctx=request.printReviewAuth!;if(!canReview(ctx))return reply.code(403).send({error:'REOPEN_REQUIRES_HUMAS_OR_SUPER_ADMIN'});const id=z.coerce.number().int().positive().safeParse((request.params as any).id);const body=z.object({reason:z.string().trim().min(5).max(500)}).safeParse(request.body);if(!id.success||!body.success)return reply.code(400).send({error:'INVALID_REOPEN_REQUEST'});const client=await pool.connect();try{await client.query('BEGIN');const current=(await client.query(`SELECT id,title,status,sentiment,risk_score,importance_score,ai_metadata FROM print_articles WHERE id=$1 FOR UPDATE`,[id.data])).rows[0];if(!current){await client.query('ROLLBACK');return reply.code(404).send({error:'NOT_FOUND'});}if(String(current.status)!=='analyzed'){await client.query('ROLLBACK');return reply.code(409).send({error:'ARTICLE_NOT_ANALYZED',message:`Hanya clipping berstatus Analyzed yang dapat dibuka kembali. Status saat ini: ${current.status}.`});}const reopened=(await client.query(`UPDATE print_articles SET status='verified',sentiment=NULL,risk_score=0,importance_score=0,ai_metadata=COALESCE(ai_metadata,'{}'::jsonb)-'phase2e',updated_at=now() WHERE id=$1 RETURNING id,title,status,sentiment,risk_score,importance_score,ai_metadata,verified_by,verified_at,updated_at`,[id.data])).rows[0];await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'PRINT_ARTICLE_REOPENED',$2)`,[ctx.id,{printArticleId:id.data,previousStatus:current.status,reason:body.data.reason,previousAnalysis:{sentiment:current.sentiment,riskScore:current.risk_score,importanceScore:current.importance_score,phase2e:current.ai_metadata?.phase2e??null}}]);await client.query('COMMIT');return{data:reopened};}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}});
 }
