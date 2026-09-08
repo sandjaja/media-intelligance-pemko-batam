@@ -62,5 +62,9 @@ export async function loadAuthorizationContext(pool: Pool, userId: string): Prom
 }
 
 export function hasPermission(context: AuthorizationContext, permission: string) {
-  return context.roles.includes('super_admin') || context.permissions.includes(permission);
+  if (context.roles.includes('super_admin')) return true;
+  // Humas is the operational role for the print-media workflow: upload, review,
+  // correct metadata/OCR, verify, and advance clipping status for intelligence processing.
+  if (context.roles.includes('humas') && permission === 'intelligence.write') return true;
+  return context.permissions.includes(permission);
 }
