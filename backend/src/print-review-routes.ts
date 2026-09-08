@@ -79,12 +79,13 @@ export async function registerPrintReviewRoutes(app: FastifyInstance, pool: Pool
   };
 
   const canReview = (ctx: AuthorizationContext) =>
-    ctx.roles.includes('super_admin') || ctx.roles.includes('humas');
+    ctx.legacyRole === 'admin' || ctx.roles.includes('super_admin') || ctx.roles.includes('humas');
 
   app.get('/api/print/review-capability', { preHandler: auth }, async (request) => ({
     data: {
       canReviewAndVerify: canReview(request.printReviewAuth!),
       canAdvanceAnalysis: canReview(request.printReviewAuth!),
+      canReopenAnalyzed: canReview(request.printReviewAuth!),
     },
   }));
 
@@ -120,6 +121,25 @@ export async function registerPrintReviewRoutes(app: FastifyInstance, pool: Pool
       const analyzed = (await client.query(`UPDATE print_articles SET status='analyzed',sentiment=$2,risk_score=$3,importance_score=$4,ai_metadata=jsonb_set(COALESCE(ai_metadata,'{}'::jsonb),'{phase2e}',$5::jsonb,true),updated_at=now() WHERE id=$1 RETURNING id,title,status,sentiment,risk_score,importance_score,ai_metadata,verified_by,verified_at,updated_at`,[id.data,analysis.sentiment,analysis.riskScore,analysis.importanceScore,JSON.stringify(analysis)])).rows[0];
       await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'PRINT_ARTICLE_ANALYZED',$2)`,[ctx.id,{printArticleId:id.data,previousStatus:current.status,engine:analysis.engine,sentiment:analysis.sentiment,riskScore:analysis.riskScore,importanceScore:analysis.importanceScore,issueCategory:analysis.issueCategory,confidence:analysis.confidence}]);
       await client.query('COMMIT');return { data: analyzed, analysis };
+    } catch (error) {await client.query('ROLLBACK');throw error;} finally {client.release();}
+  });
+
+  app.post('/api/print/articles/:id/reopen', { preHandler: auth }, async (request, reply) => {
+    const ctx = request.printReviewAuth!;
+    if (!canReview(ctx)) return reply.code(403).send({ error: 'REOPEN_REQUIRES_HUMAS_OR_SUPER_ADMIN' });
+    const id = z.coerce.number().int().positive().safeParse((request.params as any).id);
+    const body = z.object({ reason: z.string().trim().min(5).max(500) }).safeParse(request.body);
+    if (!id.success || !body.success) return reply.code(400).send({ error: 'INVALID_REOPEN_REQUEST' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const current = (await client.query(`SELECT id,title,status,sentiment,risk_score,importance_score,ai_metadata FROM print_articles WHERE id=$1 FOR UPDATE`,[id.data])).rows[0];
+      if (!current) {await client.query('ROLLBACK');return reply.code(404).send({ error: 'NOT_FOUND' });}
+      if (String(current.status) !== 'analyzed') {await client.query('ROLLBACK');return reply.code(409).send({ error:'ARTICLE_NOT_ANALYZED',message:`Hanya clipping berstatus Analyzed yang dapat dibuka kembali. Status saat ini: ${current.status}.` });}
+      const reopened = (await client.query(`UPDATE print_articles SET status='verified',sentiment=NULL,risk_score=0,importance_score=0,ai_metadata=COALESCE(ai_metadata,'{}'::jsonb)-'phase2e',updated_at=now() WHERE id=$1 RETURNING id,title,status,sentiment,risk_score,importance_score,ai_metadata,verified_by,verified_at,updated_at`,[id.data])).rows[0];
+      await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'PRINT_ARTICLE_REOPENED',$2)`,[ctx.id,{printArticleId:id.data,previousStatus:current.status,reason:body.data.reason,previousAnalysis:{sentiment:current.sentiment,riskScore:current.risk_score,importanceScore:current.importance_score,phase2e:current.ai_metadata?.phase2e??null}}]);
+      await client.query('COMMIT');
+      return { data: reopened };
     } catch (error) {await client.query('ROLLBACK');throw error;} finally {client.release();}
   });
 }
