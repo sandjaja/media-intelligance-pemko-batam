@@ -12,12 +12,12 @@ type CategoryRule = { name: string; terms: string[]; generic?: string[] };
 
 const FALLBACK_RULES: CategoryRule[] = [
   { name: 'Olahraga & Kepemudaan', terms: ['olahraga','atlet','popda','porprov','pon','kejuaraan','pertandingan','medali','pelatih','kontingen','bonus atlet','kepemudaan','pemuda','sport','cabor','cabang olahraga','prestasi olahraga'] },
-  { name: 'Infrastruktur & Transportasi', terms: ['jalan','jembatan','pelabuhan','transportasi','kemacetan','macet','drainase','lampu jalan','infrastruktur'] },
+  { name: 'Infrastruktur & Transportasi', terms: ['jalan','jembatan','pelabuhan','transportasi','kemacetan','macet','drainase','lampu jalan','infrastruktur','simpang','kendaraan','akses jalan','jalan tergenang','jalan terendam','genangan jalan'] },
   { name: 'Pelayanan Publik', terms: ['pelayanan','layanan publik','administrasi','perizinan','pengaduan','masyarakat'] },
   { name: 'Ekonomi & Perdagangan', terms: ['ekonomi','perdagangan','pasar murah','harga','inflasi','sembako','distribusi','pangan','daya beli','umkm'] },
   { name: 'Investasi & Pariwisata', terms: ['investasi','usaha','industri','pariwisata','pertumbuhan','proyek investasi'] },
   { name: 'Sosial & Kesejahteraan', terms: ['csr','bantuan sosial','bansos','sembako','penerima manfaat','kesejahteraan','kurang mampu','bantuan masyarakat'] },
-  { name: 'Lingkungan', terms: ['sampah','lingkungan','pencemaran','banjir','drainase','limbah','mangrove'] },
+  { name: 'Lingkungan', terms: ['sampah','lingkungan','pencemaran','banjir','drainase','limbah','mangrove','genangan','tergenang','terendam'] },
   { name: 'Keamanan & Ketertiban', terms: ['keamanan','kriminal','pidana','polisi','kerusuhan','demonstrasi','unjuk rasa'] },
   { name: 'Kesehatan', terms: ['kesehatan','rumah sakit','puskesmas','wabah','pasien','dokter'] },
   { name: 'Pendidikan', terms: ['sekolah','pendidikan','siswa','guru','beasiswa'] },
@@ -77,7 +77,7 @@ function fallback(title: string, summary: string, body: string, operatorMatches:
   return {
     issueCategory: winner && winner.score > 0 ? winner.name : 'Umum / Lintas Isu',
     categoryEvidence: {
-      engine: 'phase2e-category-hybrid-v2.6',
+      engine: 'phase2e-category-hybrid-v2.8-flood-calibrated',
       source: 'fallback-rule',
       winnerScore: winner?.score || 0,
       candidates: scored.filter(x => x.score > 0).slice(0, 4)
@@ -114,7 +114,7 @@ export function classifyIssueWithTaxonomy(titleRaw: string, summaryRaw: string, 
   return {
     issueCategory: winner.name,
     categoryEvidence: {
-      engine: 'phase2e-category-hybrid-v2.6',
+      engine: 'phase2e-category-hybrid-v2.8-flood-calibrated',
       source: 'keyword-taxonomy',
       winnerScore: Number(winner.score.toFixed(2)),
       winnerCode: winner.code,
