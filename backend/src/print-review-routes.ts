@@ -27,6 +27,7 @@ export async function registerPrintReviewRoutes(app: FastifyInstance, pool: Pool
   app.get('/api/print/review-capability', { preHandler: auth }, async (request) => ({
     data: {
       canReviewAndVerify: canReview(request.printReviewAuth!),
+      canAdvanceAnalysis: canReview(request.printReviewAuth!),
     },
   }));
 
@@ -71,6 +72,55 @@ export async function registerPrintReviewRoutes(app: FastifyInstance, pool: Pool
       );
       await client.query('COMMIT');
       return { data: verified };
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  });
+
+  app.post('/api/print/articles/:id/mark-analyzed', { preHandler: auth }, async (request, reply) => {
+    const ctx = request.printReviewAuth!;
+    if (!canReview(ctx)) return reply.code(403).send({ error: 'ANALYSIS_REQUIRES_HUMAS_OR_SUPER_ADMIN' });
+
+    const id = z.coerce.number().int().positive().safeParse((request.params as any).id);
+    if (!id.success) return reply.code(400).send({ error: 'INVALID_ID' });
+
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const current = (await client.query(
+        `SELECT id,title,status,verified_by,verified_at FROM print_articles WHERE id=$1 FOR UPDATE`,
+        [id.data],
+      )).rows[0];
+      if (!current) {
+        await client.query('ROLLBACK');
+        return reply.code(404).send({ error: 'NOT_FOUND' });
+      }
+      if (String(current.status) !== 'verified') {
+        await client.query('ROLLBACK');
+        return reply.code(409).send({
+          error: 'ARTICLE_MUST_BE_VERIFIED_FIRST',
+          message: `Clipping harus berstatus Verified sebelum masuk ke Analyzed. Status saat ini: ${current.status}.`,
+        });
+      }
+
+      const analyzed = (await client.query(
+        `UPDATE print_articles
+            SET status='analyzed', updated_at=now()
+          WHERE id=$1
+          RETURNING id,title,status,verified_by,verified_at,updated_at`,
+        [id.data],
+      )).rows[0];
+
+      await client.query(
+        `INSERT INTO audit_logs(user_id,action,metadata)
+         VALUES($1,'PRINT_ARTICLE_MARKED_ANALYZED',$2)`,
+        [ctx.id, { printArticleId: id.data, previousStatus: current.status }],
+      );
+      await client.query('COMMIT');
+      return { data: analyzed };
     } catch (error) {
       await client.query('ROLLBACK');
       throw error;
