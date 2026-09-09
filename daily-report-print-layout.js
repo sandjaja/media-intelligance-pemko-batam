@@ -1,15 +1,7 @@
 (()=>{
  const clean=v=>String(v??'').trim();
  const dateID=s=>{const m=clean(s).match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}/${m[2]}/${m[1]}`:clean(s)};
- let logoReady=false;
- const logoImg=new Image();
- logoImg.decoding='sync';
- function preloadLogo(){
-  const src=window.BATAM_LOGO_DATA_URI||'';
-  if(!src)return;
-  if(logoImg.src!==src){logoReady=false;logoImg.onload=()=>{logoReady=true;apply()};logoImg.onerror=()=>{logoReady=false};logoImg.src=src}
-  else if(logoImg.complete&&logoImg.naturalWidth>0)logoReady=true;
- }
+ const inlineLogo=`<svg data-official-report-logo xmlns="http://www.w3.org/2000/svg" width="120" height="164" viewBox="0 0 120 164" aria-label="Logo Pemerintah Kota Batam"><rect width="120" height="164" fill="#fff"/><path d="M60 10c25 0 45 18 45 41v43c0 29-19 48-45 60C34 142 15 123 15 94V51c0-23 20-41 45-41z" fill="#ffd200" stroke="#006837" stroke-width="6"/><path d="M35 50h50v40H35z" fill="#fff" stroke="#006837" stroke-width="4"/><path d="M42 80V60h12v20h12V54h12v26" fill="none" stroke="#006837" stroke-width="6"/><path d="M30 100c15 10 45 10 60 0" fill="none" stroke="#006837" stroke-width="5"/><text x="60" y="122" text-anchor="middle" font-size="12" font-weight="700" fill="#006837">BATAM</text></svg>`;
  function ensureStyle(){
   if(document.getElementById('phase2g-official-print-layout'))return;
   const s=document.createElement('style');
@@ -25,7 +17,7 @@
  #printableReport{display:block!important;color:#0f172a!important;background:#fff!important}
  #printableReport>.border-b:first-child{border-bottom:2px solid #1e293b!important;padding:0 0 10px!important;margin:0 0 10px!important}
  [data-official-report-header]{display:flex!important;align-items:center!important;gap:14px!important}
- [data-official-report-header] img{display:block!important;width:58px!important;height:72px!important;object-fit:contain!important;flex:none!important;visibility:visible!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+ [data-official-report-logo]{display:block!important;width:58px!important;height:72px!important;flex:none!important;visibility:visible!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
  [data-official-report-title]{font-size:20px!important;line-height:1.05!important;font-weight:900!important;color:#0f172a!important;margin:0!important}
  [data-official-report-meta]{font-size:9px!important;color:#64748b!important;margin-top:5px!important}
  [data-print-metrics]{display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;gap:7px!important;margin:0 0 10px!important}
@@ -60,17 +52,15 @@
   document.head.appendChild(s);
  }
  function apply(){
-  ensureStyle();preloadLogo();
+  ensureStyle();
   const printable=document.getElementById('printableReport');
   if(!printable)return;
   const report=window.__dailyReport||{};
   const summary=report.summary||{};
   const header=printable.firstElementChild;
-  if(header&&!header.querySelector('[data-official-report-header]')){
-   header.innerHTML=`<div data-official-report-header><img alt="Logo Pemerintah Kota Batam"><div><div data-official-report-title>Daily Media Intelligence Report Pemko Batam</div><div data-official-report-meta></div></div></div>`;
+  if(header){
+   header.innerHTML=`<div data-official-report-header>${inlineLogo}<div><div data-official-report-title>Daily Media Intelligence Report Pemko Batam</div><div data-official-report-meta></div></div></div>`;
   }
-  const logo=header?.querySelector('[data-official-report-header] img');
-  if(logo&&window.BATAM_LOGO_DATA_URI){logo.src=window.BATAM_LOGO_DATA_URI;if(logoReady)logo.setAttribute('data-logo-ready','1')}
   const meta=header?.querySelector('[data-official-report-meta]');
   if(meta)meta.textContent=`${dateID(report.day)} · Seluruh Pemko Batam · Engine ${clean(summary.engine||'phase2g-media-summary-v1.3')}`;
   const children=[...printable.children];
@@ -91,9 +81,9 @@
   if(!footer){footer=document.createElement('div');footer.setAttribute('data-official-report-footer','1');printable.appendChild(footer)}
   footer.innerHTML=`<div><b>Pemerintah Kota Batam</b><br>Media Intelligence Command Center</div><div>Laporan ini dihasilkan oleh sistem Media Intelligence<br>Tanggal cetak: ${dateID(report.day)}</div>`;
  }
- function schedule(){preloadLogo();setTimeout(apply,120);setTimeout(apply,450)}
+ function schedule(){setTimeout(apply,120);setTimeout(apply,450)}
  window.addEventListener('media-intelligence-tab',e=>{if(e.detail==='reports')schedule()});
  document.addEventListener('click',e=>{if(e.target.closest?.('#reportBtn,#reportGenerate'))schedule()});
  window.addEventListener('load',schedule);
- ensureStyle();preloadLogo();
+ ensureStyle();
 })();
