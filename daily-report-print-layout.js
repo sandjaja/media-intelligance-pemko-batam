@@ -1,6 +1,15 @@
 (()=>{
  const clean=v=>String(v??'').trim();
  const dateID=s=>{const m=clean(s).match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}/${m[2]}/${m[1]}`:clean(s)};
+ let logoReady=false;
+ const logoImg=new Image();
+ logoImg.decoding='sync';
+ function preloadLogo(){
+  const src=window.BATAM_LOGO_DATA_URI||'';
+  if(!src)return;
+  if(logoImg.src!==src){logoReady=false;logoImg.onload=()=>{logoReady=true;apply()};logoImg.onerror=()=>{logoReady=false};logoImg.src=src}
+  else if(logoImg.complete&&logoImg.naturalWidth>0)logoReady=true;
+ }
  function ensureStyle(){
   if(document.getElementById('phase2g-official-print-layout'))return;
   const s=document.createElement('style');
@@ -16,7 +25,7 @@
  #printableReport{display:block!important;color:#0f172a!important;background:#fff!important}
  #printableReport>.border-b:first-child{border-bottom:2px solid #1e293b!important;padding:0 0 10px!important;margin:0 0 10px!important}
  [data-official-report-header]{display:flex!important;align-items:center!important;gap:14px!important}
- [data-official-report-header] img{display:block!important;width:58px!important;height:72px!important;object-fit:contain!important;flex:none!important}
+ [data-official-report-header] img{display:block!important;width:58px!important;height:72px!important;object-fit:contain!important;flex:none!important;visibility:visible!important;-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
  [data-official-report-title]{font-size:20px!important;line-height:1.05!important;font-weight:900!important;color:#0f172a!important;margin:0!important}
  [data-official-report-meta]{font-size:9px!important;color:#64748b!important;margin-top:5px!important}
  [data-print-metrics]{display:grid!important;grid-template-columns:repeat(5,minmax(0,1fr))!important;gap:7px!important;margin:0 0 10px!important}
@@ -51,7 +60,7 @@
   document.head.appendChild(s);
  }
  function apply(){
-  ensureStyle();
+  ensureStyle();preloadLogo();
   const printable=document.getElementById('printableReport');
   if(!printable)return;
   const report=window.__dailyReport||{};
@@ -61,7 +70,7 @@
    header.innerHTML=`<div data-official-report-header><img alt="Logo Pemerintah Kota Batam"><div><div data-official-report-title>Daily Media Intelligence Report Pemko Batam</div><div data-official-report-meta></div></div></div>`;
   }
   const logo=header?.querySelector('[data-official-report-header] img');
-  if(logo&&!logo.getAttribute('src')&&window.BATAM_LOGO_DATA_URI)logo.src=window.BATAM_LOGO_DATA_URI;
+  if(logo&&window.BATAM_LOGO_DATA_URI){logo.src=window.BATAM_LOGO_DATA_URI;if(logoReady)logo.setAttribute('data-logo-ready','1')}
   const meta=header?.querySelector('[data-official-report-meta]');
   if(meta)meta.textContent=`${dateID(report.day)} · Seluruh Pemko Batam · Engine ${clean(summary.engine||'phase2g-media-summary-v1.3')}`;
   const children=[...printable.children];
@@ -79,16 +88,12 @@
    else if(/Top 10 Online News/i.test(t))sec.setAttribute('data-print-online','1');
   });
   let footer=printable.querySelector('[data-official-report-footer]');
-  if(!footer){
-   footer=document.createElement('div');
-   footer.setAttribute('data-official-report-footer','1');
-   printable.appendChild(footer);
-  }
+  if(!footer){footer=document.createElement('div');footer.setAttribute('data-official-report-footer','1');printable.appendChild(footer)}
   footer.innerHTML=`<div><b>Pemerintah Kota Batam</b><br>Media Intelligence Command Center</div><div>Laporan ini dihasilkan oleh sistem Media Intelligence<br>Tanggal cetak: ${dateID(report.day)}</div>`;
  }
- function schedule(){setTimeout(apply,120);setTimeout(apply,450)}
+ function schedule(){preloadLogo();setTimeout(apply,120);setTimeout(apply,450)}
  window.addEventListener('media-intelligence-tab',e=>{if(e.detail==='reports')schedule()});
  document.addEventListener('click',e=>{if(e.target.closest?.('#reportBtn,#reportGenerate'))schedule()});
  window.addEventListener('load',schedule);
- ensureStyle();
+ ensureStyle();preloadLogo();
 })();
