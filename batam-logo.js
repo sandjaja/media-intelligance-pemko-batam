@@ -1,1 +1,1 @@
-window.BATAM_LOGO_DATA_URI='https://upload.wikimedia.org/wikipedia/commons/5/53/Lambang_Kota_Batam.png';
+window.BATAM_LOGO_DATA_URI='./assets/batam-logo.jpg';
