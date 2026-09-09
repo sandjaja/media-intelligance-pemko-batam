@@ -1,8 +1,8 @@
 (()=>{
- const esc=v=>String(v??'').replace(/[&<>\'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));
+ const esc=v=>String(v??'').replace(/[&<>\'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt',"'":'&#39;','\"':'&quot;'}[c]));
  const clean=v=>String(v??'').replace(/[\u200B-\u200D\uFEFF]/g,'').replace(/\r?\n/g,' ').trim();
  const csvDate=v=>{const s=clean(v).slice(0,10);const m=s.match(/^(\d{4})-(\d{2})-(\d{2})$/);return m?`${m[3]}/${m[2]}/${m[1]}`:s};
- const pages=x=>{const p=x?.page_numbers;if(Array.isArray(p))return p.filter(v=>v!==null&&v!==undefined&&clean(v)!=='').map(clean).join(', ');if(typeof p==='number')return String(p);if(typeof p==='string'){const s=clean(p);if(!s)return '';try{const j=JSON.parse(s);if(Array.isArray(j))return j.map(clean).join(', ')}catch{}return s.replace(/^\[|\]$/g,'').replace(/["']/g,'').trim()}return clean(x?.page_number??x?.page??'')};
+ const pageCount=x=>{const n=Number(x?.page_count);if(Number.isFinite(n)&&n>=1)return Math.trunc(n);const p=x?.page_numbers;if(Array.isArray(p)&&p.length)return p.filter(v=>v!==null&&v!==undefined&&clean(v)!=='').length||1;return x?.is_continued?2:1};
  const issueText=x=>{const a=Array.isArray(x?.linked_issues)?x.linked_issues:[];return a.length?a.map(i=>`#${i.id} ${clean(i.title)}`).join(' | '):''};
  const alertText=x=>{const a=Array.isArray(x?.active_alerts)?x.active_alerts:[];return a.length?a.map(i=>`#${i.id} ${clean(i.title)}`).join(' | '):''};
  let embeddedLogo='';
@@ -45,9 +45,9 @@
   if(!e.target.closest?.('#reportCsv'))return;
   const r=window.__dailyReport;if(!r)return;
   e.preventDefault();e.stopImmediatePropagation();
-  const rows=[['Tanggal','Jenis','ID','Nama Media','Edisi','Halaman','Judul','OPD','Kecamatan','Sentiment','Risk','Risk Score','Importance','Linked Issue','Active Alert']];
+  const rows=[['Tanggal','Jenis','ID','Nama Media','Edisi','Jumlah Halaman','Judul','OPD','Kecamatan','Sentiment','Risk','Risk Score','Importance','Linked Issue','Active Alert']];
   (r.articles||[]).forEach(x=>rows.push([csvDate(r.day),'Media Online',x.id||'',x.source_name||'','','',x.title||'','','',x.sentiment||'',x.risk_level||'',x.risk_score??'',x.importance_score??'','','']));
-  (r.prints||[]).forEach(x=>rows.push([csvDate(r.day),'Media Cetak',x.id||'',x.source_name||'',x.edition_name||x.edition_date||'',pages(x),x.title||'',x.opd_name||'',x.district_name||'',x.sentiment||'',x.risk_level||'',x.risk_score??'',x.importance_score??'',issueText(x),alertText(x)]));
+  (r.prints||[]).forEach(x=>rows.push([csvDate(r.day),'Media Cetak',x.id||'',x.source_name||'',x.edition_name||x.edition_date||'',pageCount(x),x.title||'',x.opd_name||'',x.district_name||'',x.sentiment||'',x.risk_level||'',x.risk_score??'',x.importance_score??'',issueText(x),alertText(x)]));
   (r.socials||[]).forEach(x=>rows.push([csvDate(r.day),'Media Sosial',x.id||'',x.source_name||x.account_name||'','','',x.title||x.content||'',x.opd_name||'',x.district_name||'',x.sentiment||'',x.risk_level||'',x.risk_score??'',x.importance_score??'','','']));
   const csv=rows.map(row=>row.map(v=>`"${clean(v).replace(/"/g,'""')}"`).join(',')).join('\r\n');
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`media-intelligence-pemko-batam-${r.day}.csv`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
