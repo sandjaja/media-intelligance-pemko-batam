@@ -1,0 +1,25 @@
+import { Pool } from 'pg';
+import jwt from 'jsonwebtoken';
+import { FastifyInstance, FastifyRequest } from 'fastify';
+import { z } from 'zod';
+import { loadAuthorizationContext, hasPermission, type AuthorizationContext } from './rbac.js';
+
+declare module 'fastify' { interface FastifyRequest { phase2gAuth?: AuthorizationContext } }
+
+export async function registerPhase2gMediaSummaryRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
+ const auth=async(request:FastifyRequest,reply:any)=>{const token=request.cookies.access_token;if(!token)return reply.code(401).send({error:'UNAUTHENTICATED'});try{const d=jwt.verify(token,jwtSecret) as jwt.JwtPayload;if(typeof d.sub!=='string')throw new Error('invalid');const ctx=await loadAuthorizationContext(pool,d.sub);if(!ctx?.active)return reply.code(403).send({error:'ACCOUNT_INACTIVE'});request.phase2gAuth=ctx;}catch{return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'});}};
+ const scopedOpd=(u:AuthorizationContext,requested?:string)=>hasPermission(u,'platform.admin')||hasPermission(u,'intelligence.read.all')?requested:(u.opdId??null);
+ app.get('/api/intelligence/media-summary',{preHandler:auth},async(request,reply)=>{
+  const q=z.object({from:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),to:z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),opdId:z.string().regex(/^\d+$/).optional(),districtId:z.string().regex(/^\d+$/).optional()}).safeParse(request.query);
+  if(!q.success)return reply.code(400).send({error:'INVALID_QUERY'});
+  const opdId=scopedOpd(request.phase2gAuth!,q.data.opdId),params:unknown[]=[],pw:string[]=[`pa.status='analyzed'`];
+  if(q.data.from){params.push(q.data.from);pw.push(`pa.created_at >= $${params.length}::date`)} if(q.data.to){params.push(q.data.to);pw.push(`pa.created_at < ($${params.length}::date + interval '1 day')`)} if(opdId){params.push(opdId);pw.push(`pa.opd_id=$${params.length}`)} if(q.data.districtId){params.push(q.data.districtId);pw.push(`pa.district_id=$${params.length}`)}
+  const print=await pool.query(`SELECT COUNT(*)::int total,COUNT(*) FILTER(WHERE sentiment='positive')::int positive,COUNT(*) FILTER(WHERE sentiment='neutral')::int neutral,COUNT(*) FILTER(WHERE sentiment='negative')::int negative,COUNT(*) FILTER(WHERE risk_level='low')::int low,COUNT(*) FILTER(WHERE risk_level='medium')::int medium,COUNT(*) FILTER(WHERE risk_level='high')::int high,COUNT(*) FILTER(WHERE risk_level='critical')::int critical,COALESCE(ROUND(AVG(risk_score)),0)::int avg_risk,COALESCE(ROUND(AVG(importance_score)),0)::int avg_importance FROM print_articles pa WHERE ${pw.join(' AND ')}`,params);
+  const issueParams=[...params],issueWhere=[...pw];
+  const issues=await pool.query(`SELECT i.id,i.title,i.status,i.risk_level,COUNT(DISTINCT ipa.print_article_id)::int evidence_count,COALESCE(ROUND(AVG(pa.risk_score)),0)::int avg_risk,MAX(pa.risk_score)::int max_risk FROM issue_print_articles ipa JOIN print_articles pa ON pa.id=ipa.print_article_id JOIN issues i ON i.id=ipa.issue_id WHERE ipa.linkage_status='linked' AND ${issueWhere.join(' AND ')} GROUP BY i.id,i.title,i.status,i.risk_level ORDER BY max_risk DESC,evidence_count DESC LIMIT 10`,issueParams);
+  const alertParams:unknown[]=[];const aw=[`a.status IN ('open','acknowledged')`];if(opdId){alertParams.push(opdId);aw.push(`(a.opd_id=$${alertParams.length} OR EXISTS(SELECT 1 FROM issue_opd io WHERE io.issue_id=a.issue_id AND io.opd_id=$${alertParams.length}))`)}
+  const alerts=await pool.query(`SELECT a.id,a.issue_id,a.title,a.severity,a.reason,a.status,a.created_at,COUNT(DISTINCT apa.print_article_id)::int print_evidence_count FROM alerts a LEFT JOIN alert_print_articles apa ON apa.alert_id=a.id WHERE ${aw.join(' AND ')} GROUP BY a.id ORDER BY a.created_at DESC LIMIT 20`,alertParams);
+  const top=await pool.query(`SELECT pa.id,pa.title,pa.sentiment,pa.risk_score,pa.risk_level,pa.importance_score,pa.created_at,o.name opd_name,d.name district_name FROM print_articles pa LEFT JOIN opd o ON o.id=pa.opd_id LEFT JOIN districts d ON d.id=pa.district_id WHERE ${pw.join(' AND ')} ORDER BY pa.risk_score DESC,pa.importance_score DESC,pa.created_at DESC LIMIT 10`,params);
+  return{data:{engine:'phase2g-media-summary-v1.0',generatedAt:new Date().toISOString(),filters:{from:q.data.from??null,to:q.data.to??null,opdId:opdId??null,districtId:q.data.districtId??null},print:print.rows[0],topIssues:issues.rows,activeAlerts:alerts.rows,topPrintEvidence:top.rows}};
+ });
+}
