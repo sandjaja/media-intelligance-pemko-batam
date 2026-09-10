@@ -38,12 +38,16 @@ export async function registerOwnedSocialRoutes(app: FastifyInstance, pool: Pool
   const idParam = z.object({ id: z.string().regex(/^\d+$/) });
   const accountInput = z.object({
     opdId: z.coerce.number().int().positive().nullable().optional(),
-    platform: z.enum(['instagram','facebook','tiktok','x','youtube','linkedin','threads']),
+    platform: z.enum(['instagram','facebook','tiktok','x','youtube','website','threads']),
     accountName: z.string().trim().min(2).max(200),
     handle: z.string().trim().min(1).max(200),
     profileUrl: z.string().trim().url().max(1000).optional().or(z.literal('')),
     accountType: z.enum(['primary','supporting']).default('supporting'),
     active: z.boolean().default(true),
+  }).superRefine((data, ctx) => {
+    if (data.platform === 'website' && !data.profileUrl) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['profileUrl'], message: 'Website resmi wajib memiliki URL.' });
+    }
   });
 
   app.get('/api/admin/owned-social-accounts', { preHandler: auth }, async () => {
@@ -91,6 +95,7 @@ export async function registerOwnedSocialRoutes(app: FastifyInstance, pool: Pool
       accountType: parsed.data.accountType ?? current.account_type,
       active: parsed.data.active ?? current.active,
     };
+    if (next.platform === 'website' && !next.profileUrl) return reply.code(400).send({ error: 'WEBSITE_URL_REQUIRED' });
     if (next.opdId && !(await pool.query(`SELECT id FROM opd WHERE id=$1`, [next.opdId])).rows[0]) return reply.code(404).send({ error: 'OPD_NOT_FOUND' });
     try {
       const { rows } = await pool.query(
