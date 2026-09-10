@@ -1,1 +1,1 @@
-(()=>{const s=document.createElement('script');s.src='./admin-core.js?v=20260907-owned1';document.body.appendChild(s)})();
+(()=>{const s=document.createElement('script');s.src='./admin-core.js?v=20260910-owned2';s.onload=()=>{const b=document.createElement('script');b.src='./owned-social-bulk-override.js?v=20260910-bulk1';document.body.appendChild(b)};document.body.appendChild(s)})();
