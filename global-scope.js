@@ -1,63 +1,12 @@
 (()=>{
-  const districtSelect=document.getElementById('districtSelect');
-  if(!districtSelect||typeof api!=='function'||typeof state==='undefined')return;
-
-  state.district=state.district||'all';
-  state.districtList=state.districtList||[];
-
-  async function loadDistrictOptions(){
-    const result=await api('/districts');
-    state.districtList=result.data||[];
-    districtSelect.innerHTML='<option value="all">Semua Kecamatan / Kota Batam</option>'+state.districtList.map(d=>`<option value="${esc(d.id)}">${esc(d.name)}</option>`).join('');
-    districtSelect.value=state.district;
-  }
-
-  async function renderCurrentTab(){
-    renderHighlights();renderScan();renderSoWhat();renderSources();renderAsk();
-    if(state.tab==='dashboard'){
-      if(typeof window.renderPhase2gDashboard==='function') await window.renderPhase2gDashboard();
-      else {renderDashboard();drawChart();}
-    }else{
-      renderDashboard();
-    }
-    if(state.tab==='printarchive') window.renderPrintArchive?.();
-  }
-
-  const originalLoad=load;
-  load=async function(){
-    try{
-      const [opdResult,scopeResult,health]=await Promise.all([
-        api('/opd'),
-        api('/command-center/scope?'+new URLSearchParams({
-          ...(state.opd!=='all'?{opdId:String(state.opd)}:{}),
-          ...(state.district!=='all'?{districtId:String(state.district)}:{})
-        }).toString()),
-        api('/ingestion/status')
-      ]);
-      state.opdList=opdResult.data||[];
-      const opdSelect=document.getElementById('opdSelect');
-      opdSelect.innerHTML='<option value="all">Semua OPD / Pemko Batam</option>'+state.opdList.map(o=>`<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('');
-      opdSelect.value=state.opd;
-      districtSelect.value=state.district;
-      state.metrics=scopeResult.metrics||{};
-      state.articles=scopeResult.articles||[];
-      state.highlights=scopeResult.highlights||[];
-      state.alerts=scopeResult.alerts||[];
-      state.health=health;
-      state.sources=health.sources||[];
-      await renderCurrentTab();
-      const districtName=state.district==='all'?'Seluruh Kecamatan':(state.districtList.find(d=>String(d.id)===String(state.district))?.name||'Kecamatan terpilih');
-      const opdName=state.opd==='all'?'Seluruh OPD':(state.opdList.find(o=>String(o.id)===String(state.opd))?.name||'OPD terpilih');
-      const alertText=document.getElementById('alertText');
-      if(alertText)alertText.textContent=`Scope: ${opdName} · ${districtName} · ${state.articles.length} artikel · ${state.highlights.length} highlight · ${state.alerts.length} open alert.`;
-    }catch(e){
-      console.warn('Global scope load fallback:',e);
-      return originalLoad();
-    }
-  };
-
-  const opdSelect=document.getElementById('opdSelect');
-  if(opdSelect)opdSelect.onchange=async e=>{state.opd=e.target.value;await load();};
-  districtSelect.onchange=async e=>{state.district=e.target.value;await load();};
-  loadDistrictOptions().then(()=>load()).catch(e=>console.warn('District filter init failed:',e));
+ const districtSelect=document.getElementById('districtSelect'),opdSelect=document.getElementById('opdSelect');
+ if(!districtSelect||!opdSelect||typeof api!=='function'||typeof state==='undefined')return;
+ state.district=state.district||'all';state.districtList=state.districtList||[];
+ async function options(){const [o,d]=await Promise.all([api('/opd'),api('/districts')]);state.opdList=o.data||[];state.districtList=d.data||[];opdSelect.innerHTML='<option value="all">Semua OPD / Pemko Batam</option>'+state.opdList.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');districtSelect.innerHTML='<option value="all">Semua Kecamatan / Kota Batam</option>'+state.districtList.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');opdSelect.value=state.opd;districtSelect.value=state.district}
+ async function refresh(){
+  const q=new URLSearchParams();if(state.opd!=='all')q.set('opdId',String(state.opd));if(state.district!=='all')q.set('districtId',String(state.district));
+  try{const r=await api('/command-center/scope'+(q.toString()?`?${q}`:''));state.metrics=r.metrics||{};state.articles=r.articles||[];state.highlights=r.highlights||[];state.alerts=r.alerts||[];renderHighlights();renderSoWhat();renderSources();renderAsk();if(state.tab==='dashboard'&&typeof window.renderPhase2gDashboard==='function')await window.renderPhase2gDashboard();else if(state.tab==='printarchive')window.renderPrintArchive?.();const on=state.opd==='all'?'Seluruh OPD':state.opdList.find(x=>String(x.id)===String(state.opd))?.name||'OPD terpilih',dn=state.district==='all'?'Seluruh Kecamatan':state.districtList.find(x=>String(x.id)===String(state.district))?.name||'Kecamatan terpilih';const t=document.getElementById('alertText');if(t)t.textContent=`Scope: ${on} · ${dn} · ${state.articles.length} artikel · ${state.highlights.length} highlight · ${state.alerts.length} open alert.`}catch(err){console.warn('Scope refresh failed',err);window.toast?.('Filter gagal dimuat: '+err.message)}
+ }
+ opdSelect.onchange=async e=>{state.opd=e.target.value;await refresh()};districtSelect.onchange=async e=>{state.district=e.target.value;await refresh()};
+ options().then(refresh).catch(e=>console.warn('Scope init failed',e));
 })();
