@@ -12,6 +12,17 @@
     districtSelect.value=state.district;
   }
 
+  async function renderCurrentTab(){
+    renderHighlights();renderScan();renderSoWhat();renderSources();renderAsk();
+    if(state.tab==='dashboard'){
+      if(typeof window.renderPhase2gDashboard==='function') await window.renderPhase2gDashboard();
+      else {renderDashboard();drawChart();}
+    }else{
+      renderDashboard();
+    }
+    if(state.tab==='printarchive') window.renderPrintArchive?.();
+  }
+
   const originalLoad=load;
   load=async function(){
     try{
@@ -27,14 +38,14 @@
       const opdSelect=document.getElementById('opdSelect');
       opdSelect.innerHTML='<option value="all">Semua OPD / Pemko Batam</option>'+state.opdList.map(o=>`<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('');
       opdSelect.value=state.opd;
+      districtSelect.value=state.district;
       state.metrics=scopeResult.metrics||{};
       state.articles=scopeResult.articles||[];
       state.highlights=scopeResult.highlights||[];
       state.alerts=scopeResult.alerts||[];
       state.health=health;
       state.sources=health.sources||[];
-      renderDashboard();renderHighlights();renderScan();renderSoWhat();renderSources();renderAsk();
-      if(state.tab==='dashboard')drawChart();
+      await renderCurrentTab();
       const districtName=state.district==='all'?'Seluruh Kecamatan':(state.districtList.find(d=>String(d.id)===String(state.district))?.name||'Kecamatan terpilih');
       const opdName=state.opd==='all'?'Seluruh OPD':(state.opdList.find(o=>String(o.id)===String(state.opd))?.name||'OPD terpilih');
       const alertText=document.getElementById('alertText');
@@ -45,6 +56,8 @@
     }
   };
 
-  districtSelect.addEventListener('change',async e=>{state.district=e.target.value;await load();});
+  const opdSelect=document.getElementById('opdSelect');
+  if(opdSelect)opdSelect.onchange=async e=>{state.opd=e.target.value;await load();};
+  districtSelect.onchange=async e=>{state.district=e.target.value;await load();};
   loadDistrictOptions().then(()=>load()).catch(e=>console.warn('District filter init failed:',e));
 })();
