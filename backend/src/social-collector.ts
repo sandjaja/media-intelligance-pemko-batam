@@ -92,9 +92,12 @@ export async function ingestSocialCandidate(pool:Pool,candidate:SocialCandidate,
   const columns=`platform,external_id,content_type,source_kind,owned_account_id,opd_id,author_name,author_handle,author_profile_url,canonical_url,title,content,language,published_at,sentiment,sentiment_score,importance_score,influence_score,risk_score,risk_level,content_hash,collector,raw_payload,metadata,processing_status`;
   const placeholders=values.map((_,i)=>`$${i+1}`).join(',');
   const update=`content_type=EXCLUDED.content_type,source_kind=EXCLUDED.source_kind,owned_account_id=EXCLUDED.owned_account_id,opd_id=COALESCE(EXCLUDED.opd_id,social_mentions.opd_id),author_name=EXCLUDED.author_name,author_handle=EXCLUDED.author_handle,author_profile_url=EXCLUDED.author_profile_url,canonical_url=EXCLUDED.canonical_url,title=EXCLUDED.title,content=EXCLUDED.content,language=EXCLUDED.language,published_at=EXCLUDED.published_at,sentiment=EXCLUDED.sentiment,sentiment_score=EXCLUDED.sentiment_score,importance_score=EXCLUDED.importance_score,risk_score=EXCLUDED.risk_score,risk_level=EXCLUDED.risk_level,collector=EXCLUDED.collector,raw_payload=EXCLUDED.raw_payload,metadata=EXCLUDED.metadata,processing_status=EXCLUDED.processing_status,updated_at=now()`;
+  const contentConflict = candidate.ownedAccountId != null
+    ? `ON CONFLICT(platform,owned_account_id,content_hash) WHERE content_hash IS NOT NULL AND owned_account_id IS NOT NULL`
+    : `ON CONFLICT(platform,content_hash) WHERE content_hash IS NOT NULL AND owned_account_id IS NULL`;
   const sql=candidate.externalId
     ? `INSERT INTO social_mentions(${columns}) VALUES(${placeholders}) ON CONFLICT(platform,external_id) WHERE external_id IS NOT NULL DO UPDATE SET ${update} RETURNING id,platform,external_id,opd_id,sentiment,risk_score,risk_level,processing_status`
-    : `INSERT INTO social_mentions(${columns}) VALUES(${placeholders}) ON CONFLICT(platform,content_hash) WHERE content_hash IS NOT NULL DO UPDATE SET ${update} RETURNING id,platform,external_id,opd_id,sentiment,risk_score,risk_level,processing_status`;
+    : `INSERT INTO social_mentions(${columns}) VALUES(${placeholders}) ${contentConflict} DO UPDATE SET ${update} RETURNING id,platform,external_id,opd_id,sentiment,risk_score,risk_level,processing_status`;
   const {rows}=await pool.query(sql,values);
   const mention=rows[0];
   for(const match of matches){
