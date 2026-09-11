@@ -100,7 +100,7 @@ export async function ingestSocialCandidate(pool:Pool,candidate:SocialCandidate,
   for(const match of matches){
     await pool.query(`INSERT INTO social_mention_keywords(mention_id,keyword_id,matched_text,match_count,confidence) VALUES($1,$2,$3,$4,$5) ON CONFLICT(mention_id,keyword_id) DO UPDATE SET matched_text=EXCLUDED.matched_text,match_count=EXCLUDED.match_count,confidence=EXCLUDED.confidence`,[mention.id,match.id,match.matchedText,match.matchCount,match.confidence]);
   }
-  await pool.query(`INSERT INTO evidence_sources(source_type,external_id,canonical_url,captured_at,content_hash,metadata,social_mention_id) SELECT $1,$2,$3,now(),$4,$5::jsonb,$6 WHERE NOT EXISTS(SELECT 1 FROM evidence_sources WHERE social_mention_id=$6)`,[candidate.sourceKind==='owned'?'owned_social':'social',candidate.externalId??null,candidate.canonicalUrl??null,contentHash,JSON.stringify({collector:candidate.collector??defaultCollector}),mention.id]);
+  await pool.query(`INSERT INTO evidence_sources(source_type,source_url,source_label,captured_at,content_hash,metadata,social_mention_id) SELECT $1,$2,$3,now(),$4,$5::jsonb,$6 WHERE NOT EXISTS(SELECT 1 FROM evidence_sources WHERE social_mention_id=$6)`,[candidate.sourceKind==='owned'?'owned_social':'social',candidate.canonicalUrl??null,candidate.authorName??candidate.authorHandle??candidate.platform,contentHash,JSON.stringify({collector:candidate.collector??defaultCollector,externalId:candidate.externalId??null}),mention.id]);
   return {...mention,keywordMatches:matches.length,matchedKeywordIds:matches.map(m=>Number(m.id))};
 }
 
