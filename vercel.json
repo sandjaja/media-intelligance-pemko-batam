@@ -2,6 +2,7 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "version": 2,
   "builds": [
+    { "src": "backend/src/cron-website.ts", "use": "@vercel/node" },
     { "src": "backend/src/vercel.ts", "use": "@vercel/node" },
     { "src": "*.html", "use": "@vercel/static" },
     { "src": "*.js", "use": "@vercel/static" },
@@ -14,9 +15,13 @@
     { "src": "*.ico", "use": "@vercel/static" }
   ],
   "routes": [
+    { "src": "/api/cron/website-sync", "dest": "/backend/src/cron-website.ts" },
     { "src": "/health(?:/.*)?", "dest": "/backend/src/vercel.ts" },
     { "src": "/api(?:/.*)?", "dest": "/backend/src/vercel.ts" },
     { "handle": "filesystem" },
     { "src": "/", "dest": "/index.html" }
+  ],
+  "crons": [
+    { "path": "/api/cron/website-sync", "schedule": "0 * * * *" }
   ]
 }
