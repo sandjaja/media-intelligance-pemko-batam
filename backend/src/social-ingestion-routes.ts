@@ -66,15 +66,35 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
     const accountId=z.coerce.number().int().positive().safeParse((request.params as any).accountId);
     if(!accountId.success)return reply.code(400).send({error:'INVALID_ACCOUNT_ID'});
     const ctx=request.socialIngestAuth!;
-    const account=(await pool.query(`SELECT id,opd_id FROM owned_social_accounts WHERE id=$1 AND platform='website' AND active=true LIMIT 1`,[accountId.data])).rows[0];
-    if(!account)return reply.code(404).send({error:'WEBSITE_ACCOUNT_NOT_FOUND'});
-    if(!canReadAll(ctx)&&String(account.opd_id??'')!==String(ctx.opdId??''))return reply.code(403).send({error:'FORBIDDEN'});
+    const startedAt=Date.now();
     try{
+      const account=(await pool.query(`SELECT id,opd_id,account_name,profile_url FROM owned_social_accounts WHERE id=$1 AND platform='website' AND active=true LIMIT 1`,[accountId.data])).rows[0];
+      if(!account)return reply.code(404).send({error:'WEBSITE_ACCOUNT_NOT_FOUND'});
+      if(!canReadAll(ctx)&&String(account.opd_id??'')!==String(ctx.opdId??''))return reply.code(403).send({error:'FORBIDDEN'});
+
+      await pool.query(
+        `INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'WEBSITE_SOCIAL_INGEST_STARTED',$2::jsonb)`,
+        [ctx.id,JSON.stringify({accountId:accountId.data,accountName:account.account_name,profileUrl:account.profile_url,routeVersion:'website-sync-v2'})],
+      );
+
       const result=await collectOwnedWebsiteAccount(pool,accountId.data);
-      await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'WEBSITE_SOCIAL_INGEST',$2::jsonb)`,[ctx.id,JSON.stringify({accountId:accountId.data,feedUrl:result.feedUrl,fetched:result.fetched,succeeded:result.succeeded,failed:result.failed})]);
+      await pool.query(
+        `INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'WEBSITE_SOCIAL_INGEST',$2::jsonb)`,
+        [ctx.id,JSON.stringify({accountId:accountId.data,feedUrl:result.feedUrl,mode:result.mode,fetched:result.fetched,succeeded:result.succeeded,failed:result.failed,durationMs:Date.now()-startedAt})],
+      );
       return reply.code(result.failed?207:201).send({data:result});
     }catch(error){
-      return reply.code(422).send({error:'WEBSITE_INGEST_FAILED',message:error instanceof Error?error.message:String(error)});
+      const message=error instanceof Error?error.message:String(error);
+      app.log.error({err:error,accountId:accountId.data},'Website ingestion failed');
+      try{
+        await pool.query(
+          `INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'WEBSITE_SOCIAL_INGEST_FAILED',$2::jsonb)`,
+          [ctx.id,JSON.stringify({accountId:accountId.data,message,durationMs:Date.now()-startedAt,routeVersion:'website-sync-v2'})],
+        );
+      }catch(auditError){
+        app.log.error({err:auditError,accountId:accountId.data},'Failed to persist website ingestion error audit');
+      }
+      return reply.code(422).send({error:'WEBSITE_INGEST_FAILED',message});
     }
   });
 
