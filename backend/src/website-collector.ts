@@ -12,6 +12,8 @@ type WebsiteAccount = {
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' });
 const USER_AGENT = 'MediaIntelligenceBot/1.0 (+Pemko Batam media monitoring)';
+const FETCH_TIMEOUT_MS = 7000;
+const HTML_CRAWL_LIMIT = 8;
 const asArray = <T>(value: T | T[] | undefined): T[] => value == null ? [] : Array.isArray(value) ? value : [value];
 const textValue = (value: unknown): string | undefined => {
   if (typeof value === 'string') return value.trim() || undefined;
@@ -45,7 +47,7 @@ const safeDate = (value?: string) => {
 async function fetchText(url: string) {
   const response = await fetch(url, {
     headers: { 'user-agent': USER_AGENT, accept: 'text/html,application/xhtml+xml,application/rss+xml,application/atom+xml,application/xml;q=0.9,*/*;q=0.8' },
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     redirect: 'follow',
   });
   const body = await response.text();
@@ -141,7 +143,7 @@ function extractArticleLinks(html: string, baseUrl: string) {
       candidates.push({ url: normalizedUrl, text, score });
     } catch { /* invalid link */ }
   }
-  return candidates.sort((a,b)=>b.score-a.score).slice(0, 20);
+  return candidates.sort((a,b)=>b.score-a.score).slice(0, HTML_CRAWL_LIMIT);
 }
 
 function extractArticleCandidate(html: string, url: string, linkText: string, account: WebsiteAccount): SocialCandidate | null {
@@ -183,17 +185,16 @@ function extractArticleCandidate(html: string, url: string, linkText: string, ac
 
 async function crawlWebsiteHtml(html: string, baseUrl: string, account: WebsiteAccount) {
   const links = extractArticleLinks(html, baseUrl);
-  const candidates: SocialCandidate[] = [];
-  for (const link of links) {
-    try {
-      const { response, body } = await fetchText(link.url);
-      if (!response.ok || !response.headers.get('content-type')?.toLowerCase().includes('text/html')) continue;
-      const candidate = extractArticleCandidate(body, response.url || link.url, link.text, account);
-      if (candidate) candidates.push(candidate);
-      if (candidates.length >= 10) break;
-    } catch { /* skip inaccessible article and continue */ }
-  }
-  return candidates;
+  const settled = await Promise.allSettled(links.map(async(link)=>{
+    const { response, body } = await fetchText(link.url);
+    if (!response.ok || !response.headers.get('content-type')?.toLowerCase().includes('text/html')) return null;
+    return extractArticleCandidate(body, response.url || link.url, link.text, account);
+  }));
+  return settled
+    .filter((r): r is PromiseFulfilledResult<SocialCandidate | null> => r.status === 'fulfilled')
+    .map(r=>r.value)
+    .filter((candidate): candidate is SocialCandidate => Boolean(candidate))
+    .slice(0, HTML_CRAWL_LIMIT);
 }
 
 export async function collectOwnedWebsiteAccount(pool: Pool, accountId: number) {
