@@ -58,7 +58,7 @@ function matchKeyword(text:string,row:KeywordRow):KeywordMatch|null {
     if(row.match_type==='regex') {
       const re = new RegExp(row.keyword,'gi');
       const hits = haystack.match(re) || [];
-      return hits.length ? {...row,matchedText:hits[0],matchCount:hits.length,confidence:0.95} : null;
+      return hits.length ? {...row,matchedText:hits[0] ?? row.keyword,matchCount:hits.length,confidence:0.95} : null;
     }
     if(row.match_type==='exact') {
       const re = new RegExp(`(^|\\W)${escapeRegex(needle)}($|\\W)`,'gi');
