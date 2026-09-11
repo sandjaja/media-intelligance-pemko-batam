@@ -21,16 +21,22 @@ const FALLBACK_RULES: CategoryRule[] = [
   { name: 'Keamanan & Ketertiban', terms: ['keamanan','kriminal','pidana','polisi','kerusuhan','demonstrasi','unjuk rasa'] },
   { name: 'Kesehatan', terms: ['kesehatan','rumah sakit','puskesmas','wabah','pasien','dokter'] },
   { name: 'Pendidikan', terms: ['sekolah','pendidikan','siswa','guru','beasiswa'] },
-  { name: 'Pemerintahan', terms: ['kebijakan','anggaran','regulasi','peraturan','rapat koordinasi','musrenbang','administrasi pemerintahan','program pemerintah','tata kelola'], generic: ['pemko','pemerintah','walikota','dinas','opd'] }
+  { name: 'Pemerintahan / Keuangan Daerah', terms: ['apbd','pad','anggaran','pendapatan daerah','belanja daerah','defisit','silpa','nota keuangan','ranperda apbd','rancangan apbd','pajak daerah','penerimaan pembiayaan','tahun anggaran','kebijakan','regulasi','peraturan','rapat paripurna','dprd','musrenbang','administrasi pemerintahan','program pemerintah','tata kelola'], generic: ['pemko','pemerintah','wali kota','walikota','dinas','opd'] }
 ];
 
 const norm = (v: any) => String(v || '').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
+
+// v2.10: match complete words/phrases, never arbitrary substrings.
+// This prevents short terms such as "pon" from matching "penopang"/"respon".
 const count = (text: string, term: string) => {
-  if (!term) return 0;
+  const hay = norm(text), needle = norm(term);
+  if (!hay || !needle) return 0;
+  const paddedHay = ` ${hay} `;
+  const paddedNeedle = ` ${needle} `;
   let n = 0, p = 0;
-  while ((p = text.indexOf(term, p)) !== -1) {
+  while ((p = paddedHay.indexOf(paddedNeedle, p)) !== -1) {
     n++;
-    p += Math.max(1, term.length);
+    p += Math.max(1, paddedNeedle.length);
   }
   return n;
 };
@@ -51,12 +57,13 @@ function fallback(title: string, summary: string, body: string, operatorMatches:
     for (const termRaw of rule.terms) {
       const term = norm(termRaw), tc = count(title, term), sc = count(summary, term), bc = count(body, term);
       if (!(tc + sc + bc)) continue;
-      const contribution = Math.min(18, tc * 6 + sc * 3 + bc);
+      // Headline and summary express the subject; OCR body occurrences are supporting evidence.
+      const contribution = Math.min(24, tc * 10 + sc * 5 + Math.min(4, bc));
       score += contribution;
-      evidence.push(`${termRaw}: +${contribution}${tc ? ' judul' : ''}`);
+      evidence.push(`${termRaw}: +${contribution}${tc ? ' judul' : sc ? ' ringkasan' : ' isi'}`);
       if (operatorTerms.has(term)) {
-        score += 2;
-        evidence.push(`${termRaw}: +2 keyword operator`);
+        score += 1;
+        evidence.push(`${termRaw}: +1 keyword operator`);
       }
     }
     if (rule.generic) {
@@ -77,7 +84,7 @@ function fallback(title: string, summary: string, body: string, operatorMatches:
   return {
     issueCategory: winner && winner.score > 0 ? winner.name : 'Umum / Lintas Isu',
     categoryEvidence: {
-      engine: 'phase2e-category-hybrid-v2.9-flood-traffic-calibrated',
+      engine: 'phase2e-category-hybrid-v2.10-contextual-whole-word',
       source: 'fallback-rule',
       winnerScore: winner?.score || 0,
       candidates: scored.filter(x => x.score > 0).slice(0, 4)
@@ -98,23 +105,24 @@ export function classifyIssueWithTaxonomy(titleRaw: string, summaryRaw: string, 
     for (const term of splitKeyword(row.keyword)) {
       const tc = count(title, term), sc = count(summary, term), bc = count(body, term);
       if (!(tc + sc + bc)) continue;
-      const fieldScore = Math.min(12, tc * 4 + sc * 2 + bc);
+      const fieldScore = Math.min(18, tc * 8 + sc * 4 + Math.min(4, bc));
       const contribution = Number((fieldScore * weight * (.75 + priority * .25)).toFixed(2));
       const current = byCategory.get(name) || { code, name, score: 0, evidence: [] };
       current.score += contribution;
-      current.evidence.push(`keyword resmi “${term}”: +${contribution}${tc ? ' judul' : ''}`);
+      current.evidence.push(`keyword resmi “${term}”: +${contribution}${tc ? ' judul' : sc ? ' ringkasan' : ' isi'}`);
       byCategory.set(name, current);
     }
   }
 
   const ranked = [...byCategory.values()].sort((a, b) => b.score - a.score);
+  // Database taxonomy remains authoritative when it has a real match. If not, use the richer contextual fallback.
   if (!ranked.length) return fallback(title, summary, body, operatorMatches);
   const winner = ranked[0];
 
   return {
     issueCategory: winner.name,
     categoryEvidence: {
-      engine: 'phase2e-category-hybrid-v2.9-flood-traffic-calibrated',
+      engine: 'phase2e-category-hybrid-v2.10-contextual-whole-word',
       source: 'keyword-taxonomy',
       winnerScore: Number(winner.score.toFixed(2)),
       winnerCode: winner.code,
