@@ -1,0 +1,32 @@
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { Pool } from 'pg';
+import jwt from 'jsonwebtoken';
+import { z } from 'zod';
+import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
+
+declare module 'fastify' { interface FastifyRequest { communicationGapAuth?: AuthorizationContext } }
+
+type ExternalSignal={id:string;title:string|null;summary:string|null;body_text:string|null;sentiment:string|null;risk_score:string|number;importance_score:string|number;edition_date:string;source_name:string;opd_id:string|null;opd_name:string|null};
+type OwnedCluster={id:string;canonical_title:string|null;representative_title:string|null;representative_content:string|null;member_count:number|string;channel_count:number|string;first_published_at:string|null;last_published_at:string|null};
+
+const STOP=new Set(['dan','yang','di','ke','dari','untuk','pada','dengan','atau','ini','itu','dalam','atas','sebagai','oleh','kota','batam','pemko','pemerintah','berita','halaman']);
+function norm(v:string|null|undefined){return String(v??'').toLowerCase().replace(/https?:\/\/\S+/g,' ').replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim()}
+function toks(v:string|null|undefined,max=500){return norm(v).split(' ').filter(x=>x.length>2&&!STOP.has(x)).slice(0,max)}
+function jaccard(a:string[],b:string[]){const A=new Set(a),B=new Set(b);if(!A.size||!B.size)return 0;let n=0;for(const x of A)if(B.has(x))n++;return n/(A.size+B.size-n)}
+function containment(a:string[],b:string[]){const A=new Set(a),B=new Set(b);if(!A.size||!B.size)return 0;let n=0;for(const x of A)if(B.has(x))n++;return n/Math.min(A.size,B.size)}
+function similarity(signal:ExternalSignal,cluster:OwnedCluster){const st=toks(signal.title,80),sb=toks(`${signal.summary||''} ${signal.body_text||''}`,500),ct=toks(cluster.canonical_title||cluster.representative_title,80),cb=toks(cluster.representative_content,500);const title=jaccard(st,ct),body=jaccard(sb,cb),contain=Math.max(containment(st,ct),containment(sb,cb));return Math.max(title,.88*body,.82*contain,.35*title+.65*body)}
+function priority(s:ExternalSignal,status:string){const risk=Number(s.risk_score||0),importance=Number(s.importance_score||0),negative=String(s.sentiment||'').toLowerCase()==='negative';const raw=risk*.55+importance*.25+(negative?20:0)+(status==='gap'?15:status==='partial'?7:0);return raw>=70?'critical':raw>=52?'high':raw>=34?'medium':'watch'}
+
+export async function registerCommunicationGapRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
+  const auth=async(request:FastifyRequest,reply:any)=>{const token=request.cookies.access_token;if(!token)return reply.code(401).send({error:'UNAUTHENTICATED'});try{const decoded=jwt.verify(token,jwtSecret) as jwt.JwtPayload;if(typeof decoded.sub!=='string')throw new Error('invalid');const ctx=await loadAuthorizationContext(pool,decoded.sub);if(!ctx?.active)return reply.code(403).send({error:'ACCOUNT_INACTIVE'});request.communicationGapAuth=ctx}catch{return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'})}};
+  app.get('/api/intelligence/communication-gaps',{preHandler:auth},async(request,reply)=>{
+    const parsed=z.object({days:z.coerce.number().int().min(1).max(30).default(7),limit:z.coerce.number().int().min(1).max(100).default(50),threshold:z.coerce.number().min(.2).max(.8).default(.35)}).safeParse(request.query);
+    if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
+    const {days,limit,threshold}=parsed.data;
+    const external=(await pool.query<ExternalSignal>(`SELECT pa.id,pa.title,pa.summary,pa.body_text,pa.sentiment,pa.risk_score,pa.importance_score,pe.edition_date::text,ms.name source_name,pa.opd_id,o.name opd_name FROM print_articles pa JOIN print_editions pe ON pe.id=pa.edition_id JOIN media_sources ms ON ms.id=pe.source_id LEFT JOIN opd o ON o.id=pa.opd_id WHERE pa.status IN ('verified','analyzed') AND pe.edition_date >= CURRENT_DATE-$1::int ORDER BY pa.risk_score DESC,pa.importance_score DESC,pe.edition_date DESC LIMIT $2`,[days,limit])).rows;
+    const clusters=(await pool.query<OwnedCluster>(`SELECT occ.id,occ.canonical_title,occ.member_count,occ.channel_count,occ.first_published_at,occ.last_published_at,sm.title representative_title,sm.content representative_content FROM owned_content_clusters occ LEFT JOIN social_mentions sm ON sm.id=occ.representative_mention_id WHERE COALESCE(occ.last_published_at,occ.first_published_at,now()) >= now()-($1::text||' days')::interval ORDER BY occ.last_published_at DESC NULLS LAST`,[String(days+3)])).rows;
+    const gaps=external.map(s=>{let best:OwnedCluster|null=null,bestScore=0;for(const c of clusters){const score=similarity(s,c);if(score>bestScore){best=c;bestScore=score}}const matched=best&&bestScore>=threshold;const channels=matched?Number(best!.channel_count||0):0;const status=!matched?'gap':channels>1?'amplified':'partial';return{external:{id:s.id,title:s.title,sourceName:s.source_name,editionDate:s.edition_date,sentiment:s.sentiment,riskScore:Number(s.risk_score||0),importanceScore:Number(s.importance_score||0),opdId:s.opd_id,opdName:s.opd_name},response:matched?{clusterId:best!.id,title:best!.canonical_title||best!.representative_title,channelCount:channels,publicationCount:Number(best!.member_count||0),similarity:Number(bestScore.toFixed(4)),firstPublishedAt:best!.first_published_at,lastPublishedAt:best!.last_published_at}:null,status,priority:priority(s,status)} }).sort((a,b)=>{const p:any={critical:4,high:3,medium:2,watch:1};return p[b.priority]-p[a.priority]||b.external.riskScore-a.external.riskScore});
+    const summary={externalSignals:gaps.length,gaps:gaps.filter(x=>x.status==='gap').length,partial:gaps.filter(x=>x.status==='partial').length,amplified:gaps.filter(x=>x.status==='amplified').length,highPriority:gaps.filter(x=>x.priority==='high'||x.priority==='critical').length,windowDays:days,threshold};
+    return{data:{summary,items:gaps,engine:'communication-gap-rule-v1-print-vs-owned'}};
+  });
+}
