@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { hasPermission, loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { ingestSocialBatch, type SocialCandidate } from './social-collector.js';
 import { collectOwnedWebsiteAccount } from './website-collector.js';
+import { rebuildOwnedContentClusters } from './owned-content-clustering.js';
 
 declare module 'fastify' { interface FastifyRequest { socialIngestAuth?: AuthorizationContext } }
 
@@ -74,22 +75,24 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
 
       await pool.query(
         `INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'WEBSITE_SOCIAL_INGEST_STARTED',$2::jsonb)`,
-        [ctx.id,JSON.stringify({accountId:accountId.data,accountName:account.account_name,profileUrl:account.profile_url,routeVersion:'website-sync-v2'})],
+        [ctx.id,JSON.stringify({accountId:accountId.data,accountName:account.account_name,profileUrl:account.profile_url,routeVersion:'website-sync-v3'})],
       );
 
       const result=await collectOwnedWebsiteAccount(pool,accountId.data);
+      let clustering=null;
+      try{clustering=await rebuildOwnedContentClusters(pool)}catch(clusterError){app.log.warn({err:clusterError},'Owned content clustering refresh failed')}
       await pool.query(
         `INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'WEBSITE_SOCIAL_INGEST',$2::jsonb)`,
-        [ctx.id,JSON.stringify({accountId:accountId.data,feedUrl:result.feedUrl,mode:result.mode,fetched:result.fetched,succeeded:result.succeeded,failed:result.failed,durationMs:Date.now()-startedAt})],
+        [ctx.id,JSON.stringify({accountId:accountId.data,feedUrl:result.feedUrl,mode:result.mode,fetched:result.fetched,succeeded:result.succeeded,failed:result.failed,clustering,durationMs:Date.now()-startedAt})],
       );
-      return reply.code(result.failed?207:201).send({data:result});
+      return reply.code(result.failed?207:201).send({data:{...result,clustering}});
     }catch(error){
       const message=error instanceof Error?error.message:String(error);
       app.log.error({err:error,accountId:accountId.data},'Website ingestion failed');
       try{
         await pool.query(
           `INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'WEBSITE_SOCIAL_INGEST_FAILED',$2::jsonb)`,
-          [ctx.id,JSON.stringify({accountId:accountId.data,message,durationMs:Date.now()-startedAt,routeVersion:'website-sync-v2'})],
+          [ctx.id,JSON.stringify({accountId:accountId.data,message,durationMs:Date.now()-startedAt,routeVersion:'website-sync-v3'})],
         );
       }catch(auditError){
         app.log.error({err:auditError,accountId:accountId.data},'Failed to persist website ingestion error audit');
