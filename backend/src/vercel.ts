@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { bootstrapInitialAdmin } from './bootstrap-admin.js';
 
 const INTERNAL_PORT = 18787;
-const BACKEND_BUILD = 'website-sync-v3-20260911';
+const BACKEND_BUILD = 'owned-clustering-v1-20260911';
 let backendReady: Promise<void> | null = null;
 
 async function ensureBackend() {
@@ -22,7 +22,6 @@ async function ensureBackend() {
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   try {
-    // Never expose database topology, usernames, migration counts, or secret configuration.
     if ((req.url || '').startsWith('/health/database')) {
       res.statusCode = 404;
       res.setHeader('content-type', 'application/json; charset=utf-8');
