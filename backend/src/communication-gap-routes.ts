@@ -20,7 +20,9 @@ const ISSUE_TERMS=[
   ['pelayanan publik','layanan publik','mal pelayanan publik'],
   ['kemiskinan','pengentasan kemiskinan'],
   ['pendidikan','sekolah','siswa','mahasiswa'],
-  ['kesehatan','rumah sakit','puskesmas']
+  ['kesehatan','rumah sakit','puskesmas'],
+  ['olahraga','popda','porda','porprov','atlet','sport tourism','kepemudaan'],
+  ['judi online','judol','perjudian online']
 ];
 const ANGLE_TERMS=[
   ['defisit','kekurangan','selisih'],['surplus'],['target','capaian','realisasi'],['kenaikan','naik','meningkat'],['penurunan','turun','menurun'],
@@ -36,12 +38,20 @@ function groups(text:string|null|undefined,taxonomy:string[][]){const p=padded(t
 function overlap(a:number[],b:number[]){if(!a.length||!b.length)return 0;const B=new Set(b),n=a.filter(x=>B.has(x)).length;return n/Math.min(a.length,b.length)}
 function similarity(signal:ExternalSignal,cluster:OwnedCluster){const st=toks(signal.title,80),sb=toks(`${signal.summary||''} ${signal.body_text||''}`,500),ct=toks(cluster.canonical_title||cluster.representative_title,80),cb=toks(cluster.representative_content,500);const title=jaccard(st,ct),body=jaccard(sb,cb),contain=Math.max(containment(st,ct),containment(sb,cb));return Math.max(title,.88*body,.82*contain,.35*title+.65*body)}
 function issueAware(signal:ExternalSignal,cluster:OwnedCluster){
-  const sText=`${signal.title||''} ${signal.summary||''} ${signal.body_text||''}`,cText=`${cluster.canonical_title||''} ${cluster.representative_title||''} ${cluster.representative_content||''}`;
-  const lexical=similarity(signal,cluster),sIssues=groups(sText,ISSUE_TERMS),cIssues=groups(cText,ISSUE_TERMS),issueScore=overlap(sIssues,cIssues),sAngles=groups(`${signal.title||''} ${signal.summary||''}`,ANGLE_TERMS),cAngles=groups(`${cluster.canonical_title||''} ${cluster.representative_title||''}`,ANGLE_TERMS),angleScore=overlap(sAngles,cAngles);
-  const sameIssue=issueScore>0;
-  const score=Math.max(lexical,sameIssue?.48+.22*issueScore+.12*angleScore:0);
-  const matchType=!sameIssue?'lexical':angleScore>0?'same_issue_same_angle':'same_issue_different_angle';
-  return{score:Math.min(1,score),lexical,issueScore,angleScore,matchType,sameIssue};
+  const lexical=similarity(signal,cluster);
+  const sCore=groups(`${signal.title||''} ${signal.summary||''}`,ISSUE_TERMS);
+  const cCore=groups(`${cluster.canonical_title||''} ${cluster.representative_title||''}`,ISSUE_TERMS);
+  const sSupport=groups(signal.body_text,ISSUE_TERMS);
+  const cSupport=groups(cluster.representative_content,ISSUE_TERMS);
+  const coreIssueScore=overlap(sCore,cCore);
+  const supportIssueScore=Math.max(overlap(sCore,cSupport),overlap(sSupport,cCore));
+  const sameIssue=coreIssueScore>0;
+  const sAngles=groups(`${signal.title||''} ${signal.summary||''}`,ANGLE_TERMS);
+  const cAngles=groups(`${cluster.canonical_title||''} ${cluster.representative_title||''}`,ANGLE_TERMS);
+  const angleScore=overlap(sAngles,cAngles);
+  const score=sameIssue?Math.max(lexical,.68+.18*coreIssueScore+.08*angleScore):lexical;
+  const matchType=!sameIssue?'lexical':sAngles.length===0?'same_issue_angle_unknown':angleScore>0?'same_issue_same_angle':'same_issue_different_angle';
+  return{score:Math.min(1,score),lexical,coreIssueScore,supportIssueScore,angleScore,matchType,sameIssue};
 }
 function priority(s:ExternalSignal,status:string){const risk=Number(s.risk_score||0),importance=Number(s.importance_score||0),negative=String(s.sentiment||'').toLowerCase()==='negative';const raw=risk*.55+importance*.25+(negative?20:0)+(status==='gap'?15:status==='partial'?7:0);return raw>=70?'critical':raw>=52?'high':raw>=34?'medium':'watch'}
 function operationalRecommendation(s:ExternalSignal,status:string,p:string,response:OwnedCluster|null,angleCoverage='none'){
@@ -58,8 +68,8 @@ export async function registerCommunicationGapRoutes(app:FastifyInstance,pool:Po
     const parsed=z.object({days:z.coerce.number().int().min(1).max(30).default(7),limit:z.coerce.number().int().min(1).max(100).default(50),threshold:z.coerce.number().min(.2).max(.8).default(.35)}).safeParse(request.query);if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});const {days,limit,threshold}=parsed.data;
     const external=(await pool.query<ExternalSignal>(`SELECT pa.id,pa.title,pa.summary,pa.body_text,pa.sentiment,pa.risk_score,pa.importance_score,pe.edition_date::text,ms.name source_name,pa.opd_id,o.name opd_name FROM print_articles pa JOIN print_editions pe ON pe.id=pa.edition_id JOIN media_sources ms ON ms.id=pe.source_id LEFT JOIN opd o ON o.id=pa.opd_id WHERE pa.status IN ('verified','analyzed') AND pe.edition_date >= CURRENT_DATE-$1::int ORDER BY pa.risk_score DESC,pa.importance_score DESC,pe.edition_date DESC LIMIT $2`,[days,limit])).rows;
     const clusters=(await pool.query<OwnedCluster>(`SELECT occ.id,occ.canonical_title,occ.member_count,occ.channel_count,occ.first_published_at,occ.last_published_at,sm.title representative_title,sm.content representative_content FROM owned_content_clusters occ LEFT JOIN social_mentions sm ON sm.id=occ.representative_mention_id WHERE COALESCE(occ.last_published_at,occ.first_published_at,now()) >= now()-($1::text||' days')::interval ORDER BY occ.last_published_at DESC NULLS LAST`,[String(days+3)])).rows;
-    const gaps=external.map(s=>{let best:OwnedCluster|null=null,bestMatch:any=null;for(const c of clusters){const m=issueAware(s,c);if(!bestMatch||m.score>bestMatch.score){best=c;bestMatch=m}}const matched=best&&bestMatch&&(bestMatch.score>=threshold||bestMatch.sameIssue);const matchedCluster=matched?best:null;const channels=matchedCluster?Number(matchedCluster.channel_count||0):0;const status=!matchedCluster?'gap':channels>1?'amplified':'partial';const angleCoverage=!matchedCluster?'none':bestMatch.matchType==='same_issue_different_angle'?'different':bestMatch.matchType==='same_issue_same_angle'?'same':'unknown';const p=priority(s,status);return{external:{id:s.id,title:s.title,sourceName:s.source_name,editionDate:s.edition_date,sentiment:s.sentiment,riskScore:Number(s.risk_score||0),importanceScore:Number(s.importance_score||0),opdId:s.opd_id,opdName:s.opd_name},response:matchedCluster?{clusterId:matchedCluster.id,title:matchedCluster.canonical_title||matchedCluster.representative_title,channelCount:channels,publicationCount:Number(matchedCluster.member_count||0),similarity:Number(bestMatch.score.toFixed(4)),lexicalSimilarity:Number(bestMatch.lexical.toFixed(4)),issueSimilarity:Number(bestMatch.issueScore.toFixed(4)),angleSimilarity:Number(bestMatch.angleScore.toFixed(4)),matchType:bestMatch.matchType,angleCoverage,firstPublishedAt:matchedCluster.first_published_at,lastPublishedAt:matchedCluster.last_published_at}:null,status,priority:p,recommendation:operationalRecommendation(s,status,p,matchedCluster,angleCoverage)} }).sort((a,b)=>{const p:any={critical:4,high:3,medium:2,watch:1};return p[b.priority]-p[a.priority]||b.external.riskScore-a.external.riskScore});
+    const gaps=external.map(s=>{let best:OwnedCluster|null=null,bestMatch:any=null;for(const c of clusters){const m=issueAware(s,c);if(!bestMatch||m.score>bestMatch.score){best=c;bestMatch=m}}const matched=best&&bestMatch&&(bestMatch.sameIssue||bestMatch.score>=threshold);const matchedCluster=matched?best:null;const channels=matchedCluster?Number(matchedCluster.channel_count||0):0;const status=!matchedCluster?'gap':channels>1?'amplified':'partial';const angleCoverage=!matchedCluster?'none':bestMatch.matchType==='same_issue_different_angle'?'different':bestMatch.matchType==='same_issue_same_angle'?'same':'unknown';const p=priority(s,status);return{external:{id:s.id,title:s.title,sourceName:s.source_name,editionDate:s.edition_date,sentiment:s.sentiment,riskScore:Number(s.risk_score||0),importanceScore:Number(s.importance_score||0),opdId:s.opd_id,opdName:s.opd_name},response:matchedCluster?{clusterId:matchedCluster.id,title:matchedCluster.canonical_title||matchedCluster.representative_title,channelCount:channels,publicationCount:Number(matchedCluster.member_count||0),similarity:Number(bestMatch.score.toFixed(4)),lexicalSimilarity:Number(bestMatch.lexical.toFixed(4)),issueSimilarity:Number(bestMatch.coreIssueScore.toFixed(4)),supportIssueSimilarity:Number(bestMatch.supportIssueScore.toFixed(4)),angleSimilarity:Number(bestMatch.angleScore.toFixed(4)),matchType:bestMatch.matchType,angleCoverage,firstPublishedAt:matchedCluster.first_published_at,lastPublishedAt:matchedCluster.last_published_at}:null,status,priority:p,recommendation:operationalRecommendation(s,status,p,matchedCluster,angleCoverage)} }).sort((a,b)=>{const p:any={critical:4,high:3,medium:2,watch:1};return p[b.priority]-p[a.priority]||b.external.riskScore-a.external.riskScore});
     const summary={externalSignals:gaps.length,gaps:gaps.filter(x=>x.status==='gap').length,partial:gaps.filter(x=>x.status==='partial').length,amplified:gaps.filter(x=>x.status==='amplified').length,angleGaps:gaps.filter(x=>x.response?.angleCoverage==='different').length,highPriority:gaps.filter(x=>x.priority==='high'||x.priority==='critical').length,actionRequired:gaps.filter(x=>x.status==='gap'||x.response?.angleCoverage==='different').filter(x=>x.priority==='critical'||x.priority==='high'||x.priority==='medium').length,windowDays:days,threshold};
-    return{data:{summary,items:gaps,engine:'communication-gap-rule-v1.2-issue-angle-aware'}};
+    return{data:{summary,items:gaps,engine:'communication-gap-rule-v1.3-core-issue-anchor'}};
   });
 }
