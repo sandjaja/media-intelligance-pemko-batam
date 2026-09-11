@@ -16,6 +16,53 @@ function jaccard(a:string[],b:string[]){const A=new Set(a),B=new Set(b);if(!A.si
 function containment(a:string[],b:string[]){const A=new Set(a),B=new Set(b);if(!A.size||!B.size)return 0;let n=0;for(const x of A)if(B.has(x))n++;return n/Math.min(A.size,B.size)}
 function similarity(signal:ExternalSignal,cluster:OwnedCluster){const st=toks(signal.title,80),sb=toks(`${signal.summary||''} ${signal.body_text||''}`,500),ct=toks(cluster.canonical_title||cluster.representative_title,80),cb=toks(cluster.representative_content,500);const title=jaccard(st,ct),body=jaccard(sb,cb),contain=Math.max(containment(st,ct),containment(sb,cb));return Math.max(title,.88*body,.82*contain,.35*title+.65*body)}
 function priority(s:ExternalSignal,status:string){const risk=Number(s.risk_score||0),importance=Number(s.importance_score||0),negative=String(s.sentiment||'').toLowerCase()==='negative';const raw=risk*.55+importance*.25+(negative?20:0)+(status==='gap'?15:status==='partial'?7:0);return raw>=70?'critical':raw>=52?'high':raw>=34?'medium':'watch'}
+function operationalRecommendation(s:ExternalSignal,status:string,p:string,response:OwnedCluster|null){
+  const leadOpd=s.opd_name||'Humas/Media Center bersama OPD teknis terkait';
+  const negative=String(s.sentiment||'').toLowerCase()==='negative';
+  const risk=Number(s.risk_score||0),importance=Number(s.importance_score||0);
+  const sla=p==='critical'?'≤ 1 jam':p==='high'?'≤ 3 jam':p==='medium'?'≤ 6 jam':'≤ 24 jam';
+  if(status==='gap')return{
+    leadOpd,
+    urgency:p,
+    targetResponseTime:sla,
+    reason:`Belum ditemukan narasi resmi yang cukup relevan${negative?', sementara sentimen eksternal negatif':''}. Risk ${risk}/100 dan importance ${importance}/100.`,
+    objective:'Mengisi kekosongan informasi resmi dengan fakta terverifikasi sebelum narasi eksternal berkembang tanpa konteks Pemko.',
+    actions:[
+      'Validasi fakta dan kondisi terbaru dengan OPD teknis/petugas lapangan.',
+      p==='critical'||p==='high'?'Siapkan holding statement singkat segera; jangan menunggu rilis panjang selesai.':'Siapkan pernyataan resmi ringkas berbasis fakta dan langkah penanganan.',
+      'Publikasikan respons pada kanal utama Pemko/Media Center, lalu tautkan ke OPD terkait.',
+      'Pantau perubahan sentimen dan pemberitaan setelah respons dipublikasikan.'
+    ],
+    channelStrategy:'Pemko/Media Center sebagai sumber utama; OPD teknis sebagai penguat fakta dan tindak lanjut.'
+  };
+  if(status==='partial')return{
+    leadOpd,
+    urgency:p,
+    targetResponseTime:sla,
+    reason:`Narasi resmi sudah ada tetapi baru terdistribusi di ${Number(response?.channel_count||1)} kanal.`,
+    objective:'Memperluas jangkauan narasi resmi dan memastikan pesan kunci konsisten lintas kanal.',
+    actions:[
+      'Verifikasi bahwa narasi resmi menjawab inti isu eksternal.',
+      'Amplifikasi melalui kanal utama Pemko/Media Center dan kanal OPD relevan.',
+      'Samakan headline, fakta kunci, data, dan call-to-action antar kanal.',
+      'Pantau apakah pemberitaan eksternal mulai mengutip atau merujuk respons resmi.'
+    ],
+    channelStrategy:'Perlu amplifikasi lintas kanal resmi; hindari membuat versi pesan yang saling berbeda.'
+  };
+  return{
+    leadOpd,
+    urgency:'monitor',
+    targetResponseTime:'Monitoring berkala',
+    reason:`Narasi resmi sudah muncul di ${Number(response?.channel_count||0)} kanal dengan ${Number(response?.member_count||0)} publikasi.`,
+    objective:'Menjaga konsistensi fakta dan memastikan amplifikasi tidak menghasilkan pesan yang saling bertentangan.',
+    actions:[
+      'Pantau konsistensi pesan dan perkembangan sentimen eksternal.',
+      'Perbarui narasi hanya jika ada fakta atau perkembangan baru.',
+      'Catat kanal yang paling efektif untuk pola amplifikasi berikutnya.'
+    ],
+    channelStrategy:'Tidak perlu menambah respons baru bila isu sudah terjawab; fokus pada konsistensi dan update faktual.'
+  };
+}
 
 export async function registerCommunicationGapRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
   const auth=async(request:FastifyRequest,reply:any)=>{const token=request.cookies.access_token;if(!token)return reply.code(401).send({error:'UNAUTHENTICATED'});try{const decoded=jwt.verify(token,jwtSecret) as jwt.JwtPayload;if(typeof decoded.sub!=='string')throw new Error('invalid');const ctx=await loadAuthorizationContext(pool,decoded.sub);if(!ctx?.active)return reply.code(403).send({error:'ACCOUNT_INACTIVE'});request.communicationGapAuth=ctx}catch{return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'})}};
@@ -25,8 +72,8 @@ export async function registerCommunicationGapRoutes(app:FastifyInstance,pool:Po
     const {days,limit,threshold}=parsed.data;
     const external=(await pool.query<ExternalSignal>(`SELECT pa.id,pa.title,pa.summary,pa.body_text,pa.sentiment,pa.risk_score,pa.importance_score,pe.edition_date::text,ms.name source_name,pa.opd_id,o.name opd_name FROM print_articles pa JOIN print_editions pe ON pe.id=pa.edition_id JOIN media_sources ms ON ms.id=pe.source_id LEFT JOIN opd o ON o.id=pa.opd_id WHERE pa.status IN ('verified','analyzed') AND pe.edition_date >= CURRENT_DATE-$1::int ORDER BY pa.risk_score DESC,pa.importance_score DESC,pe.edition_date DESC LIMIT $2`,[days,limit])).rows;
     const clusters=(await pool.query<OwnedCluster>(`SELECT occ.id,occ.canonical_title,occ.member_count,occ.channel_count,occ.first_published_at,occ.last_published_at,sm.title representative_title,sm.content representative_content FROM owned_content_clusters occ LEFT JOIN social_mentions sm ON sm.id=occ.representative_mention_id WHERE COALESCE(occ.last_published_at,occ.first_published_at,now()) >= now()-($1::text||' days')::interval ORDER BY occ.last_published_at DESC NULLS LAST`,[String(days+3)])).rows;
-    const gaps=external.map(s=>{let best:OwnedCluster|null=null,bestScore=0;for(const c of clusters){const score=similarity(s,c);if(score>bestScore){best=c;bestScore=score}}const matched=best&&bestScore>=threshold;const channels=matched?Number(best!.channel_count||0):0;const status=!matched?'gap':channels>1?'amplified':'partial';return{external:{id:s.id,title:s.title,sourceName:s.source_name,editionDate:s.edition_date,sentiment:s.sentiment,riskScore:Number(s.risk_score||0),importanceScore:Number(s.importance_score||0),opdId:s.opd_id,opdName:s.opd_name},response:matched?{clusterId:best!.id,title:best!.canonical_title||best!.representative_title,channelCount:channels,publicationCount:Number(best!.member_count||0),similarity:Number(bestScore.toFixed(4)),firstPublishedAt:best!.first_published_at,lastPublishedAt:best!.last_published_at}:null,status,priority:priority(s,status)} }).sort((a,b)=>{const p:any={critical:4,high:3,medium:2,watch:1};return p[b.priority]-p[a.priority]||b.external.riskScore-a.external.riskScore});
-    const summary={externalSignals:gaps.length,gaps:gaps.filter(x=>x.status==='gap').length,partial:gaps.filter(x=>x.status==='partial').length,amplified:gaps.filter(x=>x.status==='amplified').length,highPriority:gaps.filter(x=>x.priority==='high'||x.priority==='critical').length,windowDays:days,threshold};
-    return{data:{summary,items:gaps,engine:'communication-gap-rule-v1-print-vs-owned'}};
+    const gaps=external.map(s=>{let best:OwnedCluster|null=null,bestScore=0;for(const c of clusters){const score=similarity(s,c);if(score>bestScore){best=c;bestScore=score}}const matched=best&&bestScore>=threshold;const matchedCluster=matched?best:null;const channels=matchedCluster?Number(matchedCluster.channel_count||0):0;const status=!matchedCluster?'gap':channels>1?'amplified':'partial';const p=priority(s,status);return{external:{id:s.id,title:s.title,sourceName:s.source_name,editionDate:s.edition_date,sentiment:s.sentiment,riskScore:Number(s.risk_score||0),importanceScore:Number(s.importance_score||0),opdId:s.opd_id,opdName:s.opd_name},response:matchedCluster?{clusterId:matchedCluster.id,title:matchedCluster.canonical_title||matchedCluster.representative_title,channelCount:channels,publicationCount:Number(matchedCluster.member_count||0),similarity:Number(bestScore.toFixed(4)),firstPublishedAt:matchedCluster.first_published_at,lastPublishedAt:matchedCluster.last_published_at}:null,status,priority:p,recommendation:operationalRecommendation(s,status,p,matchedCluster)} }).sort((a,b)=>{const p:any={critical:4,high:3,medium:2,watch:1};return p[b.priority]-p[a.priority]||b.external.riskScore-a.external.riskScore});
+    const summary={externalSignals:gaps.length,gaps:gaps.filter(x=>x.status==='gap').length,partial:gaps.filter(x=>x.status==='partial').length,amplified:gaps.filter(x=>x.status==='amplified').length,highPriority:gaps.filter(x=>x.priority==='high'||x.priority==='critical').length,actionRequired:gaps.filter(x=>x.status!=='amplified'&&(x.priority==='critical'||x.priority==='high'||x.priority==='medium')).length,windowDays:days,threshold};
+    return{data:{summary,items:gaps,engine:'communication-gap-rule-v1.1-operational-response'}};
   });
 }
