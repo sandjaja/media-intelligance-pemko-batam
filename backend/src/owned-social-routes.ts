@@ -44,15 +44,20 @@ export async function registerOwnedSocialRoutes(app: FastifyInstance, pool: Pool
     profileUrl: z.string().trim().url().max(1000).optional().or(z.literal('')),
     accountType: z.enum(['primary','supporting']).default('supporting'),
     active: z.boolean().default(true),
+    isPrimarySource: z.boolean().default(false),
   }).superRefine((data, ctx) => {
     if (data.platform === 'website' && !data.profileUrl) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['profileUrl'], message: 'Website resmi wajib memiliki URL.' });
+    }
+    if (data.opdId && data.isPrimarySource) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['isPrimarySource'], message: 'Sumber utama Pemko hanya dapat digunakan oleh kanal Pemko/lintas OPD.' });
     }
   });
 
   app.get('/api/admin/owned-social-accounts', { preHandler: auth }, async () => {
     const { rows } = await pool.query(
-      `SELECT a.id,a.opd_id,a.platform,a.account_name,a.handle,a.profile_url,a.account_type,a.active,a.created_at,a.updated_at,
+      `SELECT a.id,a.opd_id,a.platform,a.account_name,a.handle,a.profile_url,a.account_type,a.active,
+              a.ownership_level,a.is_primary_source,a.source_priority,a.created_at,a.updated_at,
               o.name AS opd_name,o.code AS opd_code
        FROM owned_social_accounts a
        LEFT JOIN opd o ON o.id=a.opd_id
@@ -65,14 +70,17 @@ export async function registerOwnedSocialRoutes(app: FastifyInstance, pool: Pool
     const parsed = accountInput.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'INVALID_OWNED_SOCIAL_ACCOUNT', details: parsed.error.flatten() });
     if (parsed.data.opdId && !(await pool.query(`SELECT id FROM opd WHERE id=$1`, [parsed.data.opdId])).rows[0]) return reply.code(404).send({ error: 'OPD_NOT_FOUND' });
+    const ownershipLevel = parsed.data.opdId ? 'opd' : 'pemko';
+    const isPrimarySource = ownershipLevel === 'pemko' && parsed.data.isPrimarySource;
+    const sourcePriority = ownershipLevel === 'pemko' ? 100 : 10;
     try {
       const { rows } = await pool.query(
-        `INSERT INTO owned_social_accounts(opd_id,platform,account_name,handle,profile_url,account_type,active)
-         VALUES($1,$2,$3,$4,$5,$6,$7)
-         RETURNING id,opd_id,platform,account_name,handle,profile_url,account_type,active,created_at,updated_at`,
-        [parsed.data.opdId ?? null, parsed.data.platform, parsed.data.accountName, parsed.data.handle, parsed.data.profileUrl || null, parsed.data.accountType, parsed.data.active],
+        `INSERT INTO owned_social_accounts(opd_id,platform,account_name,handle,profile_url,account_type,active,ownership_level,is_primary_source,source_priority)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+         RETURNING id,opd_id,platform,account_name,handle,profile_url,account_type,active,ownership_level,is_primary_source,source_priority,created_at,updated_at`,
+        [parsed.data.opdId ?? null, parsed.data.platform, parsed.data.accountName, parsed.data.handle, parsed.data.profileUrl || null, parsed.data.accountType, parsed.data.active, ownershipLevel, isPrimarySource, sourcePriority],
       );
-      await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'OWNED_SOCIAL_ACCOUNT_CREATED',$2)`, [(request as any).ownedSocialAdminUserId, { accountId: rows[0].id, platform: rows[0].platform, handle: rows[0].handle }]);
+      await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'OWNED_SOCIAL_ACCOUNT_CREATED',$2)`, [(request as any).ownedSocialAdminUserId, { accountId: rows[0].id, platform: rows[0].platform, handle: rows[0].handle, ownershipLevel, isPrimarySource }]);
       return reply.code(201).send({ data: rows[0] });
     } catch (error: any) {
       if (error?.code === '23505') return reply.code(409).send({ error: 'OWNED_SOCIAL_ACCOUNT_ALREADY_EXISTS' });
@@ -94,18 +102,23 @@ export async function registerOwnedSocialRoutes(app: FastifyInstance, pool: Pool
       profileUrl: parsed.data.profileUrl === '' ? null : (parsed.data.profileUrl ?? current.profile_url),
       accountType: parsed.data.accountType ?? current.account_type,
       active: parsed.data.active ?? current.active,
+      isPrimarySource: parsed.data.isPrimarySource ?? current.is_primary_source,
     };
     if (next.platform === 'website' && !next.profileUrl) return reply.code(400).send({ error: 'WEBSITE_URL_REQUIRED' });
     if (next.opdId && !(await pool.query(`SELECT id FROM opd WHERE id=$1`, [next.opdId])).rows[0]) return reply.code(404).send({ error: 'OPD_NOT_FOUND' });
+    const ownershipLevel = next.opdId ? 'opd' : 'pemko';
+    if (ownershipLevel === 'opd') next.isPrimarySource = false;
+    const sourcePriority = ownershipLevel === 'pemko' ? 100 : 10;
     try {
       const { rows } = await pool.query(
         `UPDATE owned_social_accounts
-         SET opd_id=$1,platform=$2,account_name=$3,handle=$4,profile_url=$5,account_type=$6,active=$7,updated_at=now()
-         WHERE id=$8
-         RETURNING id,opd_id,platform,account_name,handle,profile_url,account_type,active,created_at,updated_at`,
-        [next.opdId, next.platform, next.accountName, next.handle, next.profileUrl, next.accountType, next.active, id.data.id],
+         SET opd_id=$1,platform=$2,account_name=$3,handle=$4,profile_url=$5,account_type=$6,active=$7,
+             ownership_level=$8,is_primary_source=$9,source_priority=$10,updated_at=now()
+         WHERE id=$11
+         RETURNING id,opd_id,platform,account_name,handle,profile_url,account_type,active,ownership_level,is_primary_source,source_priority,created_at,updated_at`,
+        [next.opdId, next.platform, next.accountName, next.handle, next.profileUrl, next.accountType, next.active, ownershipLevel, next.isPrimarySource, sourcePriority, id.data.id],
       );
-      await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'OWNED_SOCIAL_ACCOUNT_UPDATED',$2)`, [(request as any).ownedSocialAdminUserId, { accountId: id.data.id }]);
+      await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'OWNED_SOCIAL_ACCOUNT_UPDATED',$2)`, [(request as any).ownedSocialAdminUserId, { accountId: id.data.id, ownershipLevel, isPrimarySource: next.isPrimarySource }]);
       return { data: rows[0] };
     } catch (error: any) {
       if (error?.code === '23505') return reply.code(409).send({ error: 'OWNED_SOCIAL_ACCOUNT_ALREADY_EXISTS' });
