@@ -35,7 +35,7 @@ function init(){
     const old=btn.innerHTML;btn.disabled=true;btn.innerHTML='<i class="fa-solid fa-spinner fa-spin mr-1"></i>Menyinkronkan...';
     showStatus('warning','Sinkronisasi sedang berjalan',`${name} sedang diperiksa dan artikel terbaru sedang diproses.`);
     try{
-      const result=(await api(`/social/ingestion/website/${accountId}`,{method:'POST'})).data||{};
+      const result=(await api(`/social/ingestion/website/${accountId}`,{method:'POST',body:'{}'})).data||{};
       const fetched=Number(result.fetched||0),succeeded=Number(result.succeeded||0),failed=Number(result.failed||0);
       const source=result.feedUrl?` Sumber: ${result.feedUrl}`:'';
       if(failed===0){
