@@ -22,16 +22,15 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_owned_social_source_hierarchy
   ON owned_social_accounts(active, is_primary_source, source_priority DESC, platform);
 
--- Existing rows already model Pemko/lintas OPD with opd_id IS NULL.
+-- Existing rows with no OPD owner represent Pemko/lintas OPD official channels.
+-- They are authoritative primary sources across website and social platforms.
 UPDATE owned_social_accounts
 SET ownership_level = CASE WHEN opd_id IS NULL THEN 'pemko' ELSE 'opd' END,
+    is_primary_source = CASE WHEN opd_id IS NULL THEN true ELSE false END,
     source_priority = CASE WHEN opd_id IS NULL THEN GREATEST(source_priority,100) ELSE source_priority END
-WHERE ownership_level = 'opd' OR source_priority = 10;
+WHERE ownership_level = 'opd'
+   OR source_priority = 10
+   OR opd_id IS NULL;
 
--- Backward-compatible bootstrap only. Administrators can later move primary status
--- to a replacement website/account without changing clustering code.
-UPDATE owned_social_accounts
-SET is_primary_source = true,
-    ownership_level = 'pemko',
-    source_priority = GREATEST(source_priority,100)
-WHERE lower(handle) = 'mediacenter.batam.go.id';
+-- Primary-source status is data-driven. If Pemko replaces any website/social account,
+-- administrators only need to update ownership/is_primary_source/source_priority.
