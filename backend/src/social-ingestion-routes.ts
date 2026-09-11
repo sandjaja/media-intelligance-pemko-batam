@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { hasPermission, loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { ingestSocialBatch, type SocialCandidate } from './social-collector.js';
+import { collectOwnedWebsiteAccount } from './website-collector.js';
 
 declare module 'fastify' { interface FastifyRequest { socialIngestAuth?: AuthorizationContext } }
 
@@ -61,6 +62,22 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
     return reply.code(result.failed?207:201).send({data:result});
   });
 
+  app.post('/api/social/ingestion/website/:accountId',{preHandler:[auth,requireWrite]},async(request,reply)=>{
+    const accountId=z.coerce.number().int().positive().safeParse((request.params as any).accountId);
+    if(!accountId.success)return reply.code(400).send({error:'INVALID_ACCOUNT_ID'});
+    const ctx=request.socialIngestAuth!;
+    const account=(await pool.query(`SELECT id,opd_id FROM owned_social_accounts WHERE id=$1 AND platform='website' AND active=true LIMIT 1`,[accountId.data])).rows[0];
+    if(!account)return reply.code(404).send({error:'WEBSITE_ACCOUNT_NOT_FOUND'});
+    if(!canReadAll(ctx)&&String(account.opd_id??'')!==String(ctx.opdId??''))return reply.code(403).send({error:'FORBIDDEN'});
+    try{
+      const result=await collectOwnedWebsiteAccount(pool,accountId.data);
+      await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'WEBSITE_SOCIAL_INGEST',$2::jsonb)`,[ctx.id,JSON.stringify({accountId:accountId.data,feedUrl:result.feedUrl,fetched:result.fetched,succeeded:result.succeeded,failed:result.failed})]);
+      return reply.code(result.failed?207:201).send({data:result});
+    }catch(error){
+      return reply.code(422).send({error:'WEBSITE_INGEST_FAILED',message:error instanceof Error?error.message:String(error)});
+    }
+  });
+
   app.get('/api/social/ingestion/status',{preHandler:auth},async(request)=>{
     const ctx=request.socialIngestAuth!;
     const params:unknown[]=[];
@@ -78,12 +95,13 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
     return {
       ownedAccounts:accounts.rows,
       providers:{
-        meta:{configured:Boolean(process.env.META_ACCESS_TOKEN),platforms:['instagram','facebook']},
+        website:{configured:true,platforms:['website'],mode:'rss-atom-autodiscovery'},
+        meta:{configured:Boolean(process.env.META_ACCESS_TOKEN),platforms:['instagram','facebook','threads']},
         youtube:{configured:Boolean(process.env.YOUTUBE_API_KEY),platforms:['youtube']},
         x:{configured:Boolean(process.env.X_BEARER_TOKEN),platforms:['x']},
         tiktok:{configured:Boolean(process.env.TIKTOK_ACCESS_TOKEN),platforms:['tiktok']},
       },
-      note:'Batch ingestion is active. Automatic provider collection requires provider credentials and adapter configuration.'
+      note:'Batch ingestion and website RSS/Atom collection are active. Other automatic provider collection requires provider credentials and adapter configuration.'
     };
   });
 }
