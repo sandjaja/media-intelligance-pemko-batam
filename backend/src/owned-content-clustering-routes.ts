@@ -39,12 +39,12 @@ export async function registerOwnedContentClusteringRoutes(app: FastifyInstance,
     const accounts=(await pool.query(`SELECT id,account_name FROM owned_social_accounts WHERE active=true AND platform='website'${scope} ORDER BY is_primary_source DESC,source_priority DESC,id ASC`,params)).rows;
     const settled=await Promise.allSettled(accounts.map(async account=>{
       const sync=await collectOwnedWebsiteAccount(pool,Number(account.id));
-      return {accountId:Number(account.id),accountName:account.account_name,ok:true,...sync};
+      return {ok:true as const,...sync};
     }));
     const websiteSync=settled.map((entry,index)=>entry.status==='fulfilled'
       ?entry.value
-      :{accountId:Number(accounts[index].id),accountName:accounts[index].account_name,ok:false,error:entry.reason instanceof Error?entry.reason.message:String(entry.reason)});
-    websiteSync.filter(x=>!x.ok).forEach(x=>app.log.warn({accountId:x.accountId,error:x.error},'Owned website refresh failed'));
+      :{accountId:Number(accounts[index].id),accountName:accounts[index].account_name,ok:false as const,error:entry.reason instanceof Error?entry.reason.message:String(entry.reason)});
+    websiteSync.forEach(x=>{if(!x.ok&&'error' in x)app.log.warn({accountId:x.accountId,error:x.error},'Owned website refresh failed')});
     const result=await rebuildOwnedContentClusters(pool);
     const payload={...result,websiteSync};
     await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'OWNED_CONTENT_CLUSTER_REBUILD',$2::jsonb)`,[ctx.id,JSON.stringify(payload)]);
