@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
+import { z } from 'zod';
 import { hasPermission, loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { rebuildOwnedContentClusters } from './owned-content-clustering.js';
 import { collectOwnedWebsiteAccount } from './website-collector.js';
@@ -9,71 +10,65 @@ declare module 'fastify' { interface FastifyRequest { ownedClusterAuth?: Authori
 
 export async function registerOwnedContentClusteringRoutes(app: FastifyInstance, pool: Pool, jwtSecret: string) {
   const auth = async (request: FastifyRequest, reply: any) => {
-    const token = request.cookies.access_token;
-    if (!token) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
-    try {
-      const decoded = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
-      if (typeof decoded.sub !== 'string') throw new Error('invalid');
-      const ctx = await loadAuthorizationContext(pool, decoded.sub);
-      if (!ctx?.active) return reply.code(403).send({ error: 'ACCOUNT_INACTIVE' });
-      request.ownedClusterAuth = ctx;
-    } catch {
-      return reply.code(401).send({ error: 'INVALID_ACCESS_TOKEN' });
-    }
+    const token=request.cookies.access_token;
+    if(!token)return reply.code(401).send({error:'UNAUTHENTICATED'});
+    try{
+      const decoded=jwt.verify(token,jwtSecret) as jwt.JwtPayload;
+      if(typeof decoded.sub!=='string')throw new Error('invalid');
+      const ctx=await loadAuthorizationContext(pool,decoded.sub);
+      if(!ctx?.active)return reply.code(403).send({error:'ACCOUNT_INACTIVE'});
+      request.ownedClusterAuth=ctx;
+    }catch{return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'});}
   };
-
-  const requireWrite = async (request: FastifyRequest, reply: any) => {
+  const requireWrite=async(request:FastifyRequest,reply:any)=>{
     const ctx=request.ownedClusterAuth!;
-    if(!hasPermission(ctx,'intelligence.write')&&!hasPermission(ctx,'platform.admin')) return reply.code(403).send({error:'FORBIDDEN'});
+    if(!hasPermission(ctx,'intelligence.write')&&!hasPermission(ctx,'platform.admin'))return reply.code(403).send({error:'FORBIDDEN'});
   };
   const canReadAll=(ctx:AuthorizationContext)=>hasPermission(ctx,'platform.admin')||hasPermission(ctx,'intelligence.read.all');
+  const canCurate=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
+  const requireCurator=async(request:FastifyRequest,reply:any)=>{if(!canCurate(request.ownedClusterAuth!))return reply.code(403).send({error:'CURATION_FORBIDDEN'});};
 
   app.post('/api/social/owned-clusters/rebuild',{preHandler:[auth,requireWrite]},async(request)=>{
-    const ctx=request.ownedClusterAuth!;
-    const params:unknown[]=[];
-    let scope='';
-    if(!canReadAll(ctx)){
-      if(!ctx.opdId) scope=' AND 1=0';
-      else { params.push(ctx.opdId); scope=` AND opd_id=$${params.length}`; }
-    }
+    const ctx=request.ownedClusterAuth!,params:unknown[]=[];let scope='';
+    if(!canReadAll(ctx)){if(!ctx.opdId)scope=' AND 1=0';else{params.push(ctx.opdId);scope=` AND opd_id=$${params.length}`;}}
     const accounts=(await pool.query(`SELECT id,account_name FROM owned_social_accounts WHERE active=true AND platform='website'${scope} ORDER BY is_primary_source DESC,source_priority DESC,id ASC`,params)).rows;
-    const settled=await Promise.allSettled(accounts.map(async account=>{
-      const sync=await collectOwnedWebsiteAccount(pool,Number(account.id));
-      return {ok:true as const,...sync};
-    }));
-    const websiteSync=settled.map((entry,index)=>entry.status==='fulfilled'
-      ?entry.value
-      :{accountId:Number(accounts[index].id),accountName:accounts[index].account_name,ok:false as const,error:entry.reason instanceof Error?entry.reason.message:String(entry.reason)});
+    const settled=await Promise.allSettled(accounts.map(async account=>({ok:true as const,...await collectOwnedWebsiteAccount(pool,Number(account.id))})));
+    const websiteSync=settled.map((entry,index)=>entry.status==='fulfilled'?entry.value:{accountId:Number(accounts[index].id),accountName:accounts[index].account_name,ok:false as const,error:entry.reason instanceof Error?entry.reason.message:String(entry.reason)});
     websiteSync.forEach(x=>{if(!x.ok&&'error' in x)app.log.warn({accountId:x.accountId,error:x.error},'Owned website refresh failed')});
-    const result=await rebuildOwnedContentClusters(pool);
-    const payload={...result,websiteSync};
+    const result=await rebuildOwnedContentClusters(pool),payload={...result,websiteSync};
     await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'OWNED_CONTENT_CLUSTER_REBUILD',$2::jsonb)`,[ctx.id,JSON.stringify(payload)]);
     return{data:payload};
   });
 
-  app.get('/api/social/owned-publications',{preHandler:auth},async(request)=>{
+  app.get('/api/social/owned-curation',{preHandler:[auth,requireCurator]},async(request)=>{
+    const q=request.query as Record<string,unknown>;
+    const status=['candidate','approved','ignored'].includes(String(q.status))?String(q.status):'candidate';
+    const limit=Math.max(1,Math.min(200,Number(q.limit)||100));
+    const params:unknown[]=[status,limit];
+    const {rows}=await pool.query(`SELECT sm.id,sm.title,sm.content,sm.canonical_url,sm.platform,sm.published_at,sm.captured_at,sm.curation_status,sm.curation_reason,sm.curated_at,sm.curated_by,sm.opd_id,o.name opd_name,osa.account_name owned_account_name FROM social_mentions sm LEFT JOIN opd o ON o.id=sm.opd_id LEFT JOIN owned_social_accounts osa ON osa.id=sm.owned_account_id WHERE sm.source_kind='owned' AND sm.curation_status=$1 ORDER BY COALESCE(sm.published_at,sm.captured_at,sm.created_at) DESC NULLS LAST,sm.id DESC LIMIT $2`,params);
+    return{data:rows,status};
+  });
+
+  app.post('/api/social/owned-curation/:id',{preHandler:[auth,requireCurator]},async(request,reply)=>{
+    const id=z.coerce.number().int().positive().safeParse((request.params as any).id);
+    const body=z.object({status:z.enum(['candidate','approved','ignored']),reason:z.string().trim().max(1000).optional().nullable()}).safeParse(request.body);
+    if(!id.success||!body.success)return reply.code(400).send({error:'INVALID_REQUEST'});
     const ctx=request.ownedClusterAuth!;
-    const query=request.query as Record<string,unknown>;
+    const {rows}=await pool.query(`UPDATE social_mentions SET curation_status=$2,curated_by=$3,curated_at=now(),curation_reason=$4,updated_at=now() WHERE id=$1 AND source_kind='owned' RETURNING id,title,canonical_url,curation_status,curation_reason,curated_at`,[id.data,body.data.status,ctx.id,body.data.reason??null]);
+    if(!rows[0])return reply.code(404).send({error:'OWNED_PUBLICATION_NOT_FOUND'});
+    const clustering=await rebuildOwnedContentClusters(pool);
+    await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'OWNED_PUBLICATION_CURATED',$2::jsonb)`,[ctx.id,JSON.stringify({mentionId:id.data,status:body.data.status,reason:body.data.reason??null})]);
+    return{data:rows[0],clustering};
+  });
+
+  app.get('/api/social/owned-publications',{preHandler:auth},async(request)=>{
+    const ctx=request.ownedClusterAuth!,query=request.query as Record<string,unknown>;
     const limit=Math.max(1,Math.min(200,Number(query?.limit)||100));
     const requestedOpd=typeof query?.opdId==='string'&&/^\d+$/.test(query.opdId)?query.opdId:null;
-    const params:unknown[]=[];
-    const where=[`sm.source_kind='owned'`];
-    if(canReadAll(ctx)){
-      if(requestedOpd){params.push(requestedOpd);where.push(`sm.opd_id=$${params.length}`);}
-    }else if(ctx.opdId){
-      params.push(ctx.opdId);where.push(`sm.opd_id=$${params.length}`);
-    }else where.push('1=0');
+    const params:unknown[]=[],where=[`sm.source_kind='owned'`,`COALESCE(sm.curation_status,'approved')='approved'`];
+    if(canReadAll(ctx)){if(requestedOpd){params.push(requestedOpd);where.push(`sm.opd_id=$${params.length}`);}}else if(ctx.opdId){params.push(ctx.opdId);where.push(`sm.opd_id=$${params.length}`);}else where.push('1=0');
     params.push(limit);
-    const {rows}=await pool.query(
-      `SELECT sm.*,o.name opd_name,osa.account_name owned_account_name,osa.handle owned_account_handle
-         FROM social_mentions sm
-         LEFT JOIN opd o ON o.id=sm.opd_id
-         LEFT JOIN owned_social_accounts osa ON osa.id=sm.owned_account_id
-        WHERE ${where.join(' AND ')}
-        ORDER BY COALESCE(sm.published_at,sm.captured_at,sm.created_at) DESC NULLS LAST,sm.id DESC
-        LIMIT $${params.length}`,
-      params,
-    );
+    const {rows}=await pool.query(`SELECT sm.*,o.name opd_name,osa.account_name owned_account_name,osa.handle owned_account_handle FROM social_mentions sm LEFT JOIN opd o ON o.id=sm.opd_id LEFT JOIN owned_social_accounts osa ON osa.id=sm.owned_account_id WHERE ${where.join(' AND ')} ORDER BY COALESCE(sm.published_at,sm.captured_at,sm.created_at) DESC NULLS LAST,sm.id DESC LIMIT $${params.length}`,params);
     return{data:rows};
   });
 
