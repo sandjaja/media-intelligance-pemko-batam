@@ -2,7 +2,6 @@ import type { Pool } from 'pg';
 
 export const NORMALIZED_ROLES = [
   'super_admin',
-  'command_center_analyst',
   'humas',
   'executive',
   'opd',
