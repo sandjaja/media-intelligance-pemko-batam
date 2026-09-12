@@ -14,7 +14,7 @@ export async function registerOwnedContentClusteringRoutes(app: FastifyInstance,
     try{const decoded=jwt.verify(token,jwtSecret) as jwt.JwtPayload;if(typeof decoded.sub!=='string')throw new Error('invalid');const ctx=await loadAuthorizationContext(pool,decoded.sub);if(!ctx?.active)return reply.code(403).send({error:'ACCOUNT_INACTIVE'});request.ownedClusterAuth=ctx;}catch{return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'});}
   };
   const requireWrite=async(request:FastifyRequest,reply:any)=>{const ctx=request.ownedClusterAuth!;if(!hasPermission(ctx,'intelligence.write')&&!hasPermission(ctx,'platform.admin'))return reply.code(403).send({error:'FORBIDDEN'});};
-  const canReadAll=(ctx:AuthorizationContext)=>hasPermission(ctx,'platform.admin')||hasPermission(ctx,'intelligence.read.all');
+  const canReadAll=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas')||ctx.roles.includes('executive')||hasPermission(ctx,'platform.admin')||hasPermission(ctx,'intelligence.read.all');
   const canCurate=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
   const requireCurator=async(request:FastifyRequest,reply:any)=>{if(!canCurate(request.ownedClusterAuth!))return reply.code(403).send({error:'CURATION_FORBIDDEN'});};
 
