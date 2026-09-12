@@ -26,32 +26,55 @@ export async function registerOwnedContentClusteringRoutes(app: FastifyInstance,
     const ctx=request.ownedClusterAuth!;
     if(!hasPermission(ctx,'intelligence.write')&&!hasPermission(ctx,'platform.admin')) return reply.code(403).send({error:'FORBIDDEN'});
   };
+  const canReadAll=(ctx:AuthorizationContext)=>hasPermission(ctx,'platform.admin')||hasPermission(ctx,'intelligence.read.all');
 
   app.post('/api/social/owned-clusters/rebuild',{preHandler:[auth,requireWrite]},async(request)=>{
     const ctx=request.ownedClusterAuth!;
-    const canReadAll=hasPermission(ctx,'platform.admin')||hasPermission(ctx,'intelligence.read.all');
     const params:unknown[]=[];
     let scope='';
-    if(!canReadAll){
+    if(!canReadAll(ctx)){
       if(!ctx.opdId) scope=' AND 1=0';
       else { params.push(ctx.opdId); scope=` AND opd_id=$${params.length}`; }
     }
     const accounts=(await pool.query(`SELECT id,account_name FROM owned_social_accounts WHERE active=true AND platform='website'${scope} ORDER BY is_primary_source DESC,source_priority DESC,id ASC`,params)).rows;
-    const websiteSync:any[]=[];
-    for(const account of accounts){
-      try{
-        const sync=await collectOwnedWebsiteAccount(pool,Number(account.id));
-        websiteSync.push({accountId:Number(account.id),accountName:account.account_name,ok:true,...sync});
-      }catch(error){
-        const message=error instanceof Error?error.message:String(error);
-        websiteSync.push({accountId:Number(account.id),accountName:account.account_name,ok:false,error:message});
-        app.log.warn({err:error,accountId:account.id},'Owned website refresh failed');
-      }
-    }
+    const settled=await Promise.allSettled(accounts.map(async account=>{
+      const sync=await collectOwnedWebsiteAccount(pool,Number(account.id));
+      return {accountId:Number(account.id),accountName:account.account_name,ok:true,...sync};
+    }));
+    const websiteSync=settled.map((entry,index)=>entry.status==='fulfilled'
+      ?entry.value
+      :{accountId:Number(accounts[index].id),accountName:accounts[index].account_name,ok:false,error:entry.reason instanceof Error?entry.reason.message:String(entry.reason)});
+    websiteSync.filter(x=>!x.ok).forEach(x=>app.log.warn({accountId:x.accountId,error:x.error},'Owned website refresh failed'));
     const result=await rebuildOwnedContentClusters(pool);
     const payload={...result,websiteSync};
     await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'OWNED_CONTENT_CLUSTER_REBUILD',$2::jsonb)`,[ctx.id,JSON.stringify(payload)]);
     return{data:payload};
+  });
+
+  app.get('/api/social/owned-publications',{preHandler:auth},async(request)=>{
+    const ctx=request.ownedClusterAuth!;
+    const query=request.query as Record<string,unknown>;
+    const limit=Math.max(1,Math.min(200,Number(query?.limit)||100));
+    const requestedOpd=typeof query?.opdId==='string'&&/^\d+$/.test(query.opdId)?query.opdId:null;
+    const params:unknown[]=[];
+    const where=[`sm.source_kind='owned'`];
+    if(canReadAll(ctx)){
+      if(requestedOpd){params.push(requestedOpd);where.push(`sm.opd_id=$${params.length}`);}
+    }else if(ctx.opdId){
+      params.push(ctx.opdId);where.push(`sm.opd_id=$${params.length}`);
+    }else where.push('1=0');
+    params.push(limit);
+    const {rows}=await pool.query(
+      `SELECT sm.*,o.name opd_name,osa.account_name owned_account_name,osa.handle owned_account_handle
+         FROM social_mentions sm
+         LEFT JOIN opd o ON o.id=sm.opd_id
+         LEFT JOIN owned_social_accounts osa ON osa.id=sm.owned_account_id
+        WHERE ${where.join(' AND ')}
+        ORDER BY COALESCE(sm.published_at,sm.captured_at,sm.created_at) DESC NULLS LAST,sm.id DESC
+        LIMIT $${params.length}`,
+      params,
+    );
+    return{data:rows};
   });
 
   app.get('/api/social/owned-clusters',{preHandler:auth},async()=>{
