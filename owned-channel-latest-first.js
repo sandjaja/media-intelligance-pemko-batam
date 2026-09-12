@@ -8,12 +8,32 @@
     const t=raw?Date.parse(raw):0;
     return Number.isFinite(t)?t:0;
   };
+  const ownedVisible=()=>{
+    const el=document.getElementById('ownedchannels');
+    return Boolean(el&&!el.classList.contains('hidden'));
+  };
   window.fetch=async function(input,init){
-    const response=await originalFetch(input,init);
+    let requestInput=input;
     try{
-      const url=typeof input==='string'?input:(input?.url||'');
+      const rawUrl=typeof input==='string'?input:(input?.url||'');
       const method=(init?.method||(typeof input!=='string'&&input?.method)||'GET').toUpperCase();
-      if(method==='GET'&&/\/api\/social\/mentions(?:\?|$)/.test(url)){
+      if(method==='GET'&&ownedVisible()&&/\/api\/social\/mentions(?:\?|$)/.test(rawUrl)){
+        const parsed=new URL(rawUrl,window.location.origin);
+        const q=new URLSearchParams();
+        q.set('limit',parsed.searchParams.get('limit')||'100');
+        const opdId=parsed.searchParams.get('opdId');
+        if(opdId)q.set('opdId',opdId);
+        q.set('_ts',String(Date.now()));
+        requestInput=`/api/social/owned-publications?${q.toString()}`;
+      }
+    }catch(error){
+      console.warn('Owned latest-first route normalization skipped',error);
+    }
+    const response=await originalFetch(requestInput,init);
+    try{
+      const url=typeof requestInput==='string'?requestInput:(requestInput?.url||'');
+      const method=(init?.method||(typeof requestInput!=='string'&&requestInput?.method)||'GET').toUpperCase();
+      if(method==='GET'&&/\/api\/social\/(?:mentions|owned-publications)(?:\?|$)/.test(url)){
         const clone=response.clone();
         const body=await clone.json();
         if(Array.isArray(body?.data)){
