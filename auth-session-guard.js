@@ -30,7 +30,6 @@ async function refreshAccess(){
       return r.ok;
     }catch{return false}
   })();
-  // Keep one shared refresh result alive long enough for all startup API calls.
   refreshPromise.finally(()=>setTimeout(()=>{refreshPromise=null},1500));
   return refreshPromise;
 }
@@ -43,9 +42,6 @@ window.fetch=async function(input,init={}){
   const refreshed=await refreshAccess();
   if(!refreshed)return response;
 
-  // Mobile browsers can expose a freshly Set-Cookie'd access token slightly after
-  // the refresh response completes. Retry the ORIGINAL request only; never rotate
-  // the refresh token again during this recovery window.
   for(const delay of [80,180,350]){
     await sleep(delay);
     try{
@@ -56,11 +52,13 @@ window.fetch=async function(input,init={}){
   return response;
 };
 
-// Let auth-ui use the same single-flight refresh owner when needed.
 window.MEDIA_AUTH_REFRESH=refreshAccess;
 
 async function sessionCheck(){
-  if(forceLogin()||document.body?.dataset?.auth==='required'||redirecting)return;
+  // Never run a background session probe while auth-ui is still bootstrapping.
+  // On mobile, focus/visibility events fire during page reload and previously raced
+  // the initial /me request, causing a false redirect to ?auth=login.
+  if(forceLogin()||redirecting||document.body?.dataset?.auth!=='ok')return;
   try{
     const r=await window.fetch(API+'/me',{credentials:'include',cache:'no-store',headers:{'Cache-Control':'no-cache'}});
     if(r.ok){localStorage.removeItem(LOGOUT_KEY);return}
