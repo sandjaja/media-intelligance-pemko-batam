@@ -36,7 +36,7 @@ ON CONFLICT DO NOTHING;
 
 -- Migrate scoped OPD users to the unified role.
 INSERT INTO user_roles(user_id,role_id,opd_id)
-SELECT DISTINCT ur.user_id,target.id,COALESCE(ur.opd_id,u.opd_id)
+SELECT DISTINCT ur.user_id,target.id,COALESCE(ur.opd_id,u.opd_id)::bigint
 FROM user_roles ur
 JOIN roles legacy ON legacy.id=ur.role_id AND legacy.code IN ('opd_admin','opd_analyst')
 JOIN roles target ON target.code='opd'
@@ -47,7 +47,7 @@ ON CONFLICT DO NOTHING;
 -- Any malformed legacy OPD account without OPD scope becomes viewer rather than
 -- silently receiving global access.
 INSERT INTO user_roles(user_id,role_id,opd_id)
-SELECT DISTINCT ur.user_id,target.id,NULL
+SELECT DISTINCT ur.user_id,target.id,NULL::bigint
 FROM user_roles ur
 JOIN roles legacy ON legacy.id=ur.role_id AND legacy.code IN ('opd_admin','opd_analyst')
 JOIN roles target ON target.code='viewer'
