@@ -5,13 +5,12 @@
 ALTER TABLE roles ADD COLUMN IF NOT EXISTS scope TEXT NOT NULL DEFAULT 'global';
 ALTER TABLE roles ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
 
-INSERT INTO roles(code,name,description)
-VALUES ('opd','OPD','Pengguna OPD untuk menerima tugas, menyiapkan fakta/data, menyusun respons, dan mengirimkannya ke Humas.')
+INSERT INTO roles(code,name,scope,active)
+VALUES ('opd','OPD','opd',true)
 ON CONFLICT (code) DO UPDATE
 SET name=EXCLUDED.name,
-    description=EXCLUDED.description;
-
-UPDATE roles SET scope='opd', active=true WHERE code='opd';
+    scope='opd',
+    active=true;
 
 -- Preserve the union of capabilities that existing OPD Admin/Analyst users had.
 INSERT INTO role_permissions(role_id,permission_id)
