@@ -35,3 +35,12 @@ test('classifies PAD narrative as supporting fiscal context for APBD without tre
   assert.equal(m.matchType,'supporting_related');
   assert.equal(m.relationLabel,'Konteks fiskal APBD/PAD');
 });
+
+test('does not create fiscal supporting relation from APBD or PAD words buried only in article body',()=>{
+  const m=evaluateCommunicationGapMatch(
+    signal('APBD BATAM 2027 DEFISIT 116 MILIAR','Rancangan APBD 2027 mengalami defisit'),
+    cluster('Batam Innovation Award 2026, Amsakar: Inovasi Harus Berdampak untuk Masyarakat','Dalam sambutan disebut PAD dan pendapatan daerah sebagai salah satu indikator pembangunan.')
+  );
+  assert.equal(m.sameIssue,false);
+  assert.equal(m.relatedIssue,false);
+});
