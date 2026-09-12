@@ -5,8 +5,7 @@ export const NORMALIZED_ROLES = [
   'command_center_analyst',
   'humas',
   'executive',
-  'opd_admin',
-  'opd_analyst',
+  'opd',
   'viewer',
 ] as const;
 
@@ -30,7 +29,7 @@ export function legacyRoleFor(role: NormalizedRole): LegacyRole {
 }
 
 export function roleRequiresOpd(role: NormalizedRole) {
-  return role === 'opd_admin' || role === 'opd_analyst';
+  return role === 'opd';
 }
 
 export async function loadAuthorizationContext(pool: Pool, userId: string): Promise<AuthorizationContext | null> {
@@ -63,12 +62,9 @@ export async function loadAuthorizationContext(pool: Pool, userId: string): Prom
 
 export function hasPermission(context: AuthorizationContext, permission: string) {
   // Backward compatibility: legacy admin accounts are super-admin equivalents.
-  // Some existing accounts were created before normalized user_roles were introduced,
-  // so their roles[] array can legitimately be empty while users.role === 'admin'.
   if (context.legacyRole === 'admin') return true;
   if (context.roles.includes('super_admin')) return true;
-  // Humas is the operational role for the print-media workflow: upload, review,
-  // correct metadata/OCR, verify, and advance clipping status for intelligence processing.
+  // Humas is the operational role for the print-media workflow.
   if (context.roles.includes('humas') && permission === 'intelligence.write') return true;
   return context.permissions.includes(permission);
 }
