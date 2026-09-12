@@ -4,6 +4,7 @@ const LOGOUT_KEY='mi.loggedOut';
 const API=(window.MEDIA_INTELLIGENCE_API||'/api').replace(/\/$/,'');
 const forceLogin=()=>new URLSearchParams(location.search).get('auth')==='login';
 const originalFetch=window.fetch.bind(window);
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let refreshPromise=null;
 let redirecting=false;
 
@@ -28,21 +29,35 @@ async function refreshAccess(){
       const r=await originalFetch(API+'/auth/refresh',{method:'POST',credentials:'include',cache:'no-store',headers:{'Cache-Control':'no-cache'}});
       return r.ok;
     }catch{return false}
-    finally{setTimeout(()=>{refreshPromise=null},250)}
   })();
+  // Keep one shared refresh result alive long enough for all startup API calls.
+  refreshPromise.finally(()=>setTimeout(()=>{refreshPromise=null},1500));
   return refreshPromise;
 }
 
 window.fetch=async function(input,init={}){
   const url=requestUrl(input);
-  const response=await originalFetch(input,init);
+  let response=await originalFetch(input,init);
   if(response.status!==401||!isApi(url)||excluded(url)||forceLogin())return response;
+
   const refreshed=await refreshAccess();
-  if(refreshed){
-    try{return await originalFetch(input,init)}catch{return response}
+  if(!refreshed)return response;
+
+  // Mobile browsers can expose a freshly Set-Cookie'd access token slightly after
+  // the refresh response completes. Retry the ORIGINAL request only; never rotate
+  // the refresh token again during this recovery window.
+  for(const delay of [80,180,350]){
+    await sleep(delay);
+    try{
+      response=await originalFetch(input,init);
+      if(response.status!==401)return response;
+    }catch{}
   }
   return response;
 };
+
+// Let auth-ui use the same single-flight refresh owner when needed.
+window.MEDIA_AUTH_REFRESH=refreshAccess;
 
 async function sessionCheck(){
   if(forceLogin()||document.body?.dataset?.auth==='required'||redirecting)return;
@@ -53,8 +68,6 @@ async function sessionCheck(){
   }catch{}
 }
 
-// IMPORTANT: a normal browser refresh must never be treated as a logout.
-// Session validity is determined by the server-side refresh cookie, not sessionStorage.
 ensureForcedLogin();
 document.addEventListener('submit',e=>{
   if(e.target?.id!=='loginForm')return;
