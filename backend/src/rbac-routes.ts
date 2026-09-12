@@ -69,11 +69,28 @@ export async function registerRbacRoutes(app: FastifyInstance, pool: Pool, jwtSe
     const client=await pool.connect(); try{await client.query('BEGIN');const passwordHash=parsed.data.password?await argon2.hash(parsed.data.password,{type:argon2.argon2id}):current.password_hash;const {rows}=await client.query(`UPDATE users SET email=$1,password_hash=$2,role=$3,active=$4,opd_id=$5 WHERE id=$6 RETURNING id,email,role,active,opd_id,created_at`,[parsed.data.email?.toLowerCase()??current.email,passwordHash,legacyRoleFor(role),parsed.data.active??current.active,opdId,id.data.id]);await client.query(`DELETE FROM user_roles WHERE user_id=$1`,[id.data.id]);await client.query(`INSERT INTO user_roles(user_id,role_id,opd_id) SELECT $1,r.id,$2 FROM roles r WHERE r.code=$3`,[id.data.id,opdId,role]);await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'RBAC_USER_UPDATED',$2)`,[request.authz!.id,{userId:id.data.id,normalizedRole:role,opdId,active:parsed.data.active??current.active}]);await client.query('COMMIT');return{data:{...rows[0],roles:[role]}}}catch(error:any){await client.query('ROLLBACK');if(error?.code==='23505')return reply.code(409).send({error:'USER_ALREADY_EXISTS'});throw error}finally{client.release()}
   });
 
-  app.delete('/api/admin/rbac/users/:id', { preHandler: [authz, requirePermission('users.manage')] }, async (request, reply) => {
+  const deleteUser = async (request: FastifyRequest, reply: any) => {
     const id=z.object({id:z.string().regex(/^\d+$/)}).safeParse(request.params); if(!id.success)return reply.code(400).send({error:'INVALID_USER'});
-    if(id.data.id===request.authz!.id)return reply.code(400).send({error:'CANNOT_DELETE_SELF'});
-    const target=(await pool.query(`SELECT u.id,u.email,EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=u.id AND r.code='super_admin') is_super_admin FROM users u WHERE u.id=$1`,[id.data.id])).rows[0]; if(!target)return reply.code(404).send({error:'USER_NOT_FOUND'});
-    if(target.is_super_admin){const count=Number((await pool.query(`SELECT COUNT(DISTINCT ur.user_id) count FROM user_roles ur JOIN roles r ON r.id=ur.role_id JOIN users u ON u.id=ur.user_id WHERE r.code='super_admin' AND u.active=true`)).rows[0]?.count||0);if(count<=1)return reply.code(400).send({error:'CANNOT_DELETE_LAST_SUPER_ADMIN'});}
-    const client=await pool.connect();try{await client.query('BEGIN');await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'RBAC_USER_DELETED',$2)`,[request.authz!.id,{userId:target.id,email:target.email}]);await client.query(`DELETE FROM users WHERE id=$1`,[id.data.id]);await client.query('COMMIT');return reply.send({data:{id:String(target.id),email:target.email,deleted:true}})}catch(error){await client.query('ROLLBACK');throw error}finally{client.release()}
-  });
+    if(id.data.id===request.authz!.id)return reply.code(400).send({error:'CANNOT_DELETE_SELF',message:'Akun yang sedang digunakan tidak dapat dihapus.'});
+    const target=(await pool.query(`SELECT u.id,u.email,EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=u.id AND r.code='super_admin') is_super_admin FROM users u WHERE u.id=$1`,[id.data.id])).rows[0]; if(!target)return reply.code(404).send({error:'USER_NOT_FOUND',message:'Akun tidak ditemukan atau sudah dihapus.'});
+    if(target.is_super_admin){const count=Number((await pool.query(`SELECT COUNT(DISTINCT ur.user_id) count FROM user_roles ur JOIN roles r ON r.id=ur.role_id JOIN users u ON u.id=ur.user_id WHERE r.code='super_admin' AND u.active=true`)).rows[0]?.count||0);if(count<=1)return reply.code(400).send({error:'CANNOT_DELETE_LAST_SUPER_ADMIN',message:'Super Admin terakhir tidak dapat dihapus.'});}
+    const client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      await client.query(`DELETE FROM refresh_tokens WHERE user_id=$1`,[id.data.id]);
+      await client.query(`DELETE FROM user_roles WHERE user_id=$1`,[id.data.id]);
+      await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'RBAC_USER_DELETED',$2)`,[request.authz!.id,{userId:target.id,email:target.email}]);
+      const result=await client.query(`DELETE FROM users WHERE id=$1 RETURNING id,email`,[id.data.id]);
+      if(!result.rows[0]){await client.query('ROLLBACK');return reply.code(404).send({error:'USER_NOT_FOUND',message:'Akun tidak ditemukan atau sudah dihapus.'});}
+      await client.query('COMMIT');
+      return reply.send({data:{id:String(result.rows[0].id),email:result.rows[0].email,deleted:true}});
+    }catch(error:any){
+      await client.query('ROLLBACK');
+      request.log.error({err:error,userId:id.data.id},'RBAC user deletion failed');
+      return reply.code(500).send({error:'USER_DELETE_FAILED',message:'Akun gagal dihapus. Silakan coba lagi setelah deployment terbaru aktif.'});
+    }finally{client.release()}
+  };
+
+  app.delete('/api/admin/rbac/users/:id', { preHandler: [authz, requirePermission('users.manage')] }, deleteUser);
+  app.post('/api/admin/rbac/users/:id/delete', { preHandler: [authz, requirePermission('users.manage')] }, deleteUser);
 }
