@@ -1,15 +1,13 @@
--- Human review/override for Owned Channel amplification relationships.
--- Automatic clustering remains the default; Humas/Super Admin can override exceptions.
-ALTER TABLE owned_content_cluster_members ADD COLUMN IF NOT EXISTS review_status TEXT;
-ALTER TABLE owned_content_cluster_members ADD COLUMN IF NOT EXISTS reviewed_by BIGINT REFERENCES users(id) ON DELETE SET NULL;
-ALTER TABLE owned_content_cluster_members ADD COLUMN IF NOT EXISTS reviewed_at TIMESTAMPTZ;
-ALTER TABLE owned_content_cluster_members ADD COLUMN IF NOT EXISTS review_reason TEXT;
-
-DO $$ BEGIN
-  ALTER TABLE owned_content_cluster_members ADD CONSTRAINT owned_cluster_member_review_status_check
-    CHECK (review_status IS NULL OR review_status IN ('confirmed','rejected'));
-EXCEPTION WHEN duplicate_object THEN NULL;
-END $$;
-
-CREATE INDEX IF NOT EXISTS idx_owned_cluster_members_review_status
-  ON owned_content_cluster_members(review_status, similarity_score);
+-- Persistent human override for Owned Channel amplification relationships.
+-- Kept outside generated cluster-member rows so refresh/reclustering cannot erase decisions.
+CREATE TABLE IF NOT EXISTS owned_amplification_reviews (
+  mention_id BIGINT PRIMARY KEY REFERENCES social_mentions(id) ON DELETE CASCADE,
+  decision TEXT NOT NULL CHECK (decision IN ('confirmed','rejected','moved')),
+  target_mention_id BIGINT REFERENCES social_mentions(id) ON DELETE SET NULL,
+  reason TEXT,
+  reviewed_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  reviewed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_owned_amplification_reviews_decision ON owned_amplification_reviews(decision,reviewed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_owned_amplification_reviews_target ON owned_amplification_reviews(target_mention_id) WHERE target_mention_id IS NOT NULL;
