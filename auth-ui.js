@@ -31,14 +31,9 @@ function hideAppAndLogin(){document.getElementById('authSessionChecking')?.remov
 async function doLogout(button){if(button)button.disabled=true;try{await fetch(API+'/auth/logout',{method:'POST',credentials:'include',cache:'no-store'})}catch{}finally{window.location.replace('./index.html?auth=login')}}
 function placeHeaderActions(canAdmin){const report=document.getElementById('reportBtn'),host=report?.parentElement;if(!report||!host)return;let logout=document.getElementById('logoutNavBtn');if(!logout){logout=document.createElement('button');logout.id='logoutNavBtn';logout.dataset.action='logout';logout.className='px-3 py-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-black';logout.innerHTML='<i class="fa-solid fa-right-from-bracket mr-1"></i> Keluar';logout.onclick=()=>doLogout(logout)}if(canAdmin){let admin=document.getElementById('adminNavBtn');if(!admin){admin=document.createElement('a');admin.id='adminNavBtn';admin.href='./admin.html';admin.className='px-3 py-2 rounded-lg bg-amber-400 text-slate-950 text-xs font-black';admin.innerHTML='<i class="fa-solid fa-screwdriver-wrench mr-1"></i> Administrasi'}report.insertAdjacentElement('afterend',admin);admin.insertAdjacentElement('afterend',logout)}else{document.getElementById('adminNavBtn')?.remove();report.insertAdjacentElement('afterend',logout)}}
 async function fetchMeWithRecovery(){
- let r=await fetch(API+'/me',{credentials:'include',cache:'no-store',headers:{'Cache-Control':'no-cache'}});
- if(r.ok)return r;
- if(r.status!==401)return r;
- try{
-   const rr=await fetch(API+'/auth/refresh',{method:'POST',credentials:'include',cache:'no-store',headers:{'Cache-Control':'no-cache'}});
-   if(rr.ok)r=await fetch(API+'/me',{credentials:'include',cache:'no-store',headers:{'Cache-Control':'no-cache'}});
- }catch{}
- return r;
+ // auth-session-guard owns refresh-token rotation. Calling /auth/refresh here as well
+ // creates a race where two refreshes can revoke the same rotating token.
+ return fetch(API+'/me',{credentials:'include',cache:'no-store',headers:{'Cache-Control':'no-cache'}});
 }
 async function init(){applyBranding();const forceLogin=new URLSearchParams(location.search).get('auth')==='login';if(forceLogin){hideAppAndLogin();return}checking();try{const base=await fetchMeWithRecovery();if(!base.ok)throw new Error('unauthenticated');const baseData=await base.json();let user=baseData.user;try{const rbac=await fetch(API+'/rbac/me',{credentials:'include',cache:'no-store'});if(rbac.ok){const ctx=await rbac.json();user={...user,...ctx.user}}}catch{}window.MEDIA_CURRENT_USER=user;window.MEDIA_PERMISSIONS=new Set(user.permissions||[]);window.MEDIA_ROLES=new Set(user.roles||[]);document.getElementById('authSessionChecking')?.remove();document.getElementById('authGate')?.remove();document.body.dataset.auth='ok';hideSelectors.forEach(s=>document.querySelectorAll(s).forEach(e=>e.style.display=''));applyBranding();const canAdmin=(user.roles||[]).includes('super_admin')||(user.permissions||[]).some(p=>['platform.admin','users.manage','opd.manage','sources.manage','keywords.manage'].includes(p));placeHeaderActions(canAdmin);window.dispatchEvent(new CustomEvent('media:authenticated',{detail:user}))}catch(e){hideAppAndLogin()}}
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
