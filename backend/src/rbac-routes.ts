@@ -14,8 +14,7 @@ declare module 'fastify' {
 const roleEnum = z.enum(NORMALIZED_ROLES);
 const ROLE_DESCRIPTIONS: Record<string,string> = {
   super_admin: 'Akses penuh platform, konfigurasi, pengguna dan seluruh data Command Center.',
-  command_center_analyst: 'Analisis lintas media, isu, sosial, strategi dan laporan Command Center.',
-  humas: 'Operasional komunikasi, konten, strategi, media dan respons kehumasan.',
+  humas: 'Operasional komunikasi, analisis media, konten, strategi, assignment OPD, review dan approval respons.',
   executive: 'Akses baca executive intelligence, isu strategis, strategi dan laporan.',
   opd: 'Menerima tugas OPD, menyiapkan fakta/data, menyusun respons, dan mengirimkannya ke Humas untuk review/approval.',
   viewer: 'Akses baca terbatas untuk monitoring dan laporan.',
@@ -59,11 +58,11 @@ export async function registerRbacRoutes(app: FastifyInstance, pool: Pool, jwtSe
          LEFT JOIN role_permissions rp ON rp.role_id=r.id
          LEFT JOIN permissions p ON p.id=rp.permission_id
         WHERE r.active=true
-          AND r.code IN ('super_admin','command_center_analyst','humas','executive','opd','viewer')
+          AND r.code IN ('super_admin','humas','executive','opd','viewer')
         GROUP BY r.id,r.code,r.name,r.scope,r.active
         ORDER BY CASE r.code
-          WHEN 'super_admin' THEN 1 WHEN 'command_center_analyst' THEN 2 WHEN 'humas' THEN 3
-          WHEN 'executive' THEN 4 WHEN 'opd' THEN 5 ELSE 6 END`,
+          WHEN 'super_admin' THEN 1 WHEN 'humas' THEN 2 WHEN 'executive' THEN 3
+          WHEN 'opd' THEN 4 ELSE 5 END`,
     );
     return { data: rows.map(row => ({ ...row, description: ROLE_DESCRIPTIONS[row.code] ?? '' })) };
   });
