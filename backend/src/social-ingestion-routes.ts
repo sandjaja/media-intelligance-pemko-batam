@@ -119,15 +119,15 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
 
     const settled=await Promise.allSettled(accounts.map(async account=>{
       const result=await collectOwnedWebsiteAccount(pool,Number(account.id));
-      return {accountId:Number(account.id),accountName:account.account_name,...result};
+      return {ok:true as const,...result};
     }));
     const results=settled.map((entry,index)=>entry.status==='fulfilled'
-      ?{ok:true,...entry.value}
-      :{ok:false,accountId:Number(accounts[index].id),accountName:accounts[index].account_name,error:entry.reason instanceof Error?entry.reason.message:String(entry.reason)});
+      ?entry.value
+      :{ok:false as const,accountId:Number(accounts[index].id),accountName:accounts[index].account_name,error:entry.reason instanceof Error?entry.reason.message:String(entry.reason)});
     const succeeded=results.filter(x=>x.ok).length;
     const failed=results.length-succeeded;
     let clustering=null;
-    try{clustering=await rebuildOwnedContentClusters(pool)}catch(clusterError){app.log.warn({err:clusterError},'Owned content clustering refresh failed after bulk website sync')}
+    try{clustering=await rebuildOwnedContentClusters(pool)}catch(clusterError){app.log.warn({err:clusterError},'Owned content clustering failed after bulk website sync')}
     await pool.query(
       `INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'OWNED_WEBSITES_REFRESH',$2::jsonb)`,
       [ctx.id,JSON.stringify({accounts:accounts.length,succeeded,failed,results,clustering,durationMs:Date.now()-startedAt,routeVersion:'owned-websites-refresh-v1'})],
