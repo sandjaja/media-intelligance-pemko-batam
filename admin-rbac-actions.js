@@ -27,6 +27,34 @@
       throw err;
     }
   }
+  async function saveUserFromForm(form){
+    const id=$('#userId')?.value||'';
+    const role=$('#userRole')?.value||'viewer';
+    const opdRaw=$('#userOpd')?.value||'';
+    if(role==='opd'&&!opdRaw){toast('Role OPD wajib memilih OPD.',false);return;}
+    const body={
+      email:$('#userEmail').value.trim(),
+      role,
+      active:$('#userActive').checked,
+      opdId:role==='opd'?Number(opdRaw):null,
+    };
+    const password=$('#userPassword').value;
+    if(!id||password)body.password=password;
+    const submit=form.querySelector('button[type="submit"]');const old=submit?.innerHTML;if(submit)submit.disabled=true;
+    try{
+      await request(id?`/admin/rbac/users/${id}`:'/admin/rbac/users',{method:id?'PATCH':'POST',body:JSON.stringify(body)});
+      toast('Pengguna disimpan.');
+      setTimeout(()=>location.reload(),350);
+    }catch(err){
+      const messages={OPD_REQUIRED_FOR_ROLE:'Role OPD wajib memiliki scope OPD.',GLOBAL_ROLE_CANNOT_HAVE_OPD_SCOPE:'Role global tidak boleh memiliki scope OPD.',USER_ALREADY_EXISTS:'Email pengguna sudah terdaftar.',CANNOT_DISABLE_SELF:'Akun yang sedang digunakan tidak dapat dinonaktifkan.',CANNOT_REMOVE_OWN_SUPER_ADMIN:'Super Admin tidak dapat mencabut role Super Admin miliknya sendiri.'};
+      toast(messages[err.code]||err.message||'Pengguna gagal disimpan.',false);
+    }finally{if(submit){submit.disabled=false;if(old!=null)submit.innerHTML=old;}}
+  }
+  document.addEventListener('submit',e=>{
+    if(e.target?.id!=='userForm')return;
+    e.preventDefault();e.stopImmediatePropagation();
+    saveUserFromForm(e.target);
+  },true);
   document.addEventListener('click',async e=>{
     const b=e.target.closest('button[data-user-delete]');if(!b)return;
     e.preventDefault();e.stopPropagation();
