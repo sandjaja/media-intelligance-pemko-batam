@@ -2,7 +2,7 @@
   const API=(window.MEDIA_INTELLIGENCE_API||'/api').replace(/\/$/,'');
   const $=s=>document.querySelector(s);
   const toast=(msg,ok=true)=>{const t=$('#toast');if(!t)return;t.textContent=msg;t.className=`fixed bottom-5 right-5 glass rounded-xl px-4 py-3 text-xs shadow-2xl ${ok?'text-emerald-300':'text-rose-300'}`;t.classList.remove('hidden');clearTimeout(window.__rbacToast);window.__rbacToast=setTimeout(()=>t.classList.add('hidden'),5000)};
-  async function request(path,options={}){const r=await fetch(API+path,{credentials:'include',cache:'no-store',headers:{'Content-Type':'application/json',...(options.headers||{})},...options});const d=await r.json().catch(()=>({}));if(!r.ok){const err=new Error(d.message||d.error||`HTTP ${r.status}`);err.status=r.status;err.code=d.error;throw err}return d;}
+  async function request(path,options={}){const hasBody=options.body!==undefined;const headers={...(hasBody?{'Content-Type':'application/json'}:{}),...(options.headers||{})};const r=await fetch(API+path,{credentials:'include',cache:'no-store',headers,...options});const d=await r.json().catch(()=>({}));if(!r.ok){const err=new Error(d.message||d.error||`HTTP ${r.status}`);err.status=r.status;err.code=d.error;throw err}return d;}
 
   function patchCopy(){
     const p=$('#usersPanel h2')?.parentElement?.querySelector('p');
@@ -21,7 +21,7 @@
     });
   }
   async function deleteUser(id){
-    try{return await request(`/admin/rbac/users/${id}`,{method:'DELETE'})}
+    try{return await request(`/admin/rbac/users/${id}`,{method:'DELETE',body:'{}'})}
     catch(err){
       if(err.status===404||err.status===405)return request(`/admin/rbac/users/${id}/delete`,{method:'POST',body:'{}'});
       throw err;
@@ -40,7 +40,7 @@
       const count=$('#userCount');if(count)count.textContent=String(document.querySelectorAll('#userRows tr').length);
       toast(`Akun ${email} berhasil dihapus.`);
     }catch(err){
-      const messages={CANNOT_DELETE_SELF:'Akun yang sedang Anda gunakan tidak dapat dihapus.',CANNOT_DELETE_LAST_SUPER_ADMIN:'Super Admin terakhir tidak dapat dihapus.',FORBIDDEN:'Anda tidak memiliki izin menghapus pengguna.',USER_NOT_FOUND:'Akun sudah tidak ada atau telah dihapus.'};
+      const messages={CANNOT_DELETE_SELF:'Akun yang sedang Anda gunakan tidak dapat dihapus.',CANNOT_DELETE_LAST_SUPER_ADMIN:'Super Admin terakhir tidak dapat dihapus.',FORBIDDEN:'Anda tidak memiliki izin menghapus pengguna.',USER_NOT_FOUND:'Akun sudah tidak ada atau telah dihapus.',USER_DELETE_FAILED:'Server gagal menghapus akun. Coba lagi setelah deployment terbaru aktif.'};
       toast(messages[err.code]||err.message||'Akun gagal dihapus.',false);b.disabled=false;b.textContent=original;
     }
   },true);
