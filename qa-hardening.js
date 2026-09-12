@@ -25,8 +25,15 @@
 
   if(!document.querySelector('script[data-phase3-workspace]')){
     const s=document.createElement('script');
-    s.src='./phase3-workspace.js?v=20260912-phase3-ui1';
+    s.src='./phase3-workspace.js?v=20260912-phase3-ui2';
     s.dataset.phase3Workspace='1';
+    document.body.appendChild(s);
+  }
+
+  if(!document.querySelector('script[data-unified-candidate-issues]')){
+    const s=document.createElement('script');
+    s.src='./unified-candidate-issue-ui.js?v=20260912-uci1';
+    s.dataset.unifiedCandidateIssues='1';
     document.body.appendChild(s);
   }
 
