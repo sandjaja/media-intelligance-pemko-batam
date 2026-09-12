@@ -17,8 +17,7 @@ const ROLE_DESCRIPTIONS: Record<string,string> = {
   command_center_analyst: 'Analisis lintas media, isu, sosial, strategi dan laporan Command Center.',
   humas: 'Operasional komunikasi, konten, strategi, media dan respons kehumasan.',
   executive: 'Akses baca executive intelligence, isu strategis, strategi dan laporan.',
-  opd_admin: 'Administrasi dan komunikasi untuk OPD yang menjadi scope pengguna.',
-  opd_analyst: 'Analisis media, isu dan laporan untuk OPD yang menjadi scope pengguna.',
+  opd: 'Menerima tugas OPD, menyiapkan fakta/data, menyusun respons, dan mengirimkannya ke Humas untuk review/approval.',
   viewer: 'Akses baca terbatas untuk monitoring dan laporan.',
 };
 
@@ -60,10 +59,11 @@ export async function registerRbacRoutes(app: FastifyInstance, pool: Pool, jwtSe
          LEFT JOIN role_permissions rp ON rp.role_id=r.id
          LEFT JOIN permissions p ON p.id=rp.permission_id
         WHERE r.active=true
+          AND r.code IN ('super_admin','command_center_analyst','humas','executive','opd','viewer')
         GROUP BY r.id,r.code,r.name,r.scope,r.active
         ORDER BY CASE r.code
           WHEN 'super_admin' THEN 1 WHEN 'command_center_analyst' THEN 2 WHEN 'humas' THEN 3
-          WHEN 'executive' THEN 4 WHEN 'opd_admin' THEN 5 WHEN 'opd_analyst' THEN 6 ELSE 7 END`,
+          WHEN 'executive' THEN 4 WHEN 'opd' THEN 5 ELSE 6 END`,
     );
     return { data: rows.map(row => ({ ...row, description: ROLE_DESCRIPTIONS[row.code] ?? '' })) };
   });
