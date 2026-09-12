@@ -77,10 +77,10 @@ CREATE TABLE IF NOT EXISTS issue_workflow_events (
 CREATE INDEX IF NOT EXISTS idx_issue_workflow_events_issue
   ON issue_workflow_events(issue_id, created_at DESC);
 
--- Backfill a NEW operational workflow row for existing issues without changing
--- their analytical issue status.
-INSERT INTO issue_workflows(issue_id, workflow_status, lead_opd_id)
-SELECT i.id, 'NEW', i.leading_opd_id
+-- Backfill existing issues into the operational lifecycle.
+-- Current issues table does not carry a lead OPD column; assignment begins in Phase 3.
+INSERT INTO issue_workflows(issue_id, workflow_status)
+SELECT i.id, 'NEW'
 FROM issues i
 LEFT JOIN issue_workflows w ON w.issue_id=i.id
 WHERE w.issue_id IS NULL;
