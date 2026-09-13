@@ -6,6 +6,10 @@ import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 
 declare module 'fastify' { interface FastifyRequest { onlineModerationAuth?: AuthorizationContext } }
 const canModerate=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
+async function organizationId(pool:Pool,ctx:AuthorizationContext){
+  if(ctx.opdId){const r=await pool.query(`SELECT organization_id FROM opd WHERE id=$1`,[ctx.opdId]);if(r.rows[0]?.organization_id)return Number(r.rows[0].organization_id);}
+  const r=await pool.query(`SELECT id FROM organizations ORDER BY id LIMIT 2`);return r.rowCount===1?Number(r.rows[0].id):0;
+}
 
 export async function registerOnlineArticleModerationRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
   const auth=async(request:FastifyRequest,reply:any)=>{
@@ -47,6 +51,8 @@ export async function registerOnlineArticleModerationRoutes(app:FastifyInstance,
     const linked=await pool.query(`SELECT issue_id FROM issue_articles WHERE article_id=$1 LIMIT 1`,[id.data]);
     if(linked.rowCount)return reply.code(409).send({error:'ARTICLE_ALREADY_LINKED_TO_ISSUE',issueId:linked.rows[0].issue_id});
     await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'ONLINE_ARTICLE_MARKED_IRRELEVANT',$2)`,[ctx.id,{articleId:String(id.data),title:article.title,sourceName:article.source_name,reason:body.data.reason}]);
+    const orgId=await organizationId(pool,ctx);
+    if(orgId)await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'UNIFIED_CANDIDATE_ISSUE_IGNORED',$2)`,[ctx.id,{organizationId:orgId,candidateKey:`online:${id.data}`,reason:body.data.reason,source:'online-moderation'}]);
     return{ok:true,data:{articleId:String(id.data),status:'irrelevant',reason:body.data.reason}};
   });
 }
