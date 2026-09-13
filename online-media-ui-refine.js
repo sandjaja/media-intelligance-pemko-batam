@@ -6,14 +6,12 @@
       const heads=[...table.querySelectorAll('thead th')].map(x=>String(x.textContent||'').trim().toLowerCase());
       const foundIdx=heads.findIndex(x=>x.includes('ditemukan terakhir'));
       const newIdx=heads.findIndex(x=>x.includes('baru terakhir'));
-      const storedIdx=heads.findIndex(x=>x.includes('tersimpan 7 hari'));
       if(foundIdx>=0||newIdx>=0){
         [...table.querySelectorAll('tr')].forEach(row=>{
           const cells=[...row.children];
           [newIdx,foundIdx].filter(i=>i>=0).sort((a,b)=>b-a).forEach(i=>cells[i]?.remove());
         });
-        const newHeads=[...table.querySelectorAll('thead th')];
-        const stored=newHeads.find(x=>String(x.textContent||'').trim().toLowerCase().includes('tersimpan 7 hari'));
+        const stored=[...table.querySelectorAll('thead th')].find(x=>String(x.textContent||'').trim().toLowerCase().includes('tersimpan 7 hari'));
         if(stored)stored.textContent='Berita 7 hari';
       }
     }
@@ -23,7 +21,8 @@
         const txt=String(el.textContent||'');
         if(!txt.includes('INTERNAL_SERVER_ERROR')&&txt.includes('Ditemukan')&&txt.includes('Dianalisis')){
           const nums=txt.match(/\d+/g)||[];
-          if(nums.length)el.textContent=`Sumber dapat diakses · ${nums[0]} artikel ditemukan`;
+          const found=Number(nums[0]||0);
+          el.textContent=found>0?`Sumber dapat diakses · ${found} artikel terdeteksi pada uji terakhir`:'Sumber dapat diakses';
         }
       });
     }
