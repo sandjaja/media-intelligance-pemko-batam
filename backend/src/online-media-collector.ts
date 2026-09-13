@@ -4,7 +4,7 @@ export type OnlineSource = { id:string; name:string; url:string; active?:boolean
 export type OnlineArticle = { sourceId:string; title:string; url:string; publishedAt:Date; excerpt?:string };
 
 const parser=new XMLParser({ignoreAttributes:false,attributeNamePrefix:'@_'});
-const USER_AGENT='Mozilla/5.0 (compatible; PemkoBatamMediaIntelligence/2.5; +https://mediacenter.batam.go.id/)';
+const USER_AGENT='Mozilla/5.0 (compatible; PemkoBatamMediaIntelligence/2.6; +https://mediacenter.batam.go.id/)';
 const MAX_ARTICLE_AGE_MS=7*24*60*60*1000;
 const FUTURE_TOLERANCE_MS=60*60*1000;
 const asArray=<T>(v:T|T[]|undefined):T[]=>v==null?[]:Array.isArray(v)?v:[v];
@@ -68,6 +68,9 @@ function configuredScopeSlug(source:OnlineSource){
 const BATAM_SIGNALS=[
   'batam','barelang','bp batam','pemko batam','pemerintah kota batam','hang nadim','batu ampar','batu aji','belakang padang','bengkong','bulang','galang','lubuk baja','nongsa','sagulung','sei beduk','sekupang','batam kota'
 ];
+const OUTSIDE_BATAM_SIGNALS=[
+  'karimun','kundur','natuna','bintan','tanjungpinang','tanjung pinang','lingga','anambas','penyengat','daik','dabo singkep'
+];
 function sourceRequiresBatamScope(source:OnlineSource){
   try{
     const u=new URL(source.url);
@@ -76,12 +79,17 @@ function sourceRequiresBatamScope(source:OnlineSource){
 }
 function scopeMatches(source:OnlineSource,item:OnlineArticle,html?:string){
   if(!sourceRequiresBatamScope(source))return true;
-  const hay=`${item.title}\n${item.excerpt||''}`.toLowerCase();
-  if(BATAM_SIGNALS.some(term=>hay.includes(term)))return true;
+  const title=item.title.toLowerCase();
+  const lead=String(item.excerpt||'').slice(0,900).toLowerCase();
+  const titleHasBatam=BATAM_SIGNALS.some(term=>title.includes(term));
+  const titleHasOutside=OUTSIDE_BATAM_SIGNALS.some(term=>title.includes(term));
+  if(titleHasOutside&&!titleHasBatam)return false;
+  if(titleHasBatam)return true;
   if(html){
     const lower=html.toLowerCase();
     const slug=configuredScopeSlug(source).replace(/\s+/g,'[-_ ]+');
-    if(slug&&new RegExp(`(?:tag|category|kategori)[^\"']{0,120}${slug}`,'i').test(lower))return true;
+    const exactScope=!!slug&&new RegExp(`(?:tag|category|kategori)[^\"']{0,160}${slug}`,'i').test(lower);
+    if(exactScope&&BATAM_SIGNALS.some(term=>lead.includes(term)))return true;
   }
   return false;
 }
@@ -160,10 +168,6 @@ function jsonLdPublished(html:string){
   }
   return undefined;
 }
-function visiblePublished(html:string){
-  const text=stripHtml(html)?.slice(0,50000)??'';
-  return text.match(/(?:senin|selasa|rabu|kamis|jumat|jum'at|sabtu|minggu)?\s*,?\s*\d{1,2}\s+(?:januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\s+20\d{2}(?:[^\d]{1,20}\d{1,2}[.:]\d{2}(?::\d{2})?)?/i)?.[0];
-}
 function likelyArticlePath(url:string,domain:string){
   try{
     const u=new URL(url),path=u.pathname.toLowerCase();
@@ -191,7 +195,8 @@ function articleLinks(html:string,baseUrl:string){
 function parseArticleHtml(html:string,url:string,linkText:string,source:OnlineSource):OnlineArticle|null{
   const title=meta(html,'og:title')??stripHtml(html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1])??stripHtml(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1])??linkText;
   if(!title||title.length<5)return null;
-  const publishedRaw=meta(html,'article:published_time')??meta(html,'og:published_time')??meta(html,'date')??jsonLdPublished(html)??html.match(/<time\b[^>]*datetime=["']([^"']+)["']/i)?.[1]??visiblePublished(html);
+  const isAntara=/antaranews\.com$/i.test(sourceDomain(url));
+  const publishedRaw=meta(html,'article:published_time')??meta(html,'og:published_time')??meta(html,'datePublished')??jsonLdPublished(html)??(!isAntara?html.match(/<time\b[^>]*datetime=["']([^"']+)["']/i)?.[1]:undefined);
   const publishedAt=parseDate(publishedRaw);if(!publishedAt)return null;
   const articleHtml=html.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1]??html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1]??'';
   const excerpt=(stripHtml(articleHtml)??meta(html,'description')??meta(html,'og:description')??'').slice(0,100000);
