@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
+import { ingestSource } from './ingestion.js';
 
 declare module 'fastify' { interface FastifyRequest { onlineModerationAuth?: AuthorizationContext } }
 const canModerate=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
@@ -22,6 +23,22 @@ export async function registerOnlineArticleModerationRoutes(app:FastifyInstance,
     const sourceStats=(await pool.query(`SELECT ms.id source_id,ms.name,COUNT(a2.id)::int stored_7d FROM media_sources ms LEFT JOIN articles a2 ON a2.source_id=ms.id AND a2.published_at>=NOW()-INTERVAL '7 days' ${statsClause} WHERE lower(ms.category)='online' GROUP BY ms.id,ms.name ORDER BY ms.name`)).rows;
     const totalCount=sourceStats.reduce((n:any,r:any)=>n+Number(r.stored_7d||0),0);
     return{data:rows,totalCount,sourceStats,moderation:{canModerate:canModerate(request.onlineModerationAuth!)}};
+  });
+
+  app.post('/api/online/sources/:id/run',{preHandler:auth},async(request,reply)=>{
+    const ctx=request.onlineModerationAuth!;
+    if(!canModerate(ctx))return reply.code(403).send({error:'ONLINE_INGESTION_REQUIRES_HUMAS_OR_SUPER_ADMIN'});
+    const id=z.coerce.number().int().positive().safeParse((request.params as any).id);
+    if(!id.success)return reply.code(400).send({error:'INVALID_SOURCE_ID'});
+    const source=(await pool.query(`SELECT id,name,url,tier,active,category FROM media_sources WHERE id=$1 AND active=true AND url IS NOT NULL AND lower(category)='online'`,[id.data])).rows[0];
+    if(!source)return reply.code(404).send({error:'ONLINE_SOURCE_NOT_FOUND'});
+    try{
+      const result=await ingestSource(pool,source);
+      return{source:source.name,sourceId:String(source.id),collector:'online-hybrid-v3',...result};
+    }catch(error){
+      request.log.error({err:error,sourceId:source.id,source:source.name},'online source ingestion failed');
+      return reply.code(502).send({error:'SOURCE_INGESTION_FAILED',message:error instanceof Error?error.message:String(error),source:source.name,sourceId:String(source.id)});
+    }
   });
 
   app.post('/api/online/articles/:id/irrelevant',{preHandler:auth},async(request,reply)=>{const ctx=request.onlineModerationAuth!;if(!canModerate(ctx))return reply.code(403).send({error:'ONLINE_MODERATION_REQUIRES_HUMAS_OR_SUPER_ADMIN'});const id=z.coerce.number().int().positive().safeParse((request.params as any).id);const body=z.object({reason:z.string().trim().min(3).max(500)}).safeParse(request.body);if(!id.success||!body.success)return reply.code(400).send({error:'INVALID_REQUEST'});const article=(await pool.query(`SELECT a.id,a.title,ms.name source_name FROM articles a JOIN media_sources ms ON ms.id=a.source_id WHERE a.id=$1 AND lower(ms.category)='online'`,[id.data])).rows[0];if(!article)return reply.code(404).send({error:'ONLINE_ARTICLE_NOT_FOUND'});const linked=await pool.query(`SELECT issue_id FROM issue_articles WHERE article_id=$1 LIMIT 1`,[id.data]);if(linked.rowCount)return reply.code(409).send({error:'ARTICLE_ALREADY_LINKED_TO_ISSUE',issueId:linked.rows[0].issue_id});await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'ONLINE_ARTICLE_MARKED_IRRELEVANT',$2)`,[ctx.id,{articleId:String(id.data),title:article.title,sourceName:article.source_name,reason:body.data.reason}]);const orgId=await organizationId(pool,ctx);if(orgId)await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'UNIFIED_CANDIDATE_ISSUE_IGNORED',$2)`,[ctx.id,{organizationId:orgId,candidateKey:`online:${id.data}`,reason:body.data.reason,source:'online-moderation'}]);return{ok:true,data:{articleId:String(id.data),status:'irrelevant',reason:body.data.reason}};});
