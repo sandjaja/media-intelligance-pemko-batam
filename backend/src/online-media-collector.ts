@@ -18,7 +18,6 @@ function freshOnly(items:OnlineArticle[]){const now=Date.now();return items.filt
 function normalizeSourceUrl(source:OnlineSource){
   try{
     const u=new URL(source.url);
-    // Known canonical relocation: legacy Batam Pos blocks automated requests.
     if(/(^|\.)batampos\.co\.id$/i.test(u.hostname))return 'https://batampos.jawapos.com/batam';
     return u.toString();
   }catch{return source.url}
@@ -138,6 +137,7 @@ async function crawlHtml(source:OnlineSource,html:string,pageUrl:string){
   const map=new Map<string,OnlineArticle>();for(const r of settled){if(r.status==='fulfilled'&&r.value&&!map.has(r.value.url.toLowerCase()))map.set(r.value.url.toLowerCase(),r.value)}
   return freshOnly([...map.values()]).sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime()).slice(0,80);
 }
+function isScopedPage(url:string){try{const path=new URL(url).pathname.replace(/\/+$/,'');return path.length>0&&path!=='/'}catch{return false}}
 export async function collectOnlineSource(source:OnlineSource):Promise<OnlineArticle[]>{
   if(source.active===false)return[];
   const targetUrl=normalizeSourceUrl(source);
@@ -147,16 +147,19 @@ export async function collectOnlineSource(source:OnlineSource):Promise<OnlineArt
     if(response.ok){
       const pageUrl=response.url||targetUrl,type=response.headers.get('content-type')?.toLowerCase()??'';
       if(looksXml(type,body)){const items=parseFeed(body,source);if(items.length)return items}
-      const feeds=await tryFeeds(source,[discoverFeed(body,pageUrl)??'',...commonFeeds(pageUrl)]);if(feeds.length)return feeds;
-      const html=await crawlHtml(source,body,pageUrl);if(html.length)return html;
-      homepageError=new Error(`Media ${source.name} tidak menghasilkan artikel 7 hari terakhir dari RSS/Atom maupun HTML`);
+      // For tag/category/section URLs, preserve the page scope before trying origin-wide RSS feeds.
+      if(isScopedPage(pageUrl)){
+        const html=await crawlHtml(source,body,pageUrl);if(html.length)return html;
+        const discovered=discoverFeed(body,pageUrl);if(discovered){const items=await tryFeeds(source,[discovered]);if(items.length)return items}
+      }else{
+        const feeds=await tryFeeds(source,[discoverFeed(body,pageUrl)??'',...commonFeeds(pageUrl)]);if(feeds.length)return feeds;
+        const html=await crawlHtml(source,body,pageUrl);if(html.length)return html;
+      }
+      homepageError=new Error(`Media ${source.name} tidak menghasilkan artikel 7 hari terakhir dari halaman sumber`);
     }else homepageError=new Error(`Media ${source.name} returned HTTP ${response.status}`);
   }catch(error){homepageError=error instanceof Error?error:new Error(String(error))}
 
   const directFeedFallback=await tryFeeds(source,commonFeeds(targetUrl));if(directFeedFallback.length)return directFeedFallback;
-
-  // Universal fallback for any online source that blocks crawling, lacks RSS, or changes markup.
   const newsFallback=await tryExternalNewsFallback(source,targetUrl);if(newsFallback.length)return newsFallback;
-
   throw homepageError??new Error(`Media ${source.name} tidak menghasilkan artikel dalam 7 hari terakhir`);
 }
