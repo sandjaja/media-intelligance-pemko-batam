@@ -32,7 +32,7 @@
 
   if(!document.querySelector('script[data-unified-candidate-issues]')){
     const s=document.createElement('script');
-    s.src='./unified-candidate-issue-ui.js?v=20260912-uci2';
+    s.src='./unified-candidate-issue-ui.js?v=20260913-uci3';
     s.dataset.unifiedCandidateIssues='1';
     document.body.appendChild(s);
   }
