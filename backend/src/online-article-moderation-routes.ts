@@ -51,7 +51,7 @@ export async function registerOnlineArticleModerationRoutes(app:FastifyInstance,
         }
       }
       await pool.query(`UPDATE media_sources SET last_checked_at=$2,last_success_at=$2,last_error=NULL,last_fetched_count=$3,last_inserted_count=$4 WHERE id=$1`,[source.id,checkedAt,items.length,inserted]);
-      return{source:source.name,sourceId:String(source.id),collector:'online-interactive-v5',fetched:items.length,duplicateSkipped,inserted,routed,analyzed,deferred:Math.max(0,accepted.length-maxInsert)};
+      return{source:source.name,sourceId:String(source.id),collector:'online-interactive-v6',fetched:items.length,duplicateSkipped,inserted,routed,analyzed,deferred:Math.max(0,accepted.length-maxInsert)};
     }catch(error){const message=error instanceof Error?error.message:String(error);await pool.query(`UPDATE media_sources SET last_checked_at=$2,last_error=$3 WHERE id=$1`,[source.id,checkedAt,message]).catch(()=>undefined);request.log.error({err:error,sourceId:source.id},'online source ingestion failed');return reply.code(502).send({error:'SOURCE_INGESTION_FAILED',message,source:source.name,sourceId:String(source.id)});}
   });
 
