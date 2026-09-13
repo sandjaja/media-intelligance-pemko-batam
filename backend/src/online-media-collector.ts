@@ -4,23 +4,36 @@ export type OnlineSource = { id:string; name:string; url:string; active?:boolean
 export type OnlineArticle = { sourceId:string; title:string; url:string; publishedAt:Date; excerpt?:string };
 
 const parser=new XMLParser({ignoreAttributes:false,attributeNamePrefix:'@_'});
-const USER_AGENT='Mozilla/5.0 (compatible; PemkoBatamMediaIntelligence/2.1; +https://mediacenter.batam.go.id/)';
+const USER_AGENT='Mozilla/5.0 (compatible; PemkoBatamMediaIntelligence/2.2; +https://mediacenter.batam.go.id/)';
 const asArray=<T>(v:T|T[]|undefined):T[]=>v==null?[]:Array.isArray(v)?v:[v];
 const firstString=(...values:unknown[]):string|undefined=>values.find(v=>typeof v==='string'&&v.trim()) as string|undefined;
 const parseDate=(value?:string)=>{const d=value?new Date(value):new Date();return Number.isNaN(d.getTime())?new Date():d};
-const stripHtml=(value?:string)=>value?value.replace(/<script[\s\S]*?<\/script>/gi,' ').replace(/<style[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/\s+/g,' ').trim():undefined;
+const stripHtml=(value?:string)=>value?value.replace(/<script[\s\S]*?<\/script>/gi,' ').replace(/<style[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/&quot;/gi,'"').replace(/&#39;/gi,"'").replace(/\s+/g,' ').trim():undefined;
 
+function isBatamPos(source:OnlineSource){
+  try{return /(^|\.)batampos\.(co\.id|jawapos\.com)$/i.test(new URL(source.url).hostname)}catch{return /batam\s*pos/i.test(source.name)}
+}
 function normalizeSourceUrl(source:OnlineSource){
   try{
     const u=new URL(source.url);
-    // Batam Pos has moved its public news site to the Jawapos network.
-    // The legacy batampos.co.id endpoint currently rejects the collector with HTTP 403,
-    // while the public canonical site is batampos.jawapos.com.
     if(/(^|\.)batampos\.co\.id$/i.test(u.hostname)){
-      return 'https://batampos.jawapos.com/';
+      const path=u.pathname.toLowerCase();
+      if(path.includes('pemkobatam'))return 'https://batampos.jawapos.com/batam';
+      if(path.includes('bpbatam'))return 'https://batampos.jawapos.com/batam';
+      return 'https://batampos.jawapos.com/batam';
     }
     return u.toString();
   }catch{return source.url}
+}
+function batamPosGoogleNewsUrl(source:OnlineSource){
+  let focus='Batam';
+  try{
+    const p=new URL(source.url).pathname.toLowerCase();
+    if(p.includes('pemkobatam'))focus='Pemko Batam';
+    else if(p.includes('bpbatam'))focus='BP Batam';
+  }catch{}
+  const q=encodeURIComponent(`site:batampos.jawapos.com ${focus}`);
+  return `https://news.google.com/rss/search?q=${q}&hl=id&gl=ID&ceid=ID:id`;
 }
 
 async function fetchText(url:string,timeoutMs=8000){
@@ -44,6 +57,20 @@ function parseFeed(xml:string,source:OnlineSource):OnlineArticle[]{
     return {sourceId:source.id,title:title.trim(),url:url.trim(),publishedAt:parseDate(firstString(item.pubDate,item.published,item.updated,item['dc:date'])),excerpt:stripHtml(firstString(item['content:encoded'],item.content,item.description,item.summary))?.slice(0,100000)};
   }).filter(Boolean).slice(0,80) as OnlineArticle[];
 }
+function parseGoogleNewsFeed(xml:string,source:OnlineSource):OnlineArticle[]{
+  const root=parser.parse(xml),items=asArray<any>(root?.rss?.channel?.item);
+  const out:OnlineArticle[]=[];
+  for(const item of items){
+    let title=firstString(item.title?.['#text'],item.title);
+    const url=firstString(item.link,item.guid);
+    if(!title||!url)continue;
+    title=title.replace(/\s+-\s+Batam\s+Pos\s*$/i,'').trim();
+    const rawDescription=firstString(item.description);
+    const excerpt=stripHtml(rawDescription)?.slice(0,100000);
+    out.push({sourceId:source.id,title,url,publishedAt:parseDate(firstString(item.pubDate)),excerpt});
+  }
+  return out.slice(0,50);
+}
 function discoverFeed(html:string,baseUrl:string){
   for(const tag of html.match(/<link\b[^>]*>/gi)??[]){
     const rel=tag.match(/rel=["']([^"']+)["']/i)?.[1]?.toLowerCase()??'';
@@ -54,12 +81,21 @@ function discoverFeed(html:string,baseUrl:string){
   }
   return null;
 }
-function commonFeeds(baseUrl:string){try{const origin=new URL(baseUrl).origin;return [`${origin}/feed/`,`${origin}/feed`,`${origin}/rss`,`${origin}/rss/`]}catch{return[]}}
+function commonFeeds(baseUrl:string){try{const origin=new URL(baseUrl).origin;return [`${origin}/feed/`,`${origin}/feed`,`${origin}/rss`,`${origin}/rss/`,`${origin}/feed.xml`,`${origin}/index.xml`]}catch{return[]}}
 async function tryFeeds(source:OnlineSource,urls:string[]){
   for(const url of [...new Set(urls.filter(Boolean))]){
     try{const {response,body}=await fetchText(url);if(!response.ok)continue;const type=response.headers.get('content-type')?.toLowerCase()??'';if(!looksXml(type,body))continue;const items=parseFeed(body,source);if(items.length)return items}catch{}
   }
   return [] as OnlineArticle[];
+}
+async function tryBatamPosNewsFallback(source:OnlineSource){
+  if(!isBatamPos(source))return[] as OnlineArticle[];
+  try{
+    const {response,body}=await fetchText(batamPosGoogleNewsUrl(source),10000);
+    if(!response.ok)return[];
+    const items=parseGoogleNewsFeed(body,source);
+    return items.filter(item=>item.title.length>=5);
+  }catch{return[]}
 }
 function meta(html:string,key:string){
   const patterns=[new RegExp(`<meta[^>]+(?:property|name)=["']${key}["'][^>]+content=["']([^"']+)["']`,'i'),new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${key}["']`,'i')];
@@ -99,10 +135,15 @@ export async function collectOnlineSource(source:OnlineSource):Promise<OnlineArt
       if(feeds.length)return feeds;
       const html=await crawlHtml(source,body,pageUrl);
       if(html.length)return html;
-      throw new Error(`Media ${source.name} tidak menghasilkan artikel dari RSS/Atom maupun HTML`)
-    }
-    homepageError=new Error(`Media ${source.name} returned HTTP ${response.status}`);
+      homepageError=new Error(`Media ${source.name} tidak menghasilkan artikel dari RSS/Atom maupun HTML`);
+    }else homepageError=new Error(`Media ${source.name} returned HTTP ${response.status}`);
   }catch(error){homepageError=error instanceof Error?error:new Error(String(error))}
-  const fallback=await tryFeeds(source,commonFeeds(targetUrl));if(fallback.length)return fallback;
+
+  const directFeedFallback=await tryFeeds(source,commonFeeds(targetUrl));
+  if(directFeedFallback.length)return directFeedFallback;
+
+  const newsFallback=await tryBatamPosNewsFallback(source);
+  if(newsFallback.length)return newsFallback;
+
   throw homepageError??new Error(`Media ${source.name} tidak dapat diambil`);
 }
