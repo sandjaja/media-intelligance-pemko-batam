@@ -4,10 +4,10 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 
-const ENGINE='unified-candidate-issue-v1.0-print-online';
+const ENGINE='unified-candidate-issue-v1.1-print-online';
 declare module 'fastify' { interface FastifyRequest { unifiedIssueAuth?: AuthorizationContext } }
 
-const STOP=new Set(['yang','dengan','untuk','dari','pada','dalam','pemko','batam','pemerintah','dinas','kota','daerah','berita','halaman','koran','media','kepri','provinsi','tahun','akan','telah','jadi','atau','oleh','para','terkait','program','kegiatan']);
+const STOP=new Set(['yang','dengan','untuk','dari','pada','dalam','pemko','batam','pemerintah','dinas','kota','daerah','berita','halaman','koran','media','kepri','provinsi','tahun','akan','telah','jadi','atau','oleh','para','terkait','program','kegiatan','epaper']);
 const norm=(v:any)=>String(v||'').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}\s-]/gu,' ').replace(/\s+/g,' ').trim();
 const tokens=(v:any)=>[...new Set(norm(v).split(' ').filter(x=>x.length>=4&&/[a-z]/.test(x)&&!STOP.has(x)))];
 const canManage=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
@@ -23,6 +23,21 @@ async function resolveOrganizationId(db:Pool|PoolClient,ctx:AuthorizationContext
 async function ignoredKeys(db:Pool|PoolClient,organizationId:number){
   const r=await db.query(`SELECT metadata->>'candidateKey' candidate_key FROM audit_logs WHERE action='UNIFIED_CANDIDATE_ISSUE_IGNORED' AND (metadata->>'organizationId')::bigint=$1`,[organizationId]);
   return new Set(r.rows.map(x=>String(x.candidate_key||'')).filter(Boolean));
+}
+
+function looksLikeNoise(title:string,summary:string){
+  const raw=String(title||'').trim();
+  const n=norm(raw);
+  const ts=tokens(`${title} ${summary}`);
+  if(raw.length<12)return true;
+  if(ts.length<2)return true;
+  if(/\b(epaper|halaman|page|advertorial|iklan)\b/i.test(raw)&&ts.length<4)return true;
+  if(/\b\d+\s*halaman\b/i.test(raw)&&!/(apbd|pad|inflasi|banjir|macet|investasi|defisit|korupsi|sampah|limbah|kecelakaan|pelayanan)/i.test(`${title} ${summary}`))return true;
+  const letters=(n.match(/[a-z]/g)||[]).length;
+  const digits=(n.match(/[0-9]/g)||[]).length;
+  if(letters<8||digits>letters*1.2)return true;
+  if(/^(a|an|untuk|dari|pada|halaman|epaper)\b/i.test(raw)&&ts.length<4)return true;
+  return false;
 }
 
 function quality(title:string,summary:string,importance:number,risk:number,category:string|null){
@@ -52,10 +67,18 @@ async function detect(db:Pool|PoolClient,organizationId:number){
   const evidence=[...print,...online].map((r:any)=>({sourceType:r.source_type,id:Number(r.id),title:String(r.title||'').trim(),summary:String(r.summary||r.content||'').slice(0,1500),sentiment:r.sentiment||null,riskScore:Number(r.risk_score||0),importanceScore:Number(r.importance_score||0),opdId:r.opd_id==null?null:Number(r.opd_id),opdName:r.opd_name||null,districtId:r.district_id==null?null:Number(r.district_id),category:r.category||null,occurredAt:r.occurred_at||null}));
   const candidates:any[]=[];
   for(const e of evidence){
+    if(looksLikeNoise(e.title,e.summary))continue;
     const score=quality(e.title,e.summary,e.importanceScore,e.riskScore,e.category);if(score<60)continue;
     const key=`${e.sourceType}:${e.id}`;if(ignored.has(key))continue;
     const matches=issues.map((i:any)=>({issueId:Number(i.id),title:i.title,score:issueSimilarity(e,i)})).filter((x:any)=>x.score>=30).sort((a:any,b:any)=>b.score-a.score).slice(0,3);
-    candidates.push({engine:ENGINE,candidateKey:key,score,suggestedTitle:e.category||e.title.slice(0,180),suggestedDescription:`Kandidat issue dari ${e.sourceType}. ${e.title}`,sourceTypes:[e.sourceType],evidence:[e],evidenceCount:1,opdId:e.opdId,opdName:e.opdName,riskLevel:riskLevel(e.riskScore),momentum:momentum(1,e.importanceScore),existingIssueMatches:matches,reasons:[e.category?`Taxonomy: ${e.category}`:null,`Importance ${e.importanceScore}/100`,`Risk ${e.riskScore}/100`,matches[0]?`Kemungkinan terkait issue #${matches[0].issueId} (${matches[0].score}%)`:null].filter(Boolean)});
+    const reasons=[
+      e.category?`Taxonomy terdeteksi: ${e.category}`:null,
+      e.importanceScore>=40?`Importance cukup tinggi (${e.importanceScore}/100)`:`Importance ${e.importanceScore}/100`,
+      e.riskScore>=35?`Risk perlu perhatian (${e.riskScore}/100)`:`Risk ${e.riskScore}/100`,
+      /defisit|korupsi|banjir|genangan|macet|kebakaran|krisis|keluhan|protes|investasi|apbd|pad|inflasi|pengangguran|sampah|limbah|kecelakaan/i.test(`${e.title} ${e.summary}`)?'Memuat kata/topik strategis':null,
+      matches[0]?`Kemungkinan terkait issue #${matches[0].issueId} (${matches[0].score}% match)`:'Belum ditemukan issue aktif yang cukup mirip'
+    ].filter(Boolean);
+    candidates.push({engine:ENGINE,candidateKey:key,score,suggestedTitle:e.category||e.title.slice(0,180),suggestedDescription:`Kandidat issue dari ${e.sourceType}. ${e.title}`,sourceTypes:[e.sourceType],evidence:[e],evidenceCount:1,opdId:e.opdId,opdName:e.opdName,riskLevel:riskLevel(e.riskScore),momentum:momentum(1,e.importanceScore),existingIssueMatches:matches,reasons});
   }
   return candidates.sort((a,b)=>b.score-a.score||b.evidence[0].importanceScore-a.evidence[0].importanceScore).slice(0,50);
 }
@@ -72,7 +95,7 @@ export async function registerUnifiedCandidateIssueRoutes(app:FastifyInstance,po
   app.get('/api/intelligence/unified-candidate-issues',{preHandler:auth},async(request,reply)=>{const ctx=request.unifiedIssueAuth!;const organizationId=await resolveOrganizationId(pool,ctx);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});const candidates=await detect(pool,organizationId);return{data:{engine:ENGINE,total:candidates.length,candidates}}});
   app.post('/api/intelligence/unified-candidate-issues/decision',{preHandler:auth},async(request,reply)=>{
     const ctx=request.unifiedIssueAuth!;if(!canManage(ctx))return reply.code(403).send({error:'CANDIDATE_ISSUE_DECISION_REQUIRES_HUMAS_OR_SUPER_ADMIN'});
-    const p=z.object({candidateKey:z.string().min(3).max(200),decision:z.enum(['create','merge','ignore']),reason:z.string().trim().min(3).max(1000),title:z.string().trim().min(3).max(250).optional(),targetIssueId:z.coerce.number().int().positive().optional()}).safeParse(request.body);if(!p.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+    const p=z.object({candidateKey:z.string().min(3).max(200),decision:z.enum(['create','merge','ignore']),reason:z.string().trim().max(1000).optional().default(''),title:z.string().trim().min(3).max(250).optional(),targetIssueId:z.coerce.number().int().positive().optional()}).superRefine((v,ctx)=>{if(v.decision==='ignore'&&v.reason.length<3)ctx.addIssue({code:z.ZodIssueCode.custom,path:['reason'],message:'Alasan wajib untuk mengabaikan kandidat'});if(v.decision==='merge'&&!v.targetIssueId)ctx.addIssue({code:z.ZodIssueCode.custom,path:['targetIssueId'],message:'Target issue wajib untuk merge'});}).safeParse(request.body);if(!p.success)return reply.code(400).send({error:'INVALID_REQUEST'});
     const client=await pool.connect();try{await client.query('BEGIN');const organizationId=await resolveOrganizationId(client,ctx);if(!organizationId){await client.query('ROLLBACK');return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'})}const c=(await detect(client,organizationId)).find(x=>x.candidateKey===p.data.candidateKey);if(!c){await client.query('ROLLBACK');return reply.code(409).send({error:'CANDIDATE_NOT_AVAILABLE'})}
       if(p.data.decision==='ignore'){await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'UNIFIED_CANDIDATE_ISSUE_IGNORED',$2)`,[ctx.id,{organizationId,candidateKey:c.candidateKey,reason:p.data.reason,engine:ENGINE,evidence:c.evidence}]);await client.query('COMMIT');return{ok:true,decision:'ignore',candidateKey:c.candidateKey}}
       let issueId:number;
@@ -84,10 +107,10 @@ export async function registerUnifiedCandidateIssueRoutes(app:FastifyInstance,po
         const created=await client.query(`INSERT INTO issues(organization_id,issue_key,title,description,status,risk_level,momentum,first_seen_at,last_seen_at) VALUES($1,$2,$3,$4,'watch',$5,$6,COALESCE($7::timestamptz,now()),COALESCE($7::timestamptz,now())) ON CONFLICT(issue_key) DO UPDATE SET updated_at=now() RETURNING id`,[organizationId,issueKey,p.data.title||c.suggestedTitle,c.suggestedDescription,c.riskLevel,c.momentum,c.evidence[0]?.occurredAt||null]);issueId=Number(created.rows[0].id);
       }
       if(c.opdId)await client.query(`INSERT INTO issue_opd(issue_id,opd_id,responsibility) VALUES($1,$2,'leading') ON CONFLICT(issue_id,opd_id) DO UPDATE SET responsibility='leading'`,[issueId,c.opdId]);
-      await linkEvidence(client,issueId,c,ctx,p.data.reason);
+      await linkEvidence(client,issueId,c,ctx,p.data.reason||'');
       await client.query(`INSERT INTO issue_workflows(issue_id,workflow_status) VALUES($1,'NEW') ON CONFLICT(issue_id) DO NOTHING`,[issueId]);
       await client.query(`UPDATE issues SET last_seen_at=GREATEST(last_seen_at,COALESCE($2::timestamptz,last_seen_at)),updated_at=now() WHERE id=$1`,[issueId,c.evidence[0]?.occurredAt||null]);
-      await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,$2,$3)`,[ctx.id,p.data.decision==='merge'?'UNIFIED_CANDIDATE_ISSUE_MERGED':'UNIFIED_CANDIDATE_ISSUE_CREATED',{organizationId,issueId,candidateKey:c.candidateKey,reason:p.data.reason,engine:ENGINE,evidence:c.evidence}]);
+      await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,$2,$3)`,[ctx.id,p.data.decision==='merge'?'UNIFIED_CANDIDATE_ISSUE_MERGED':'UNIFIED_CANDIDATE_ISSUE_CREATED',{organizationId,issueId,candidateKey:c.candidateKey,reason:p.data.reason||'',engine:ENGINE,evidence:c.evidence}]);
       await client.query('COMMIT');return{ok:true,decision:p.data.decision,issueId,candidateKey:c.candidateKey};
     }catch(e){await client.query('ROLLBACK');throw e}finally{client.release()}
   });
