@@ -4,6 +4,24 @@ import { applyRisk } from './risk.js';
 
 function normalize(value: string) { return value.toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim(); }
 function splitKeyword(value:string){return [...new Set(String(value||'').split(/[,;|\n]+/).map(v=>v.trim()).filter(v=>v.length>=2))];}
+function containsPhrase(text:string,phrase:string){const t=` ${normalize(text)} `,p=normalize(phrase);return p.length>=2&&t.includes(` ${p} `);}
+function opdAliases(row:{name?:string;code?:string}){
+  const aliases=new Set<string>();
+  const code=normalize(String(row.code||''));
+  const name=normalize(String(row.name||''));
+  if(code.length>=3)aliases.add(code);
+  if(name.length>=4)aliases.add(name);
+  const withoutDinas=name.replace(/^dinas\s+/,'').trim();
+  if(withoutDinas.length>=5)aliases.add(withoutDinas);
+  if(code==='diskominfo')aliases.add('kominfo');
+  if(code==='disdukcapil')aliases.add('dukcapil');
+  if(code==='dinkes')aliases.add('kesehatan');
+  if(code==='disdik')aliases.add('pendidikan');
+  if(code==='dispora')aliases.add('pemuda dan olahraga');
+  if(code==='dbmsda'){aliases.add('bina marga');aliases.add('sumber daya air');}
+  if(code==='dpmptsp'){aliases.add('penanaman modal');aliases.add('pelayanan terpadu satu pintu');}
+  return [...aliases];
+}
 
 export async function analyzeArticle(pool: Pool, articleId: string) {
   const article = (await pool.query(`SELECT a.id,a.title,a.content,a.summary,a.published_at,ms.name source_name,ms.tier,ms.category media_kind FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE a.id=$1`, [articleId])).rows[0];
@@ -11,11 +29,24 @@ export async function analyzeArticle(pool: Pool, articleId: string) {
 
   const keywordRows = (await pool.query(`SELECT id,opd_id,keyword FROM keywords WHERE active=true ORDER BY id`)).rows;
   const keywords = keywordRows.flatMap(k=>splitKeyword(k.keyword).map(keyword=>({id:k.id,opd_id:k.opd_id,keyword})));
+  const titleText=normalize(String(article.title||''));
+  const bodyText=normalize(`${article.summary ?? ''} ${article.content ?? ''}`);
   const text = normalize(`${article.title} ${article.summary ?? ''} ${article.content ?? ''}`);
   const matches = keywords.filter(k => {const term=normalize(k.keyword);return term.length>=2&&text.includes(term);});
   const opdScores = new Map<string, number>();
   for (const match of matches) {
     if (match.opd_id != null) opdScores.set(String(match.opd_id), (opdScores.get(String(match.opd_id)) ?? 0) + 1);
+  }
+
+  // Stronger deterministic mapping: explicit OPD code/name in the headline wins over generic keyword matches.
+  const opdRows=(await pool.query(`SELECT id,name,code FROM opd WHERE active=true ORDER BY id`)).rows;
+  for(const opd of opdRows){
+    const id=String(opd.id);let score=opdScores.get(id)??0;
+    for(const alias of opdAliases(opd)){
+      if(containsPhrase(titleText,alias))score+=12;
+      else if(containsPhrase(bodyText,alias))score+=4;
+    }
+    if(score>0)opdScores.set(id,score);
   }
   const opdId = [...opdScores.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 
