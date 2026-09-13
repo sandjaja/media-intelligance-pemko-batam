@@ -18,13 +18,18 @@
       const results=[];
       for(const source of sources){
         try{
-          const res=await nativeFetch(`${base}/online/sources/${encodeURIComponent(source.id)}/test`,{...common,method:'POST',headers:{'content-type':'application/json',...(options.headers||{})}});
+          const res=await nativeFetch(`${base}/online/sources/${encodeURIComponent(source.id)}/test`,{
+            ...common,
+            method:'POST',
+            headers:{'content-type':'application/json',...(options.headers||{})},
+            body:'{}'
+          });
           const body=await res.json().catch(()=>({}));
           if(!res.ok)results.push({source:source.name,sourceId:String(source.id),error:body.message||body.error||`HTTP ${res.status}`});
           else results.push(body);
         }catch(error){results.push({source:source.name,sourceId:String(source.id),error:error instanceof Error?error.message:String(error)});}
       }
-      return new Response(JSON.stringify({results,mode:'source-health-test-v1'}),{status:200,headers:{'content-type':'application/json'}});
+      return new Response(JSON.stringify({results,mode:'source-health-test-v2'}),{status:200,headers:{'content-type':'application/json'}});
     }catch(error){
       return new Response(JSON.stringify({error:'ONLINE_SOURCE_TEST_FAILED',message:error instanceof Error?error.message:String(error)}),{status:502,headers:{'content-type':'application/json'}});
     }
