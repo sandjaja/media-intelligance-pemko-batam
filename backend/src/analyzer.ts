@@ -3,14 +3,16 @@ import { analyzeArticle as analyzeCoreArticle, parseKeywordQuery } from './media
 import { applyRisk } from './risk.js';
 
 function normalize(value: string) { return value.toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim(); }
+function splitKeyword(value:string){return [...new Set(String(value||'').split(/[,;|\n]+/).map(v=>v.trim()).filter(v=>v.length>=2))];}
 
 export async function analyzeArticle(pool: Pool, articleId: string) {
   const article = (await pool.query(`SELECT a.id,a.title,a.content,a.summary,a.published_at,ms.name source_name,ms.tier,ms.category media_kind FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE a.id=$1`, [articleId])).rows[0];
   if (!article) return null;
 
-  const keywords = (await pool.query(`SELECT id,opd_id,keyword FROM keywords WHERE active=true ORDER BY id`)).rows;
+  const keywordRows = (await pool.query(`SELECT id,opd_id,keyword FROM keywords WHERE active=true ORDER BY id`)).rows;
+  const keywords = keywordRows.flatMap(k=>splitKeyword(k.keyword).map(keyword=>({id:k.id,opd_id:k.opd_id,keyword})));
   const text = normalize(`${article.title} ${article.summary ?? ''} ${article.content ?? ''}`);
-  const matches = keywords.filter(k => text.includes(normalize(k.keyword)));
+  const matches = keywords.filter(k => {const term=normalize(k.keyword);return term.length>=2&&text.includes(term);});
   const opdScores = new Map<string, number>();
   for (const match of matches) {
     if (match.opd_id != null) opdScores.set(String(match.opd_id), (opdScores.get(String(match.opd_id)) ?? 0) + 1);
@@ -38,8 +40,9 @@ export async function analyzeArticle(pool: Pool, articleId: string) {
 
   await pool.query(`DELETE FROM article_entities WHERE article_id=$1`, [articleId]);
   for (const entity of analysis.entities.slice(0, 20)) await pool.query(`INSERT INTO article_entities(article_id,entity_type,entity_name) VALUES($1,'entity',$2)`, [articleId, entity]);
-  for (const match of analysis.matchedKeywords.slice(0, 20)) await pool.query(`INSERT INTO article_entities(article_id,entity_type,entity_name) VALUES($1,'keyword',$2) ON CONFLICT DO NOTHING`, [articleId, match]);
+  const matchedNames=[...new Set(matches.map(k=>k.keyword))].slice(0,20);
+  for (const match of matchedNames) await pool.query(`INSERT INTO article_entities(article_id,entity_type,entity_name) VALUES($1,'keyword',$2) ON CONFLICT DO NOTHING`, [articleId, match]);
 
   const risk = await applyRisk(pool, articleId);
-  return { articleId, opdId, sentiment: analysis.sentiment, importance: analysis.importanceScore, impact: analysis.impactScore, velocity: analysis.velocityScore, highlight: analysis.importanceScore >= 65 || analysis.riskLevel === 'high' || analysis.riskLevel === 'critical', keywordMatches: analysis.matchedKeywords.length, entities: analysis.entities, duplicateFingerprint: analysis.duplicateFingerprint, risk };
+  return { articleId, opdId, sentiment: analysis.sentiment, importance: analysis.importanceScore, impact: analysis.impactScore, velocity: analysis.velocityScore, highlight: analysis.importanceScore >= 65 || analysis.riskLevel === 'high' || analysis.riskLevel === 'critical', keywordMatches: matchedNames.length, matchedKeywords:matchedNames, entities: analysis.entities, duplicateFingerprint: analysis.duplicateFingerprint, risk };
 }
