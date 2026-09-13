@@ -27,8 +27,15 @@
       });
     }
   }
+  function loadLatestNewsButton(){
+    if(document.querySelector('script[data-online-latest-news]'))return;
+    const s=document.createElement('script');
+    s.src='./online-latest-news.js?v=20260914-latest1';
+    s.dataset.onlineLatestNews='1';
+    document.head.appendChild(s);
+  }
   const obs=new MutationObserver(()=>refine());
-  const start=()=>{const root=document.getElementById('online');if(root){obs.observe(root,{childList:true,subtree:true});refine();}};
+  const start=()=>{const root=document.getElementById('online');if(root){obs.observe(root,{childList:true,subtree:true});refine();}loadLatestNewsButton();};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',start);else start();
-  window.addEventListener('media-intelligence-tab',e=>{if(e.detail==='online')setTimeout(refine,100)});
+  window.addEventListener('media-intelligence-tab',e=>{if(e.detail==='online')setTimeout(()=>{refine();loadLatestNewsButton();},100)});
 })();
