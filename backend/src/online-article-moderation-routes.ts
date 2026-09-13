@@ -29,6 +29,15 @@ export async function registerOnlineArticleModerationRoutes(app:FastifyInstance,
     return{data:rows,totalCount:rows.length,sourceStats,moderation:{canModerate:canModerate(request.onlineModerationAuth!)}};
   });
 
+  app.post('/api/online/sources/:id/test',{preHandler:auth},async(request,reply)=>{
+    const ctx=request.onlineModerationAuth!;if(!canModerate(ctx))return reply.code(403).send({error:'ONLINE_TEST_REQUIRES_HUMAS_OR_SUPER_ADMIN'});
+    const id=z.coerce.number().int().positive().safeParse((request.params as any).id);if(!id.success)return reply.code(400).send({error:'INVALID_SOURCE_ID'});
+    const source=(await pool.query(`SELECT id,name,url,active,category FROM media_sources WHERE id=$1 AND active=true AND url IS NOT NULL AND lower(category)='online'`,[id.data])).rows[0];if(!source)return reply.code(404).send({error:'ONLINE_SOURCE_NOT_FOUND'});
+    const started=Date.now();const checkedAt=new Date();
+    try{const items=await collectOnlineSource({id:String(source.id),name:source.name,url:source.url,active:true});await pool.query(`UPDATE media_sources SET last_checked_at=$2,last_success_at=$2,last_error=NULL WHERE id=$1`,[source.id,checkedAt]);return{source:source.name,sourceId:String(source.id),ok:true,found:items.length,latencyMs:Date.now()-started};}
+    catch(error){const message=error instanceof Error?error.message:String(error);await pool.query(`UPDATE media_sources SET last_checked_at=$2,last_error=$3 WHERE id=$1`,[source.id,checkedAt,message]).catch(()=>undefined);request.log.error({err:error,sourceId:source.id},'online source health test failed');return reply.code(502).send({error:'SOURCE_TEST_FAILED',message,source:source.name,sourceId:String(source.id)});}
+  });
+
   app.post('/api/online/sources/:id/run',{preHandler:auth},async(request,reply)=>{
     const ctx=request.onlineModerationAuth!;if(!canModerate(ctx))return reply.code(403).send({error:'ONLINE_INGESTION_REQUIRES_HUMAS_OR_SUPER_ADMIN'});
     const id=z.coerce.number().int().positive().safeParse((request.params as any).id);if(!id.success)return reply.code(400).send({error:'INVALID_SOURCE_ID'});
