@@ -4,7 +4,7 @@ export type OnlineSource = { id:string; name:string; url:string; active?:boolean
 export type OnlineArticle = { sourceId:string; title:string; url:string; publishedAt:Date; excerpt?:string };
 
 const parser=new XMLParser({ignoreAttributes:false,attributeNamePrefix:'@_'});
-const USER_AGENT='Mozilla/5.0 (compatible; PemkoBatamMediaIntelligence/2.6; +https://mediacenter.batam.go.id/)';
+const USER_AGENT='Mozilla/5.0 (compatible; PemkoBatamMediaIntelligence/2.7; +https://mediacenter.batam.go.id/)';
 const MAX_ARTICLE_AGE_MS=7*24*60*60*1000;
 const FUTURE_TOLERANCE_MS=60*60*1000;
 const asArray=<T>(v:T|T[]|undefined):T[]=>v==null?[]:Array.isArray(v)?v:[v];
@@ -43,7 +43,7 @@ function sourceContext(source:OnlineSource){
     else if(/bp[-_]?batam|bpbatam/.test(path))terms.unshift('BP Batam');
     else if(/kota[-_]?batam|kotabatam/.test(path))terms.unshift('Kota Batam');
     else {
-      const meaningful=path.split('/').filter(Boolean).filter(x=>x.length>=4&&!/^(news|berita|artikel|index|home|tag|category|kategori)$/.test(x)).slice(0,2);
+      const meaningful=path.split('/').filter(Boolean).filter(x=>x.length>=4&&!/^(news|berita|artikel|index|home|tag|topic|category|kategori)$/.test(x)).slice(0,2);
       if(meaningful.length)terms.unshift(...meaningful.map(x=>x.replace(/[-_]+/g,' ')));
     }
   }catch{}
@@ -66,7 +66,7 @@ function configuredScopeSlug(source:OnlineSource){
   }catch{return''}
 }
 const BATAM_SIGNALS=[
-  'batam','barelang','bp batam','pemko batam','pemerintah kota batam','hang nadim','batu ampar','batu aji','belakang padang','bengkong','bulang','galang','lubuk baja','nongsa','sagulung','sei beduk','sekupang','batam kota'
+  'batam','barelang','bp batam','pemko batam','pemerintah kota batam','hang nadim','batu ampar','batu aji','batuaji','belakang padang','bengkong','bulang','galang','lubuk baja','nongsa','sagulung','sei beduk','sekupang','batam kota','tembesi','tanjung riau','tanjungriau'
 ];
 const OUTSIDE_BATAM_SIGNALS=[
   'karimun','kundur','natuna','bintan','tanjungpinang','tanjung pinang','lingga','anambas','penyengat','daik','dabo singkep'
@@ -80,20 +80,40 @@ function sourceRequiresBatamScope(source:OnlineSource){
 function scopeMatches(source:OnlineSource,item:OnlineArticle,html?:string){
   if(!sourceRequiresBatamScope(source))return true;
   const title=item.title.toLowerCase();
-  const lead=String(item.excerpt||'').slice(0,900).toLowerCase();
+  const lead=String(item.excerpt||'').slice(0,1200).toLowerCase();
+  const combined=`${title} ${lead}`;
   const titleHasBatam=BATAM_SIGNALS.some(term=>title.includes(term));
+  const bodyHasBatam=BATAM_SIGNALS.some(term=>lead.includes(term));
   const titleHasOutside=OUTSIDE_BATAM_SIGNALS.some(term=>title.includes(term));
-  if(titleHasOutside&&!titleHasBatam)return false;
-  if(titleHasBatam)return true;
+  if(titleHasOutside&&!titleHasBatam&&!bodyHasBatam)return false;
+  if(titleHasBatam||bodyHasBatam)return true;
   if(html){
     const lower=html.toLowerCase();
     const slug=configuredScopeSlug(source).replace(/\s+/g,'[-_ ]+');
-    const exactScope=!!slug&&new RegExp(`(?:tag|category|kategori)[^\"']{0,160}${slug}`,'i').test(lower);
-    if(exactScope&&BATAM_SIGNALS.some(term=>lead.includes(term)))return true;
+    const exactScope=!!slug&&new RegExp(`(?:tag|topic|category|kategori)[^\"']{0,160}${slug}`,'i').test(lower);
+    if(exactScope&&BATAM_SIGNALS.some(term=>combined.includes(term)))return true;
   }
   return false;
 }
 function scopedOnly(source:OnlineSource,items:OnlineArticle[]){return items.filter(item=>scopeMatches(source,item))}
+
+function isNonArticlePath(path:string){
+  return /\/(?:tag|topic|topics|author|penulis|search|cari|wp-admin|wp-content|feed|category|kategori|kanal|channel|foto|photo|video)(?:\/|$)/i.test(path)
+    || /\/(?:index|home)(?:\.html?)?(?:\/|$)/i.test(path);
+}
+function likelyArticlePath(url:string,domain=sourceDomain(url)){
+  try{
+    const u=new URL(url),path=u.pathname.toLowerCase().replace(/\/+$/,'');
+    if(!path||path==='/')return false;
+    if(isNonArticlePath(path))return false;
+    if(/antaranews\.com$/i.test(domain))return /\/berita\/\d+(?:\/|$)/.test(path);
+    if(/tribunnews\.com$/i.test(domain))return /^\/(?:[^/]+)\/\d{4,}\/[^/]+/.test(path);
+    if(/jawapos\.com$/i.test(domain))return /\/berita\//.test(path)||/\/20\d{2}\//.test(path)||path.split('/').filter(Boolean).length>=3;
+    return /\/20\d{2}\//.test(path)||/\/(?:berita|news|artikel|post|read)\//.test(path)||path.split('/').filter(Boolean).length>=2;
+  }catch{return false}
+}
+function validArticleItem(item:OnlineArticle){return likelyArticlePath(item.url)}
+function articleOnly(items:OnlineArticle[]){return items.filter(validArticleItem)}
 
 async function fetchText(url:string,timeoutMs=8000){
   const response=await fetch(url,{headers:{
@@ -112,7 +132,8 @@ function parseFeed(xml:string,source:OnlineSource):OnlineArticle[]{
     const url=firstString(item.link?.['@_href'],item.link,item.guid,item.id);
     const publishedAt=parseDate(firstString(item.pubDate,item.published,item.updated,item['dc:date']));
     if(!title||!url||!publishedAt)continue;
-    out.push({sourceId:source.id,title:title.trim(),url:url.trim(),publishedAt,excerpt:stripHtml(firstString(item['content:encoded'],item.content,item.description,item.summary))?.slice(0,100000)});
+    const article={sourceId:source.id,title:title.trim(),url:url.trim(),publishedAt,excerpt:stripHtml(firstString(item['content:encoded'],item.content,item.description,item.summary))?.slice(0,100000)};
+    if(validArticleItem(article))out.push(article);
   }
   return scopedOnly(source,freshOnly(out)).slice(0,80);
 }
@@ -156,7 +177,7 @@ async function tryExternalNewsFallback(source:OnlineSource,targetUrl:string){
     return parseGoogleNewsFeed(body,source);
   }catch{return[]}
 }
-function meta(html:string,key:string){const patterns=[new RegExp(`<meta[^>]+(?:property|name)=["']${key}["'][^>]+content=["']([^"']+)["']`,'i'),new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${key}["']`,'i')];for(const p of patterns){const v=html.match(p)?.[1];if(v)return stripHtml(v)}return undefined}
+function meta(html:string,key:string){const patterns=[new RegExp(`<meta[^>]+(?:property|name)=["']${key}["'][^>]+content=["']([^"']+)["']`,'i'),new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${key}["'][^>]*>`,'i')];for(const p of patterns){const v=html.match(p)?.[1];if(v)return stripHtml(v)}return undefined}
 function canonical(html:string,fallback:string){const href=html.match(/<link\b[^>]*rel=["'][^"']*canonical[^"']*["'][^>]*href=["']([^"']+)["']/i)?.[1];try{return href?new URL(href,fallback).toString():fallback}catch{return fallback}}
 function jsonLdPublished(html:string){
   for(const block of html.match(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi)??[]){
@@ -168,13 +189,15 @@ function jsonLdPublished(html:string){
   }
   return undefined;
 }
-function likelyArticlePath(url:string,domain:string){
-  try{
-    const u=new URL(url),path=u.pathname.toLowerCase();
-    if(/antaranews\.com$/i.test(domain))return /\/berita\/\d+(?:\/|$)/.test(path);
-    if(/\/(tag|author|wp-admin|wp-content|feed|category|kategori)(\/|$)/.test(path))return false;
-    return /\/20\d{2}\//.test(path)||/\/(berita|news|artikel|post|read)\//.test(path)||path.split('/').filter(Boolean).length>=2;
-  }catch{return false}
+function jsonLdArticleType(html:string){
+  for(const block of html.match(/<script\b[^>]*type=["']application\/ld\+json["'][^>]*>[\s\S]*?<\/script>/gi)??[]){
+    const raw=block.replace(/^.*?>/s,'').replace(/<\/script>\s*$/i,'');
+    try{
+      const data=JSON.parse(raw);const stack:any[]=[data];
+      while(stack.length){const v=stack.pop();if(Array.isArray(v)){stack.push(...v);continue}if(!v||typeof v!=='object')continue;const type=String(v['@type']||'');if(/(?:NewsArticle|Article|ReportageNewsArticle)/i.test(type))return true;stack.push(...Object.values(v));}
+    }catch{}
+  }
+  return false;
 }
 function articleLinks(html:string,baseUrl:string){
   const base=new URL(baseUrl),domain=base.hostname.replace(/^www\./i,''),seen=new Set<string>(),out:Array<{url:string;text:string;score:number}>=[];
@@ -186,28 +209,31 @@ function articleLinks(html:string,baseUrl:string){
       const path=u.pathname.toLowerCase();
       if(path==='/'||/\.(jpg|jpeg|png|gif|webp|svg|pdf|zip|mp4|mp3)$/i.test(path)||!likelyArticlePath(u.toString(),domain))continue;
       const url=u.toString();if(seen.has(url))continue;seen.add(url);
-      let score=0;if(/\/20\d{2}\//.test(path))score+=8;if(/\/berita\/\d+/.test(path))score+=10;if(/berita|news|artikel|post|batam|kepri|ekbis|nasional|hukum/.test(path))score+=4;if(path.split('/').filter(Boolean).length>=2)score+=2;if(text.length>=30)score+=2;
+      let score=0;if(/\/20\d{2}\//.test(path))score+=8;if(/\/berita\/\d+/.test(path))score+=10;if(/\/\d{4,}\//.test(path))score+=8;if(/berita|news|artikel|post|batam|pemko|kota-batam/.test(path))score+=4;if(path.split('/').filter(Boolean).length>=3)score+=2;if(text.length>=30)score+=2;
       out.push({url,text,score});
     }catch{}
   }
   return out.sort((a,b)=>b.score-a.score).slice(0,40);
 }
 function parseArticleHtml(html:string,url:string,linkText:string,source:OnlineSource):OnlineArticle|null{
+  const finalUrl=canonical(html,url);
+  if(!likelyArticlePath(finalUrl))return null;
   const title=meta(html,'og:title')??stripHtml(html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1])??stripHtml(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1])??linkText;
   if(!title||title.length<5)return null;
-  const isAntara=/antaranews\.com$/i.test(sourceDomain(url));
+  const isAntara=/antaranews\.com$/i.test(sourceDomain(finalUrl));
   const publishedRaw=meta(html,'article:published_time')??meta(html,'og:published_time')??meta(html,'datePublished')??jsonLdPublished(html)??(!isAntara?html.match(/<time\b[^>]*datetime=["']([^"']+)["']/i)?.[1]:undefined);
   const publishedAt=parseDate(publishedRaw);if(!publishedAt)return null;
   const articleHtml=html.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1]??html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i)?.[1]??'';
+  if(!articleHtml&&!jsonLdArticleType(html))return null;
   const excerpt=(stripHtml(articleHtml)??meta(html,'description')??meta(html,'og:description')??'').slice(0,100000);
   if(excerpt.length<40)return null;
-  const article={sourceId:source.id,title:title.slice(0,1000),url:canonical(html,url),publishedAt,excerpt};
+  const article={sourceId:source.id,title:title.slice(0,1000),url:finalUrl,publishedAt,excerpt};
   return isFresh(article)&&scopeMatches(source,article,html)?article:null;
 }
 async function crawlHtml(source:OnlineSource,html:string,pageUrl:string){
   const settled=await Promise.allSettled(articleLinks(html,pageUrl).map(async link=>{const {response,body}=await fetchText(link.url,6500);if(!response.ok)return null;const type=response.headers.get('content-type')?.toLowerCase()??'';if(!type.includes('text/html'))return null;return parseArticleHtml(body,response.url||link.url,link.text,source)}));
   const map=new Map<string,OnlineArticle>();for(const r of settled){if(r.status==='fulfilled'&&r.value&&!map.has(r.value.url.toLowerCase()))map.set(r.value.url.toLowerCase(),r.value)}
-  return freshOnly([...map.values()]).sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime()).slice(0,80);
+  return freshOnly(articleOnly([...map.values()])).sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime()).slice(0,80);
 }
 function nextPageUrl(html:string,currentUrl:string,visited:Set<string>){
   const rel=html.match(/<a\b[^>]*rel=["'][^"']*next[^"']*["'][^>]*href=["']([^"']+)["']/i)?.[1]??html.match(/<link\b[^>]*rel=["'][^"']*next[^"']*["'][^>]*href=["']([^"']+)["']/i)?.[1];
