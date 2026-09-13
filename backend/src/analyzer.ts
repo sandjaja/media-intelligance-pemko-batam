@@ -42,34 +42,37 @@ async function mapHeadlineToExistingIssue(pool:Pool,articleId:string,title:strin
     if(containsPhrase(headline,String(row.title||'')))score+=100;
     if(containsPhrase(headline,String(row.taxonomy_name||'')))score+=80;
     for(const term of taxonomyTerms({name:row.taxonomy_name,description:row.taxonomy_description}))if(containsPhrase(headline,term))score+=20;
-    if(score>=(best?.score??60))best={id:String(row.id),score};
+    if(score>(best?.score??0))best={id:String(row.id),score};
   }
   if(!best||best.score<60)return null;
   await pool.query(`INSERT INTO issue_articles(issue_id,article_id,relevance_score) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`,[best.id,articleId,Math.min(100,best.score)]);
   return best;
 }
 
+export async function routeArticleHeadline(pool:Pool,articleId:string){
+  const article=(await pool.query(`SELECT id,title FROM articles WHERE id=$1`,[articleId])).rows[0];
+  if(!article)return null;
+  const titleText=normalize(String(article.title||''));
+  const keywordRows=(await pool.query(`SELECT id,opd_id,keyword FROM keywords WHERE active=true ORDER BY id`)).rows;
+  const titleMatches=keywordRows.flatMap(k=>splitKeyword(k.keyword).map(keyword=>({opd_id:k.opd_id,keyword}))).filter(k=>{const term=normalize(k.keyword);return term.length>=2&&titleText.includes(term);});
+  const opdScores=new Map<string,number>();
+  for(const match of titleMatches)if(match.opd_id!=null)opdScores.set(String(match.opd_id),(opdScores.get(String(match.opd_id))??0)+2);
+  const opdRows=(await pool.query(`SELECT id,name,code FROM opd WHERE active=true ORDER BY id`)).rows;
+  for(const opd of opdRows){const id=String(opd.id);let score=opdScores.get(id)??0;for(const alias of opdAliases(opd))if(containsPhrase(titleText,alias))score+=12;if(score>0)opdScores.set(id,score);}
+  const opdId=[...opdScores.entries()].sort((a,b)=>b[1]-a[1])[0]?.[0]??null;
+  await pool.query(`UPDATE articles SET opd_id=$2 WHERE id=$1`,[articleId,opdId]);
+  const issueMatch=await mapHeadlineToExistingIssue(pool,String(articleId),String(article.title||''));
+  return{articleId:String(articleId),opdId,issueId:issueMatch?.id??null,issueMatchScore:issueMatch?.score??0};
+}
+
 export async function analyzeArticle(pool: Pool, articleId: string) {
   const article = (await pool.query(`SELECT a.id,a.title,a.content,a.summary,a.published_at,ms.name source_name,ms.tier,ms.category media_kind FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE a.id=$1`, [articleId])).rows[0];
   if (!article) return null;
 
+  const routing=await routeArticleHeadline(pool,articleId);
+  const opdId=routing?.opdId??null;
   const keywordRows = (await pool.query(`SELECT id,opd_id,keyword FROM keywords WHERE active=true ORDER BY id`)).rows;
   const keywords = keywordRows.flatMap(k=>splitKeyword(k.keyword).map(keyword=>({id:k.id,opd_id:k.opd_id,keyword})));
-  const titleText=normalize(String(article.title||''));
-  // OPD and existing-issue mapping are intentionally headline-only for deterministic, low-cost routing.
-  const titleMatches = keywords.filter(k => {const term=normalize(k.keyword);return term.length>=2&&titleText.includes(term);});
-  const opdScores = new Map<string, number>();
-  for (const match of titleMatches) if(match.opd_id != null) opdScores.set(String(match.opd_id),(opdScores.get(String(match.opd_id))??0)+2);
-
-  const opdRows=(await pool.query(`SELECT id,name,code FROM opd WHERE active=true ORDER BY id`)).rows;
-  for(const opd of opdRows){
-    const id=String(opd.id);let score=opdScores.get(id)??0;
-    for(const alias of opdAliases(opd))if(containsPhrase(titleText,alias))score+=12;
-    if(score>0)opdScores.set(id,score);
-  }
-  const opdId = [...opdScores.entries()].sort((a,b)=>b[1]-a[1])[0]?.[0] ?? null;
-
-  // Full text remains available only for sentiment/risk/intelligence analysis, not OPD/issue routing.
   const fullText=normalize(`${article.title} ${article.summary ?? ''} ${article.content ?? ''}`);
   const analysisMatches=keywords.filter(k=>{const term=normalize(k.keyword);return term.length>=2&&fullText.includes(term);});
   const queryTerms = analysisMatches.map(k => k.keyword).join(' | ');
@@ -88,7 +91,6 @@ export async function analyzeArticle(pool: Pool, articleId: string) {
   const matchedNames=[...new Set(analysisMatches.map(k=>k.keyword))].slice(0,20);
   for (const match of matchedNames) await pool.query(`INSERT INTO article_entities(article_id,entity_type,entity_name) VALUES($1,'keyword',$2) ON CONFLICT DO NOTHING`, [articleId, match]);
 
-  const issueMatch=await mapHeadlineToExistingIssue(pool,String(articleId),String(article.title||''));
   const risk = await applyRisk(pool, articleId);
-  return { articleId, opdId, issueId:issueMatch?.id??null, issueMatchScore:issueMatch?.score??0, sentiment: analysis.sentiment, importance: analysis.importanceScore, impact: analysis.impactScore, velocity: analysis.velocityScore, highlight: analysis.importanceScore >= 65 || analysis.riskLevel === 'high' || analysis.riskLevel === 'critical', keywordMatches: matchedNames.length, matchedKeywords:matchedNames, entities: analysis.entities, duplicateFingerprint: analysis.duplicateFingerprint, risk };
+  return { articleId, opdId, issueId:routing?.issueId??null, issueMatchScore:routing?.issueMatchScore??0, sentiment: analysis.sentiment, importance: analysis.importanceScore, impact: analysis.impactScore, velocity: analysis.velocityScore, highlight: analysis.importanceScore >= 65 || analysis.riskLevel === 'high' || analysis.riskLevel === 'critical', keywordMatches: matchedNames.length, matchedKeywords:matchedNames, entities: analysis.entities, duplicateFingerprint: analysis.duplicateFingerprint, risk };
 }
