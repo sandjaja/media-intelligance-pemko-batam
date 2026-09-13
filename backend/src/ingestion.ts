@@ -10,17 +10,36 @@ export function fingerprint(title: string, url: string): string {
   return crypto.createHash('sha256').update(`${title.trim().toLowerCase()}|${url.trim().toLowerCase()}`).digest('hex');
 }
 
+function canonicalTitle(value:string):string {
+  return String(value||'')
+    .toLowerCase().normalize('NFKC')
+    .replace(/\s*[-–—|]\s*(jawa\s*pos|batam\s*pos|antara(?:\s*news)?|tribun(?:news|\s*batam)?)(?:\.com)?\s*$/i,'')
+    .replace(/[^\p{L}\p{N}\s]/gu,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+
 export async function fetchFeed(source: FeedSource): Promise<IngestedArticle[]> {
   return collectOnlineSource(source);
 }
 
-export async function ingestSource(pool: Pool, source: FeedSource): Promise<{ fetched: number; inserted: number; analyzed: number }> {
+export async function ingestSource(pool: Pool, source: FeedSource): Promise<{ fetched: number; inserted: number; analyzed: number; duplicateSkipped: number }> {
   const checkedAt = new Date();
   try {
     const articles = await fetchFeed(source);
+    const recent = (await pool.query(`SELECT title FROM articles WHERE source_id=$1 AND COALESCE(published_at,created_at)>=NOW()-INTERVAL '14 days'`,[source.id])).rows;
+    const knownTitles = new Set(recent.map(r=>canonicalTitle(r.title)).filter(Boolean));
+    const seenThisRun = new Set<string>();
     let inserted = 0;
     let analyzed = 0;
+    let duplicateSkipped = 0;
     for (const article of articles) {
+      const canonical = canonicalTitle(article.title);
+      if (canonical && (knownTitles.has(canonical) || seenThisRun.has(canonical))) {
+        duplicateSkipped++;
+        continue;
+      }
+      if (canonical) seenThisRun.add(canonical);
       const fp = fingerprint(article.title, article.url);
       const result = await pool.query(
         `INSERT INTO articles (source_id,title,url,published_at,content,summary,sentiment,importance_score)
@@ -30,12 +49,13 @@ export async function ingestSource(pool: Pool, source: FeedSource): Promise<{ fe
       );
       if (result.rowCount) {
         inserted++;
+        if (canonical) knownTitles.add(canonical);
         const articleId = String(result.rows[0].id);
         const analysis = await analyzeArticle(pool, articleId);
         if (analysis) analyzed++;
         await pool.query(
           `INSERT INTO audit_logs (action,metadata) VALUES ('INGEST_ARTICLE',$1)`,
-          [{ fingerprint: fp, articleId, sourceId: source.id, collector: 'online-hybrid-v2', analysis }]
+          [{ fingerprint: fp, canonicalTitle:canonical, articleId, sourceId: source.id, collector: 'online-hybrid-v3', analysis }]
         );
       }
     }
@@ -45,7 +65,7 @@ export async function ingestSource(pool: Pool, source: FeedSource): Promise<{ fe
        WHERE id=$1`,
       [source.id, checkedAt, articles.length, inserted]
     );
-    return { fetched: articles.length, inserted, analyzed };
+    return { fetched: articles.length, inserted, analyzed, duplicateSkipped };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await pool.query(`UPDATE media_sources SET last_checked_at=$2,last_error=$3 WHERE id=$1`, [source.id, checkedAt, message]).catch(() => undefined);
@@ -73,9 +93,9 @@ export async function ingestEnabledSources(pool: Pool): Promise<Record<string, u
     const results: Record<string, unknown>[] = [];
     for (const source of rows) {
       try {
-        results.push({ source: source.name, sourceId: String(source.id), collector: 'online-hybrid-v2', ...(await ingestSource(pool, source)) });
+        results.push({ source: source.name, sourceId: String(source.id), collector: 'online-hybrid-v3', ...(await ingestSource(pool, source)) });
       } catch (error) {
-        results.push({ source: source.name, sourceId: String(source.id), collector: 'online-hybrid-v2', error: error instanceof Error ? error.message : String(error) });
+        results.push({ source: source.name, sourceId: String(source.id), collector: 'online-hybrid-v3', error: error instanceof Error ? error.message : String(error) });
       }
     }
     const successfulSources = results.filter(r => !r.error).length;
