@@ -44,6 +44,13 @@
     document.body.appendChild(s);
   }
 
+  if(!document.querySelector('script[data-online-media-ui]')){
+    const s=document.createElement('script');
+    s.src='./online-media-ui.js?v=20260913-online1';
+    s.dataset.onlineMediaUi='1';
+    document.body.appendChild(s);
+  }
+
   window.addEventListener('error',(event)=>{
     if(String(event?.message||'').includes('toast')) safeToast('Terjadi error pada notifikasi UI.');
   });
