@@ -1,0 +1,1 @@
+(()=>{const s=document.createElement('script');s.src='./admin-core.js?v=20260911-owned4';document.body.appendChild(s)})();

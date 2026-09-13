@@ -1,0 +1,11 @@
+(()=>{
+'use strict';
+const $=id=>document.getElementById(id);
+let timer=null,started=0;
+function rowsForSelection(){const rows=Array.isArray(window.__phase2gPrintArchiveRows)?window.__phase2gPrintArchiveRows:[];const ymd=v=>String(v||'').slice(0,10);const all=$('prAll');if(all&&document.activeElement===all)return rows;const day=$('prDate')?.value;if(document.activeElement?.id==='prDay')return rows.filter(x=>ymd(x.edition_date)===day);let from=$('prFrom')?.value,to=$('prTo')?.value;if(document.activeElement?.id==='prRange'){if(from>to)[from,to]=[to,from];return rows.filter(x=>{const d=ymd(x.edition_date);return d>=from&&d<=to})}return rows}
+function hide(){clearInterval(timer);timer=null;$('printPreparingOverlay')?.remove()}
+function show(count){hide();started=Date.now();const d=document.createElement('div');d.id='printPreparingOverlay';d.className='fixed inset-0 z-[120] bg-black/80 grid place-items-center p-4';d.innerHTML=`<div class="glass rounded-2xl p-6 w-full max-w-md text-center border border-cyan-500/30 shadow-2xl"><div class="mx-auto w-12 h-12 rounded-full border-4 border-slate-700 border-t-cyan-400 animate-spin"></div><div class="mt-4 text-[10px] tracking-[.2em] text-cyan-400 font-black">MENYIAPKAN LAPORAN</div><h3 class="mt-1 text-lg font-black">Mohon tunggu…</h3><p class="mt-2 text-xs text-slate-400">Sistem sedang menyiapkan <b class="text-slate-200">${count||0} clipping</b> beserta thumbnail evidence untuk hasil print.</p><div class="mt-4 h-2 rounded-full bg-slate-800 overflow-hidden"><div class="h-full w-1/3 bg-cyan-400 animate-pulse"></div></div><p id="printPreparingElapsed" class="mt-3 text-[10px] text-slate-500">0 detik · jangan tutup halaman</p></div>`;document.body.appendChild(d);timer=setInterval(()=>{const el=$('printPreparingElapsed');if(el)el.textContent=`${Math.floor((Date.now()-started)/1000)} detik · jangan tutup halaman`},1000)}
+document.addEventListener('click',ev=>{const b=ev.target.closest?.('#prAll,#prDay,#prRange');if(!b)return;setTimeout(()=>{const count=rowsForSelection().length;show(count)},0)},true);
+const nativeOpen=window.open.bind(window);window.open=(...args)=>{if($('printPreparingOverlay'))hide();return nativeOpen(...args)};
+window.addEventListener('beforeunload',hide);
+})();
