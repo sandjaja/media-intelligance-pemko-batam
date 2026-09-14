@@ -6,23 +6,19 @@ function normalize(value: string) { return value.toLowerCase().normalize('NFKC')
 function splitKeyword(value:string){return [...new Set(String(value||'').split(/[,;|\n]+/).map(v=>v.trim()).filter(v=>v.length>=2))];}
 function containsPhrase(text:string,phrase:string){const t=` ${normalize(text)} `,p=normalize(phrase);return p.length>=2&&t.includes(` ${p} `);}
 function meaningfulTokens(value:string){const stop=new Set(['dan','atau','yang','dengan','untuk','dalam','serta','pemerintah','daerah','masyarakat','kota','kabupaten']);return normalize(value).split(/\s+/).filter(v=>v.length>=4&&!stop.has(v));}
-function opdAliases(row:{name?:string;code?:string}){
-  const aliases=new Set<string>();
+function dynamicOpdTerms(row:{name?:string;code?:string}){
+  const terms=new Set<string>();
   const code=normalize(String(row.code||''));
   const name=normalize(String(row.name||''));
-  if(code.length>=3)aliases.add(code);
-  if(name.length>=4)aliases.add(name);
+  if(code.length>=3)terms.add(code);
+  if(name.length>=4)terms.add(name);
   const withoutDinas=name.replace(/^dinas\s+/,'').trim();
-  if(withoutDinas.length>=5)aliases.add(withoutDinas);
-  if(code==='diskominfo')aliases.add('kominfo');
-  if(code==='disdukcapil')aliases.add('dukcapil');
-  if(code==='dinkes')aliases.add('kesehatan');
-  if(code==='disdik')aliases.add('pendidikan');
-  if(code==='dispora')aliases.add('pemuda dan olahraga');
-  if(code==='dishub'){aliases.add('perhubungan');aliases.add('trans batam');aliases.add('brt');aliases.add('transportasi');}
-  if(code==='dbmsda'){aliases.add('bina marga');aliases.add('sumber daya air');aliases.add('jalan');aliases.add('drainase');aliases.add('banjir');}
-  if(code==='dpmptsp'){aliases.add('penanaman modal');aliases.add('pelayanan terpadu satu pintu');aliases.add('investasi');aliases.add('perizinan');}
-  return [...aliases];
+  if(withoutDinas.length>=5)terms.add(withoutDinas);
+  const withoutBadan=name.replace(/^badan\s+/,'').trim();
+  if(withoutBadan.length>=5)terms.add(withoutBadan);
+  const withoutKecamatan=name.replace(/^kecamatan\s+/,'').trim();
+  if(withoutKecamatan.length>=4)terms.add(withoutKecamatan);
+  return [...terms];
 }
 function taxonomyTerms(row:{name?:string;description?:string}){
   const generic=new Set(['dan','atau','yang','dengan','untuk','dalam','serta','pemerintah','daerah','masyarakat']);
@@ -33,6 +29,13 @@ function taxonomyTerms(row:{name?:string;description?:string}){
     }
   }
   return [...terms];
+}
+function expandKeywordRows(rows:any[]){
+  return rows.flatMap(k=>splitKeyword(k.keyword).map(keyword=>({id:k.id,opd_id:k.opd_id,keyword})));
+}
+function matchKeywords(text:string,rows:any[]){
+  const normalized=normalize(text);
+  return expandKeywordRows(rows).filter(k=>{const term=normalize(k.keyword);return term.length>=2&&containsPhrase(normalized,term);});
 }
 async function mapHeadlineToExistingIssue(pool:Pool,articleId:string,title:string){
   const headline=normalize(title);if(!headline)return null;
@@ -55,20 +58,39 @@ async function mapHeadlineToExistingIssue(pool:Pool,articleId:string,title:strin
 }
 
 export async function routeArticleHeadline(pool:Pool,articleId:string){
-  const article=(await pool.query(`SELECT id,title FROM articles WHERE id=$1`,[articleId])).rows[0];
+  const article=(await pool.query(`SELECT id,title,summary,content FROM articles WHERE id=$1`,[articleId])).rows[0];
   if(!article)return null;
+
+  const fullText=`${article.title||''} ${article.summary||''} ${article.content||''}`;
   const titleText=normalize(String(article.title||''));
   const keywordRows=(await pool.query(`SELECT id,opd_id,keyword FROM keywords WHERE active=true ORDER BY id`)).rows;
-  const titleMatches=keywordRows.flatMap(k=>splitKeyword(k.keyword).map(keyword=>({opd_id:k.opd_id,keyword}))).filter(k=>{const term=normalize(k.keyword);return term.length>=2&&containsPhrase(titleText,term);});
+  const matches=matchKeywords(fullText,keywordRows);
+
   const opdScores=new Map<string,number>();
-  for(const match of titleMatches)if(match.opd_id!=null)opdScores.set(String(match.opd_id),(opdScores.get(String(match.opd_id))??0)+8);
+  for(const match of matches){
+    if(match.opd_id!=null)opdScores.set(String(match.opd_id),(opdScores.get(String(match.opd_id))??0)+10);
+  }
+
+  // Explicit OPD mentions remain supported, but terms come only from OPD master data.
   const opdRows=(await pool.query(`SELECT id,name,code FROM opd WHERE active=true ORDER BY id`)).rows;
-  for(const opd of opdRows){const id=String(opd.id);let score=opdScores.get(id)??0;for(const alias of opdAliases(opd))if(containsPhrase(titleText,alias))score+=12;if(score>0)opdScores.set(id,score);}
+  for(const opd of opdRows){
+    const id=String(opd.id);let score=opdScores.get(id)??0;
+    for(const term of dynamicOpdTerms(opd))if(containsPhrase(titleText,term))score+=12;
+    if(score>0)opdScores.set(id,score);
+  }
+
   const opdId=[...opdScores.entries()].sort((a,b)=>b[1]-a[1])[0]?.[0]??null;
   await pool.query(`UPDATE articles SET opd_id=$2 WHERE id=$1`,[articleId,opdId]);
-  for(const match of [...new Set(titleMatches.map(k=>k.keyword))].slice(0,20)) await pool.query(`INSERT INTO article_entities(article_id,entity_type,entity_name) VALUES($1,'keyword',$2) ON CONFLICT DO NOTHING`,[articleId,match]);
+
+  // Refresh keyword labels from the active OPD keyword database for every routed article.
+  await pool.query(`DELETE FROM article_entities WHERE article_id=$1 AND entity_type='keyword'`,[articleId]);
+  const matchedNames=[...new Set(matches.map(k=>k.keyword))].slice(0,30);
+  for(const match of matchedNames){
+    await pool.query(`INSERT INTO article_entities(article_id,entity_type,entity_name) VALUES($1,'keyword',$2) ON CONFLICT DO NOTHING`,[articleId,match]);
+  }
+
   const issueMatch=await mapHeadlineToExistingIssue(pool,String(articleId),String(article.title||''));
-  return{articleId:String(articleId),opdId,issueId:issueMatch?.id??null,issueMatchScore:issueMatch?.score??0};
+  return{articleId:String(articleId),opdId,issueId:issueMatch?.id??null,issueMatchScore:issueMatch?.score??0,keywordMatches:matchedNames.length,matchedKeywords:matchedNames};
 }
 
 export async function analyzeArticle(pool: Pool, articleId: string) {
@@ -77,12 +99,8 @@ export async function analyzeArticle(pool: Pool, articleId: string) {
 
   const routing=await routeArticleHeadline(pool,articleId);
   const opdId=routing?.opdId??null;
-  const keywordRows = (await pool.query(`SELECT id,opd_id,keyword FROM keywords WHERE active=true ORDER BY id`)).rows;
-  const keywords = keywordRows.flatMap(k=>splitKeyword(k.keyword).map(keyword=>({id:k.id,opd_id:k.opd_id,keyword})));
-  const fullText=normalize(`${article.title} ${article.summary ?? ''} ${article.content ?? ''}`);
-  const analysisMatches=keywords.filter(k=>{const term=normalize(k.keyword);return term.length>=2&&containsPhrase(fullText,term);});
-  const queryTerms = analysisMatches.map(k => k.keyword).join(' | ');
-  const query = parseKeywordQuery(queryTerms);
+  const matchedNames=routing?.matchedKeywords??[];
+  const query = parseKeywordQuery(matchedNames.join(' | '));
   const peerResult = await pool.query(`SELECT COUNT(*)::int count FROM articles WHERE id<>$1 AND (title ILIKE $2 OR summary ILIKE $2)`, [articleId, `%${String(article.title).slice(0, 80)}%`]);
   const peerCount = Number(peerResult.rows[0]?.count ?? 1) + 1;
 
@@ -94,8 +112,6 @@ export async function analyzeArticle(pool: Pool, articleId: string) {
 
   await pool.query(`DELETE FROM article_entities WHERE article_id=$1 AND entity_type='entity'`, [articleId]);
   for (const entity of analysis.entities.slice(0,20)) await pool.query(`INSERT INTO article_entities(article_id,entity_type,entity_name) VALUES($1,'entity',$2) ON CONFLICT DO NOTHING`, [articleId, entity]);
-  const matchedNames=[...new Set(analysisMatches.map(k=>k.keyword))].slice(0,20);
-  for (const match of matchedNames) await pool.query(`INSERT INTO article_entities(article_id,entity_type,entity_name) VALUES($1,'keyword',$2) ON CONFLICT DO NOTHING`, [articleId, match]);
 
   const risk = await applyRisk(pool, articleId);
   return { articleId, opdId, issueId:routing?.issueId??null, issueMatchScore:routing?.issueMatchScore??0, sentiment: analysis.sentiment, importance: analysis.importanceScore, impact: analysis.impactScore, velocity: analysis.velocityScore, highlight: analysis.importanceScore >= 65 || analysis.riskLevel === 'high' || analysis.riskLevel === 'critical', keywordMatches: matchedNames.length, matchedKeywords:matchedNames, entities: analysis.entities, duplicateFingerprint: analysis.duplicateFingerprint, risk };
