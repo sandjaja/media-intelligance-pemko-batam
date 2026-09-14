@@ -55,7 +55,7 @@
       if(panel){
         const title=[...panel.querySelectorAll('b')].find(x=>/Hasil Uji(?: Koneksi)? Terakhir/.test(String(x.textContent||'')));
         if(title)setHtmlIfChanged(title,'<i class="fa-solid fa-plug text-cyan-300 mr-2"></i>Hasil Uji Koneksi Terakhir');
-        [...panel.querySelectorAll('.text-[11px]')].forEach(el=>{
+        [...panel.querySelectorAll('[class~="text-[11px]"]')].forEach(el=>{
           const txt=String(el.textContent||'');
           if(!/HTTP\s+\d+|ERROR|FAILED/i.test(txt)&&txt.includes('Ditemukan')&&txt.includes('Dianalisis'))setTextIfChanged(el,'Sumber dapat diakses');
         });
