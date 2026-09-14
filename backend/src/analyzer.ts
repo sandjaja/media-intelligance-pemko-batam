@@ -20,27 +20,30 @@ async function mapHeadlineToExistingIssue(pool:Pool,articleId:string,title:strin
 export async function routeArticleHeadline(pool:Pool,articleId:string){
   const article=(await pool.query(`SELECT id,title,summary,content FROM articles WHERE id=$1`,[articleId])).rows[0];if(!article)return null;
   const title=String(article.title||''),summary=String(article.summary||''),content=String(article.content||''),fullText=`${title} ${summary} ${content}`;
-  const titleText=normalize(title),summaryText=normalize(summary),fullNormalized=normalize(fullText);
+  const titleText=normalize(title),summaryText=normalize(summary),contentText=normalize(content),fullNormalized=normalize(fullText);
   const masterRows=(await pool.query(`SELECT k.id,k.keyword,kt.category_id,kt.weight,ko.opd_id,ko.weight opd_weight,kd.district_id,kd.weight district_weight FROM keywords k LEFT JOIN keyword_taxonomy kt ON kt.keyword_id=k.id AND kt.active=true LEFT JOIN keyword_opd ko ON ko.keyword_id=k.id AND ko.active=true LEFT JOIN keyword_district kd ON kd.keyword_id=k.id AND kd.active=true WHERE k.active=true AND k.organization_id IS NOT NULL AND k.opd_id IS NULL AND k.district_id IS NULL ORDER BY k.id`)).rows;
   const matches=masterRows.filter(k=>containsPhrase(fullNormalized,String(k.keyword||'')));
-  const taxonomyScores=new Map<string,{score:number,strong:boolean;keywords:Set<string>}>(),opdScores=new Map<string,number>(),districtScores=new Map<string,number>();
+  const taxonomyScores=new Map<string,{score:number;contextual:boolean;supporting:Set<string>;keywords:Set<string>}>(),opdScores=new Map<string,number>(),districtScores=new Map<string,number>();
+  const seenTaxonomy=new Set<string>(),seenOpd=new Set<string>(),seenDistrict=new Set<string>();
   for(const m of matches){
-    const keyword=String(m.keyword||''),base=Number(m.weight||0);let position=1;if(containsPhrase(titleText,keyword))position=1.5;else if(containsPhrase(summaryText,keyword))position=1.2;
-    if(m.category_id!=null&&base>0){const id=String(m.category_id),cur=taxonomyScores.get(id)??{score:0,strong:false,keywords:new Set<string>()};cur.score+=base*position;cur.strong=cur.strong||base>=5;cur.keywords.add(keyword);taxonomyScores.set(id,cur);}
-    if(m.opd_id!=null)opdScores.set(String(m.opd_id),(opdScores.get(String(m.opd_id))??0)+Number(m.opd_weight||2)*position);
-    if(m.district_id!=null)districtScores.set(String(m.district_id),(districtScores.get(String(m.district_id))??0)+Number(m.district_weight||2)*position);
+    const keyword=String(m.keyword||''),base=Number(m.weight||0);const inTitle=containsPhrase(titleText,keyword),inSummary=containsPhrase(summaryText,keyword),inContent=containsPhrase(contentText,keyword);let position=inTitle?1.5:inSummary?1.2:inContent?0.5:0;
+    if(m.category_id!=null&&base>0&&position>0){const id=String(m.category_id),dedupe=`${m.id}:${id}`,cur=taxonomyScores.get(id)??{score:0,contextual:false,supporting:new Set<string>(),keywords:new Set<string>()};if(!seenTaxonomy.has(dedupe)){cur.score+=base*position;seenTaxonomy.add(dedupe);}if(inTitle||inSummary){if(base>=5)cur.contextual=true;else cur.supporting.add(keyword);}cur.keywords.add(keyword);taxonomyScores.set(id,cur);}
+    if(m.opd_id!=null&&position>0){const id=String(m.opd_id),dedupe=`${m.id}:${id}`;if(!seenOpd.has(dedupe)){opdScores.set(id,(opdScores.get(id)??0)+Number(m.opd_weight||2)*position);seenOpd.add(dedupe);}}
+    if(m.district_id!=null&&position>0){const id=String(m.district_id),dedupe=`${m.id}:${id}`;if(!seenDistrict.has(dedupe)){districtScores.set(id,(districtScores.get(id)??0)+Number(m.district_weight||2)*position);seenDistrict.add(dedupe);}}
   }
-  const eligible=[...taxonomyScores.entries()].filter(([,v])=>v.strong||v.keywords.size>=2).sort((a,b)=>b[1].score-a[1].score);
+  // Body text may corroborate a classification, but it cannot create one by itself.
+  // This prevents navigation/recommendation fragments in scraped articles from overriding the headline topic.
+  const eligible=[...taxonomyScores.entries()].filter(([,v])=>v.contextual||v.supporting.size>=2).sort((a,b)=>b[1].score-a[1].score);
   const taxonomyId=eligible[0]?.[0]??null,taxonomyScore=eligible[0]?.[1].score??0;
 
-  // UPTD is an organizational entity, not a taxonomy keyword. A matched UPTD contributes
-  // to its parent OPD while taxonomy classification remains independent.
-  const uptdRows=(await pool.query(`SELECT id,opd_id,name,code,aliases FROM uptd WHERE active=true ORDER BY id`)).rows;
+  // UPTD is an organizational entity. Require headline/summary evidence; body-only mentions
+  // are too noisy because scraped pages frequently contain links to unrelated stories.
+  const uptdRows=(await pool.query(`SELECT u.id,u.opd_id,u.name,u.code,u.aliases FROM uptd u JOIN opd o ON o.id=u.opd_id AND o.active=true WHERE u.active=true ORDER BY u.id`)).rows;
   const uptdMatches:{id:string;opdId:string;name:string;score:number;evidence:string[]}[]=[];
-  for(const unit of uptdRows){let score=0;const evidence:string[]=[];for(const term of uptdTerms(unit)){let points=0;if(containsPhrase(titleText,term))points=20;else if(containsPhrase(summaryText,term))points=14;else if(containsPhrase(fullNormalized,term))points=8;if(points>0){score+=points;evidence.push(term);}}if(score>0){const opdId=String(unit.opd_id);uptdMatches.push({id:String(unit.id),opdId,name:String(unit.name||''),score,evidence});opdScores.set(opdId,(opdScores.get(opdId)??0)+score);}}
+  for(const unit of uptdRows){let score=0;const evidence:string[]=[];for(const term of uptdTerms(unit)){let points=0;if(containsPhrase(titleText,term))points=24;else if(containsPhrase(summaryText,term))points=16;if(points>0){score+=points;evidence.push(term);}}if(score>=16){const opdId=String(unit.opd_id);uptdMatches.push({id:String(unit.id),opdId,name:String(unit.name||''),score,evidence});opdScores.set(opdId,(opdScores.get(opdId)??0)+score);}}
   uptdMatches.sort((a,b)=>b.score-a.score||Number(a.id)-Number(b.id));
 
-  const opdRows=(await pool.query(`SELECT id,name,code FROM opd WHERE active=true ORDER BY id`)).rows;for(const opd of opdRows){const id=String(opd.id);let score=opdScores.get(id)??0;for(const term of dynamicOpdTerms(opd))if(containsPhrase(titleText,term))score+=12;if(score>0)opdScores.set(id,score);}
+  const opdRows=(await pool.query(`SELECT id,name,code FROM opd WHERE active=true ORDER BY id`)).rows;for(const opd of opdRows){const id=String(opd.id);let score=opdScores.get(id)??0;for(const term of dynamicOpdTerms(opd))if(containsPhrase(titleText,term))score+=20;if(score>0)opdScores.set(id,score);}
   const districtRows=(await pool.query(`SELECT id,name,code FROM districts WHERE active=true ORDER BY id`)).rows;for(const district of districtRows){const id=String(district.id);let score=districtScores.get(id)??0;for(const raw of [district.name,district.code]){const term=normalize(String(raw||''));if(term.length>=3&&containsPhrase(titleText,term))score+=12;}if(score>0)districtScores.set(id,score);}
   const opdId=[...opdScores.entries()].sort((a,b)=>b[1]-a[1])[0]?.[0]??null,districtId=[...districtScores.entries()].sort((a,b)=>b[1]-a[1])[0]?.[0]??null;
   await pool.query(`UPDATE articles SET opd_id=$2,district_id=$3 WHERE id=$1`,[articleId,opdId,districtId]);
