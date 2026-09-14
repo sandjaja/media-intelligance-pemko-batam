@@ -1,1 +1,1 @@
-(()=>{const s=document.createElement('script');s.src='./admin-core.js?v=20260914-adminfix2';document.body.appendChild(s)})();
+(()=>{const s=document.createElement('script');s.src='./admin-core.js?v=20260914-opdpatch1';document.body.appendChild(s)})();
