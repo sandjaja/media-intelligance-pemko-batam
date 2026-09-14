@@ -37,15 +37,10 @@ npm run db:seed
 
 The command first applies `schema.sql`, then creates or repairs the bootstrap admin account. Running it repeatedly will not create duplicate users and will not overwrite an existing admin password unless `ADMIN_PASSWORD` is explicitly supplied.
 
-Default bootstrap credentials:
-
-- **Email:** `admin@pemko.go.id`
-- **Password:** `Admin@PemkoBatam2026!`
-
-For production, set a private password through the deployment environment instead of using the bootstrap password:
+Bootstrap credentials must be supplied through the deployment environment. No city-specific default password is shipped with the application.
 
 ```bash
-ADMIN_EMAIL=admin@pemko.go.id ADMIN_PASSWORD='your-strong-private-password' npm run db:seed
+ADMIN_EMAIL=admin@example.go.id ADMIN_PASSWORD='your-strong-private-password' npm run db:seed
 ```
 
 `ADMIN_PASSWORD` is hashed with Argon2id before it is stored. No plaintext password is stored in PostgreSQL.
