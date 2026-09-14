@@ -38,7 +38,10 @@ export async function registerOnlineArticleModerationRoutes(app:FastifyInstance,
     const source=(await pool.query(`SELECT id,name,url,tier,active,category FROM media_sources WHERE id=$1 AND active=true AND url IS NOT NULL AND lower(category)='online'`,[id.data])).rows[0];if(!source)return reply.code(404).send({error:'ONLINE_SOURCE_NOT_FOUND'});
     const checkedAt=new Date();
     try{
-      const scope=await loadOrganizationMediaScope(pool);
+      const orgId=await organizationId(pool,ctx);
+      if(!orgId)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+      const scope=await loadOrganizationMediaScope(pool,orgId);
+      if(!scope)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_SCOPE_UNRESOLVED'});
       const items=await collectOnlineSource({id:String(source.id),name:source.name,url:source.url,active:true},scope);
       const existing=(await pool.query(`SELECT title FROM articles WHERE source_id=$1 AND COALESCE(published_at,created_at)>=NOW()-INTERVAL '14 days'`,[source.id])).rows.map(r=>String(r.title||''));
       const accepted:any[]=[];const seen=[...existing];let duplicateSkipped=0;
@@ -53,7 +56,7 @@ export async function registerOnlineArticleModerationRoutes(app:FastifyInstance,
         }
       }
       await pool.query(`UPDATE media_sources SET last_checked_at=$2,last_success_at=$2,last_error=NULL,last_fetched_count=$3,last_inserted_count=$4 WHERE id=$1`,[source.id,checkedAt,items.length,inserted]);
-      return{source:source.name,sourceId:String(source.id),collector:'online-interactive-v8-dynamic-scope',fetched:items.length,duplicateSkipped,inserted,routed,analyzed,deferred:Math.max(0,accepted.length-maxInsert),scope:scope?{organizationId:scope.organizationId,cityName:scope.cityName,districtCount:scope.districts.length}:null};
+      return{source:source.name,sourceId:String(source.id),collector:'online-interactive-v8-dynamic-scope',fetched:items.length,duplicateSkipped,inserted,routed,analyzed,deferred:Math.max(0,accepted.length-maxInsert),scope:{organizationId:scope.organizationId,cityName:scope.cityName,districtCount:scope.districts.length}};
     }catch(error){const message=error instanceof Error?error.message:String(error);await pool.query(`UPDATE media_sources SET last_checked_at=$2,last_error=$3 WHERE id=$1`,[source.id,checkedAt,message]).catch(()=>undefined);request.log.error({err:error,sourceId:source.id},'online source ingestion failed');return reply.code(502).send({error:'SOURCE_INGESTION_FAILED',message,source:source.name,sourceId:String(source.id)});}
   });
 
