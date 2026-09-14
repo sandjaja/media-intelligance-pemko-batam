@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { Pool } from 'pg';
 import { analyzeArticle } from './analyzer.js';
 import { collectOnlineSource, type OnlineSource, type OnlineArticle } from './online-media-collector.js';
-import { loadOrganizationMediaScope, filterArticlesByOrganizationScope } from './organization-media-scope.js';
+import { loadOrganizationMediaScope, type OrganizationMediaScope } from './organization-media-scope.js';
 
 export type FeedSource = OnlineSource & { tier?: number; category?: string };
 export type IngestedArticle = OnlineArticle;
@@ -14,22 +14,20 @@ export function fingerprint(title: string, url: string): string {
 function canonicalTitle(value:string):string {
   return String(value||'')
     .toLowerCase().normalize('NFKC')
-    .replace(/\s*[-–—|]\s*(jawa\s*pos|batam\s*pos|antara(?:\s*news)?|tribun(?:news|\s*batam)?)(?:\.com)?\s*$/i,'')
     .replace(/[^\p{L}\p{N}\s]/gu,' ')
     .replace(/\s+/g,' ')
     .trim();
 }
 
-export async function fetchFeed(source: FeedSource): Promise<IngestedArticle[]> {
-  return collectOnlineSource(source);
+export async function fetchFeed(source: FeedSource, scope?: OrganizationMediaScope | null): Promise<IngestedArticle[]> {
+  return collectOnlineSource(source, scope);
 }
 
-export async function ingestSource(pool: Pool, source: FeedSource): Promise<{ fetched: number; inserted: number; analyzed: number; duplicateSkipped: number; rawFetched?: number; scopeFiltered?: number }> {
+export async function ingestSource(pool: Pool, source: FeedSource): Promise<{ fetched: number; inserted: number; analyzed: number; duplicateSkipped: number }> {
   const checkedAt = new Date();
   try {
     const scope = await loadOrganizationMediaScope(pool);
-    const rawArticles = await fetchFeed(source);
-    const articles = filterArticlesByOrganizationScope(rawArticles, scope);
+    const articles = await fetchFeed(source, scope);
     const recent = (await pool.query(`SELECT title FROM articles WHERE source_id=$1 AND COALESCE(published_at,created_at)>=NOW()-INTERVAL '14 days'`,[source.id])).rows;
     const knownTitles = new Set(recent.map(r=>canonicalTitle(r.title)).filter(Boolean));
     const seenThisRun = new Set<string>();
@@ -58,7 +56,7 @@ export async function ingestSource(pool: Pool, source: FeedSource): Promise<{ fe
         if (analysis) analyzed++;
         await pool.query(
           `INSERT INTO audit_logs (action,metadata) VALUES ('INGEST_ARTICLE',$1)`,
-          [{ fingerprint: fp, canonicalTitle:canonical, articleId, sourceId: source.id, collector: 'online-hybrid-v4-db-scope', analysis, organizationId: scope?.organizationId ?? null, cityName: scope?.cityName ?? null }]
+          [{ fingerprint: fp, canonicalTitle:canonical, articleId, sourceId: source.id, collector: 'online-hybrid-v5-dynamic-scope', analysis, organizationId: scope?.organizationId ?? null, cityName: scope?.cityName ?? null }]
         );
       }
     }
@@ -68,7 +66,7 @@ export async function ingestSource(pool: Pool, source: FeedSource): Promise<{ fe
        WHERE id=$1`,
       [source.id, checkedAt, articles.length, inserted]
     );
-    return { rawFetched: rawArticles.length, fetched: articles.length, scopeFiltered: Math.max(0, rawArticles.length-articles.length), inserted, analyzed, duplicateSkipped };
+    return { fetched: articles.length, inserted, analyzed, duplicateSkipped };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await pool.query(`UPDATE media_sources SET last_checked_at=$2,last_error=$3 WHERE id=$1`, [source.id, checkedAt, message]).catch(() => undefined);
@@ -96,9 +94,9 @@ export async function ingestEnabledSources(pool: Pool): Promise<Record<string, u
     const results: Record<string, unknown>[] = [];
     for (const source of rows) {
       try {
-        results.push({ source: source.name, sourceId: String(source.id), collector: 'online-hybrid-v4-db-scope', ...(await ingestSource(pool, source)) });
+        results.push({ source: source.name, sourceId: String(source.id), collector: 'online-hybrid-v5-dynamic-scope', ...(await ingestSource(pool, source)) });
       } catch (error) {
-        results.push({ source: source.name, sourceId: String(source.id), collector: 'online-hybrid-v4-db-scope', error: error instanceof Error ? error.message : String(error) });
+        results.push({ source: source.name, sourceId: String(source.id), collector: 'online-hybrid-v5-dynamic-scope', error: error instanceof Error ? error.message : String(error) });
       }
     }
     const successfulSources = results.filter(r => !r.error).length;
