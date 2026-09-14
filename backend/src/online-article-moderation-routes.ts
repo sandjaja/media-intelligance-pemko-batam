@@ -4,18 +4,18 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { collectOnlineSource } from './online-media-collector.js';
-import { loadOrganizationMediaScope, filterArticlesByOrganizationScope } from './organization-media-scope.js';
+import { loadOrganizationMediaScope } from './organization-media-scope.js';
 import { analyzeArticle, routeArticleHeadline } from './analyzer.js';
 
 declare module 'fastify' { interface FastifyRequest { onlineModerationAuth?: AuthorizationContext } }
 const canModerate=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
-async function organizationId(pool:Pool,ctx:AuthorizationContext){if(ctx.opdId){const r=await pool.query(`SELECT organization_id FROM opd WHERE id=$1`,[ctx.opdId]);if(r.rows[0]?.organization_id)return Number(r.rows[0].organization_id);}const r=await pool.query(`SELECT id FROM organizations ORDER BY id LIMIT 2`);return r.rowCount===1?Number(r.rows[0].id):0;}
+async function organizationId(pool:Pool,ctx:AuthorizationContext){if(ctx.opdId){const r=await pool.query(`SELECT organization_id FROM opd WHERE id=$1`,[ctx.opdId]);if(r.rows[0]?.organization_id)return Number(r.rows[0].organization_id);}const r=await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 2`);return r.rowCount===1?Number(r.rows[0].id):0;}
 const relevanceClause=(status:'relevant'|'irrelevant'|'all',alias='a')=>status==='relevant'?`AND NOT EXISTS (SELECT 1 FROM audit_logs al WHERE al.action='ONLINE_ARTICLE_MARKED_IRRELEVANT' AND al.metadata->>'articleId'=${alias}.id::text)`:status==='irrelevant'?`AND EXISTS (SELECT 1 FROM audit_logs al WHERE al.action='ONLINE_ARTICLE_MARKED_IRRELEVANT' AND al.metadata->>'articleId'=${alias}.id::text)`:'';
-const canonical=(v:string)=>String(v||'').toLowerCase().normalize('NFKC').replace(/\s*[-–—|]\s*(jawa\s*pos|batam\s*pos|antara(?:\s*news)?|tribun(?:news|\s*batam)?)(?:\.com)?\s*$/i,'').replace(/[^\p{L}\p{N}\s]/gu,' ').replace(/\s+/g,' ').trim();
+const canonical=(v:string)=>String(v||'').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}\s]/gu,' ').replace(/\s+/g,' ').trim();
 const similarity=(a:string,b:string)=>{const A=new Set(canonical(a).split(' ').filter(x=>x.length>2)),B=new Set(canonical(b).split(' ').filter(x=>x.length>2));if(!A.size||!B.size)return 0;let n=0;for(const x of A)if(B.has(x))n++;return n/(A.size+B.size-n)};
 const duplicate=(title:string,known:string[])=>{const c=canonical(title);return known.some(k=>{const d=canonical(k);if(!c||!d)return false;if(c===d)return true;const s=c.length<=d.length?c:d,l=c.length>d.length?c:d;if(l.includes(s)&&s.length/l.length>=.82)return true;return similarity(c,d)>=.84;});};
-function healthTarget(url:string){try{const u=new URL(url);if(/(^|\.)batampos\.co\.id$/i.test(u.hostname))return'https://batampos.jawapos.com/batam';return u.toString();}catch{return url}}
-async function probeUrl(url:string){const ctrl=new AbortController();const timer=setTimeout(()=>ctrl.abort(),5500);try{const r=await fetch(url,{method:'GET',redirect:'follow',signal:ctrl.signal,headers:{'user-agent':'Mozilla/5.0 (compatible; PemkoBatamMediaIntelligence/health; +https://mediacenter.batam.go.id/)','accept':'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8','accept-language':'id-ID,id;q=0.9'}});try{await r.body?.cancel();}catch{}return{ok:r.ok,status:r.status,finalUrl:r.url||url};}finally{clearTimeout(timer)}}
+function healthTarget(url:string){try{return new URL(url).toString()}catch{return url}}
+async function probeUrl(url:string){const ctrl=new AbortController();const timer=setTimeout(()=>ctrl.abort(),5500);try{const r=await fetch(url,{method:'GET',redirect:'follow',signal:ctrl.signal,headers:{'user-agent':'Mozilla/5.0 (compatible; GovernmentMediaIntelligence/health)','accept':'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8','accept-language':'id-ID,id;q=0.9'}});try{await r.body?.cancel();}catch{}return{ok:r.ok,status:r.status,finalUrl:r.url||url};}finally{clearTimeout(timer)}}
 
 export async function registerOnlineArticleModerationRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
   const auth=async(request:FastifyRequest,reply:any)=>{const token=request.cookies.access_token;if(!token)return reply.code(401).send({error:'UNAUTHENTICATED'});try{const d=jwt.verify(token,jwtSecret) as jwt.JwtPayload;if(typeof d.sub!=='string')throw new Error('invalid');const ctx=await loadAuthorizationContext(pool,d.sub);if(!ctx?.active)return reply.code(403).send({error:'ACCOUNT_INACTIVE'});request.onlineModerationAuth=ctx;}catch{return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'});}};
@@ -39,8 +39,7 @@ export async function registerOnlineArticleModerationRoutes(app:FastifyInstance,
     const checkedAt=new Date();
     try{
       const scope=await loadOrganizationMediaScope(pool);
-      const rawItems=await collectOnlineSource({id:String(source.id),name:source.name,url:source.url,active:true});
-      const items=filterArticlesByOrganizationScope(rawItems,scope);
+      const items=await collectOnlineSource({id:String(source.id),name:source.name,url:source.url,active:true},scope);
       const existing=(await pool.query(`SELECT title FROM articles WHERE source_id=$1 AND COALESCE(published_at,created_at)>=NOW()-INTERVAL '14 days'`,[source.id])).rows.map(r=>String(r.title||''));
       const accepted:any[]=[];const seen=[...existing];let duplicateSkipped=0;
       for(const item of items){if(duplicate(item.title,seen)){duplicateSkipped++;continue;}seen.push(item.title);accepted.push(item);}
@@ -54,7 +53,7 @@ export async function registerOnlineArticleModerationRoutes(app:FastifyInstance,
         }
       }
       await pool.query(`UPDATE media_sources SET last_checked_at=$2,last_success_at=$2,last_error=NULL,last_fetched_count=$3,last_inserted_count=$4 WHERE id=$1`,[source.id,checkedAt,items.length,inserted]);
-      return{source:source.name,sourceId:String(source.id),collector:'online-interactive-v7-db-scope',rawFetched:rawItems.length,fetched:items.length,scopeFiltered:Math.max(0,rawItems.length-items.length),duplicateSkipped,inserted,routed,analyzed,deferred:Math.max(0,accepted.length-maxInsert),scope:scope?{organizationId:scope.organizationId,cityName:scope.cityName,districtCount:scope.districts.length}:null};
+      return{source:source.name,sourceId:String(source.id),collector:'online-interactive-v8-dynamic-scope',fetched:items.length,duplicateSkipped,inserted,routed,analyzed,deferred:Math.max(0,accepted.length-maxInsert),scope:scope?{organizationId:scope.organizationId,cityName:scope.cityName,districtCount:scope.districts.length}:null};
     }catch(error){const message=error instanceof Error?error.message:String(error);await pool.query(`UPDATE media_sources SET last_checked_at=$2,last_error=$3 WHERE id=$1`,[source.id,checkedAt,message]).catch(()=>undefined);request.log.error({err:error,sourceId:source.id},'online source ingestion failed');return reply.code(502).send({error:'SOURCE_INGESTION_FAILED',message,source:source.name,sourceId:String(source.id)});}
   });
 
