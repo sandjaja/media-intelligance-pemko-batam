@@ -1,4 +1,4 @@
--- Foundation: official/owned social accounts for Pemko Batam and OPD
+-- Foundation: official/owned social accounts for local government and OPD
 CREATE TABLE IF NOT EXISTS owned_social_accounts (
   id BIGSERIAL PRIMARY KEY,
   opd_id BIGINT REFERENCES opd(id) ON DELETE SET NULL,
