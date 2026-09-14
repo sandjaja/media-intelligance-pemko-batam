@@ -91,20 +91,14 @@ export function organizationScopeTokens(scope: OrganizationMediaScope): string[]
 
 export function isArticleInOrganizationScope(article: OnlineArticle, scope: OrganizationMediaScope): boolean {
   const { strong, supporting } = organizationScopeTerms(scope);
-  if (!strong.length) return true;
+  if (!strong.length) return false;
 
+  // Scope is intentionally decided from the headline. Article excerpts often contain
+  // navigation/footer/recommendation text from other stories and previously caused
+  // unrelated regional stories to pass merely because the city name appeared there.
   const title = normalize(article.title);
-  const lead = normalize(String(article.excerpt || '').slice(0, 1600));
-
   if (strong.some(term => containsTerm(title, term))) return true;
-  if (strong.some(term => containsTerm(lead, term))) return true;
-
-  const supportingHit = supporting.some(term => containsTerm(title, term) || containsTerm(lead, term));
-  if (supportingHit && scope.cityName) {
-    const city = normalize(scope.cityName);
-    if (containsTerm(title, city) || containsTerm(lead, city)) return true;
-  }
-
+  if (supporting.some(term => containsTerm(title, term))) return true;
   return false;
 }
 
@@ -112,6 +106,6 @@ export function filterArticlesByOrganizationScope(
   articles: OnlineArticle[],
   scope: OrganizationMediaScope | null
 ): OnlineArticle[] {
-  if (!scope) return articles;
+  if (!scope) return [];
   return articles.filter(article => isArticleInOrganizationScope(article, scope));
 }
