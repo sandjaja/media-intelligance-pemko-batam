@@ -1,4 +1,4 @@
--- Foundation RBAC permissions for Batam Media & Communication Command Center
+-- Foundation RBAC permissions for Media & Communication Command Center
 
 INSERT INTO permissions(code, name) VALUES
   ('platform.admin','Full platform administration'),
