@@ -6,8 +6,8 @@ import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 
 declare module 'fastify' { interface FastifyRequest { issueTaxonomyAuth?: AuthorizationContext } }
 const canManage=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
-async function resolveOrganizationId(pool:Pool,ctx:AuthorizationContext){if(ctx.opdId){const r=await pool.query('SELECT organization_id FROM opd WHERE id=$1',[ctx.opdId]);if(r.rows[0]?.organization_id)return Number(r.rows[0].organization_id);}const r=await pool.query('SELECT id FROM organizations ORDER BY id LIMIT 2');return r.rowCount===1?Number(r.rows[0].id):0;}
-const words=(v:string)=>[...new Set(v.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter(x=>x.length>=4&&!['yang','dengan','untuk','dari','pada','dalam','pemko','batam','kota','isu'].includes(x)))];
+async function resolveOrganizationId(pool:Pool,ctx:AuthorizationContext){if(ctx.opdId){const r=await pool.query('SELECT organization_id FROM opd WHERE id=$1',[ctx.opdId]);if(r.rows[0]?.organization_id)return Number(r.rows[0].organization_id);}const r=await pool.query('SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 2');return r.rowCount===1?Number(r.rows[0].id):0;}
+const words=(v:string)=>[...new Set(v.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter(x=>x.length>=4&&!['yang','dengan','untuk','dari','pada','dalam','pemko','kota','isu'].includes(x)))];
 function similarity(a:string,b:string){const x=words(a),y=new Set(words(b));if(!x.length)return 0;return Math.round(x.filter(w=>y.has(w)).length/Math.max(x.length,words(b).length)*100);}
 
 export async function registerIssueTaxonomyManagementRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
