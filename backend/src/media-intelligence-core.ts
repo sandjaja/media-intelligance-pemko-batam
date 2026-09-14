@@ -74,7 +74,7 @@ export function analyzeArticle(article: IntelligenceArticle, query: KeywordQuery
 
 export function extractEntities(article: IntelligenceArticle) {
   const text = [article.title, article.summary ?? '', article.content ?? ''].join(' ');
-  const matches = text.match(/\b(?:Pemko|Pemerintah Kota|Dinas|Badan|DPMPTSP|Diskominfo|Dinkes|Dishub|Disdik|Batam|Wali Kota|Wakil Wali Kota)\b(?:\s+[A-Z][\p{L}\-]+){0,4}/gu) ?? [];
+  const matches = text.match(/\b(?:Pemko|Pemerintah Kota|Pemerintah Kabupaten|Pemkab|Dinas|Badan|DPMPTSP|Diskominfo|Dinkes|Dishub|Disdik|Wali Kota|Wakil Wali Kota|Bupati|Wakil Bupati)\b(?:\s+[A-Z][\p{L}\-]+){0,4}/gu) ?? [];
   return [...new Set(matches.map(v => v.trim()))].slice(0, 20);
 }
 export function detectDuplicates(articles: IntelligenceArticle[]) { const groups = new Map<string, IntelligenceArticle[]>(); for (const article of articles) { const key = fingerprintArticle(article); if (!key) continue; const group = groups.get(key) ?? []; group.push(article); groups.set(key, group); } return [...groups.entries()].filter(([, group]) => group.length > 1).map(([fingerprint, group]) => ({ fingerprint, articles: group })); }
