@@ -27,6 +27,7 @@ export async function ingestSource(pool: Pool, source: FeedSource): Promise<{ fe
   const checkedAt = new Date();
   try {
     const scope = await loadOrganizationMediaScope(pool);
+    if (!scope) throw new Error('ACTIVE_ORGANIZATION_SCOPE_UNRESOLVED');
     const articles = await fetchFeed(source, scope);
     const recent = (await pool.query(`SELECT title FROM articles WHERE source_id=$1 AND COALESCE(published_at,created_at)>=NOW()-INTERVAL '14 days'`,[source.id])).rows;
     const knownTitles = new Set(recent.map(r=>canonicalTitle(r.title)).filter(Boolean));
@@ -56,7 +57,7 @@ export async function ingestSource(pool: Pool, source: FeedSource): Promise<{ fe
         if (analysis) analyzed++;
         await pool.query(
           `INSERT INTO audit_logs (action,metadata) VALUES ('INGEST_ARTICLE',$1)`,
-          [{ fingerprint: fp, canonicalTitle:canonical, articleId, sourceId: source.id, collector: 'online-hybrid-v5-dynamic-scope', analysis, organizationId: scope?.organizationId ?? null, cityName: scope?.cityName ?? null }]
+          [{ fingerprint: fp, canonicalTitle:canonical, articleId, sourceId: source.id, collector: 'online-hybrid-v5-dynamic-scope', analysis, organizationId: scope.organizationId, cityName: scope.cityName ?? null }]
         );
       }
     }
