@@ -9,15 +9,15 @@ declare module 'fastify' { interface FastifyRequest { printIssueAuth?: Authoriza
 type Phase2EAnalysisLike={issueCategory?:string;officialKeywordMatches?:Array<{keyword:string;opdId?:number|null}>;operatorKeywordMatches?:Array<{keyword:string}>;entityValidation?:{selected?:{opdId?:number|null;districtId?:number|null};detected?:{opd?:{id:number}|null;district?:{id:number}|null}}};
 export type IssueLinkageCandidate={issueId:number;title:string;status:string;score:number;confidence:'LOW'|'MEDIUM'|'HIGH';evidence:string[];linkageStatus:'candidate'|'linked'|'rejected'};
 export type IssueLinkageResult={engine:string;generatedAt:string;candidateCount:number;linkedIssueId:number|null;candidates:IssueLinkageCandidate[];note:string;degraded?:boolean};
-const ENGINE='phase2e-issue-link-v2.4-anchor-calibrated';
+const ENGINE='phase2e-issue-link-v2.5-portable';
 const norm=(v:any)=>String(v||'').toLowerCase().normalize('NFKD').replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
-const GENERIC=new Set(['yang','dengan','untuk','dari','pada','dalam','pemko','batam','pemerintah','dinas','kota','daerah','olahraga','kepemudaan','pemuda','atlet','prestasi','program','kegiatan','kepri','provinsi']);
+const GENERIC=new Set(['yang','dengan','untuk','dari','pada','dalam','pemko','pemerintah','dinas','kota','daerah','olahraga','kepemudaan','pemuda','atlet','prestasi','program','kegiatan','provinsi']);
 const specific=(v:string)=>{const n=norm(v);return n.length>=4&&/[a-z]/.test(n)&&!GENERIC.has(n)&&!['sport','tourism'].includes(n);};
 const tokens=(v:any)=>new Set(norm(v).split(' ').filter(specific));
 const overlap=(a:Set<string>,b:Set<string>)=>[...a].filter(x=>b.has(x));
 const confidence=(s:number):'LOW'|'MEDIUM'|'HIGH'=>s>=70?'HIGH':s>=40?'MEDIUM':'LOW';
 
-async function resolveOrganizationId(client:PoolClient,article:any,analysis:Phase2EAnalysisLike):Promise<number|null>{const opdId=Number(analysis.entityValidation?.selected?.opdId||analysis.entityValidation?.detected?.opd?.id||article.opd_id||0)||null;if(opdId){const r=await client.query(`SELECT organization_id FROM opd WHERE id=$1 LIMIT 1`,[opdId]);const v=Number(r.rows[0]?.organization_id||0);if(v)return v;}const only=await client.query(`SELECT id FROM organizations ORDER BY id LIMIT 2`);return only.rows.length===1?Number(only.rows[0].id):null;}
+async function resolveOrganizationId(client:PoolClient,article:any,analysis:Phase2EAnalysisLike):Promise<number|null>{const opdId=Number(analysis.entityValidation?.selected?.opdId||analysis.entityValidation?.detected?.opd?.id||article.opd_id||0)||null;if(opdId){const r=await client.query(`SELECT organization_id FROM opd WHERE id=$1 LIMIT 1`,[opdId]);const v=Number(r.rows[0]?.organization_id||0);if(v)return v;}const only=await client.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 2`);return only.rows.length===1?Number(only.rows[0].id):null;}
 
 async function compute(client:PoolClient,article:any,analysis:Phase2EAnalysisLike):Promise<IssueLinkageResult>{
  const organizationId=await resolveOrganizationId(client,article,analysis);if(!organizationId)return{engine:ENGINE,generatedAt:new Date().toISOString(),candidateCount:0,linkedIssueId:null,candidates:[],degraded:true,note:'Organization clipping tidak dapat ditentukan secara aman; linkage dilewati tanpa memblokir analisis.'};
