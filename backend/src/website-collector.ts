@@ -4,7 +4,7 @@ import { ingestSocialBatch, type SocialCandidate } from './social-collector.js';
 
 type WebsiteAccount = { id:string; opd_id:string|null; account_name:string; handle:string; profile_url:string|null };
 const parser=new XMLParser({ignoreAttributes:false,attributeNamePrefix:'@_'});
-const USER_AGENT='MediaIntelligenceBot/1.0 (+Pemko Batam media monitoring)';
+const USER_AGENT='MediaIntelligenceBot/2.0 (+government media monitoring)';
 const PAGE_TIMEOUT_MS=4500,FEED_TIMEOUT_MS=3500,ARTICLE_TIMEOUT_MS=3500,HTML_CRAWL_LIMIT=20;
 const BACKFILL_DAYS=7,FEED_ITEM_LIMIT=100,INGEST_LIMIT=80;
 const asArray=<T>(v:T|T[]|undefined):T[]=>v==null?[]:Array.isArray(v)?v:[v];
