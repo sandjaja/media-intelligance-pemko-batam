@@ -1,4 +1,4 @@
--- Foundation v1 for Batam Media & Communication Command Center
+-- Foundation v1 for Media & Communication Command Center
 -- Additive migration: preserves existing V2 tables and APIs while introducing
 -- normalized geography, RBAC, evidence, print, issue and narrative foundations.
 
@@ -251,13 +251,9 @@ CREATE TABLE IF NOT EXISTS alert_events (
 );
 CREATE INDEX IF NOT EXISTS idx_alert_events_alert ON alert_events(alert_id, created_at DESC);
 
-INSERT INTO organizations(name, code)
-VALUES ('Pemerintah Kota Batam', 'PEMKO_BATAM')
-ON CONFLICT DO NOTHING;
-
-UPDATE opd
-SET organization_id = (SELECT id FROM organizations WHERE code='PEMKO_BATAM' LIMIT 1)
-WHERE organization_id IS NULL;
+-- Organization, branding, geography, OPD, keywords and media sources are tenant data.
+-- They must be configured explicitly through administration/bootstrap configuration;
+-- this migration intentionally does not create a city-specific organization.
 
 INSERT INTO roles(code, name, description) VALUES
   ('super_admin','Super Admin','Full platform administration'),
