@@ -46,18 +46,28 @@ export async function registerOnlineArticleModerationRoutes(app:FastifyInstance,
       const existing=(await pool.query(`SELECT title FROM articles WHERE source_id=$1 AND COALESCE(published_at,created_at)>=NOW()-INTERVAL '14 days'`,[source.id])).rows.map(r=>String(r.title||''));
       const accepted:any[]=[];const seen=[...existing];let duplicateSkipped=0;
       for(const item of items){if(duplicate(item.title,seen)){duplicateSkipped++;continue;}seen.push(item.title);accepted.push(item);}
-      let inserted=0,analyzed=0,routed=0;const maxInsert=8,maxAnalyze=3;
+      let inserted=0,analyzed=0,routed=0;const maxInsert=8;
       for(const item of accepted.slice(0,maxInsert)){
         const r=await pool.query(`INSERT INTO articles(source_id,title,url,published_at,content,summary,sentiment,importance_score) VALUES($1,$2,$3,$4,$5,$5,'neutral',0) ON CONFLICT(url) DO NOTHING RETURNING id`,[source.id,item.title,item.url,item.publishedAt,item.excerpt??null]);
         if(r.rowCount){
           inserted++;const articleId=String(r.rows[0].id);
           try{if(await routeArticleHeadline(pool,articleId))routed++;}catch{}
-          if(analyzed<maxAnalyze){try{if(await analyzeArticle(pool,articleId))analyzed++;}catch{}}
+          try{if(await analyzeArticle(pool,articleId))analyzed++;}catch{}
         }
       }
       await pool.query(`UPDATE media_sources SET last_checked_at=$2,last_success_at=$2,last_error=NULL,last_fetched_count=$3,last_inserted_count=$4 WHERE id=$1`,[source.id,checkedAt,items.length,inserted]);
-      return{source:source.name,sourceId:String(source.id),collector:'online-interactive-v8-dynamic-scope',fetched:items.length,duplicateSkipped,inserted,routed,analyzed,deferred:Math.max(0,accepted.length-maxInsert),scope:{organizationId:scope.organizationId,cityName:scope.cityName,districtCount:scope.districts.length}};
+      return{source:source.name,sourceId:String(source.id),collector:'online-interactive-v9-full-analysis',fetched:items.length,duplicateSkipped,inserted,routed,analyzed,deferred:Math.max(0,accepted.length-maxInsert),scope:{organizationId:scope.organizationId,cityName:scope.cityName,districtCount:scope.districts.length}};
     }catch(error){const message=error instanceof Error?error.message:String(error);await pool.query(`UPDATE media_sources SET last_checked_at=$2,last_error=$3 WHERE id=$1`,[source.id,checkedAt,message]).catch(()=>undefined);request.log.error({err:error,sourceId:source.id},'online source ingestion failed');return reply.code(502).send({error:'SOURCE_INGESTION_FAILED',message,source:source.name,sourceId:String(source.id)});}
+  });
+
+  app.post('/api/online/reanalyze',{preHandler:auth},async(request,reply)=>{
+    const ctx=request.onlineModerationAuth!;if(!canModerate(ctx))return reply.code(403).send({error:'ONLINE_REANALYSIS_REQUIRES_HUMAS_OR_SUPER_ADMIN'});
+    const body=z.object({days:z.coerce.number().int().min(1).max(30).default(7),limit:z.coerce.number().int().min(1).max(500).default(300)}).safeParse(request.body??{});if(!body.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+    const articles=(await pool.query(`SELECT a.id FROM articles a JOIN media_sources ms ON ms.id=a.source_id WHERE lower(ms.category)='online' AND a.published_at>=NOW()-($1::text||' days')::interval AND NOT EXISTS (SELECT 1 FROM audit_logs al WHERE al.action='ONLINE_ARTICLE_MARKED_IRRELEVANT' AND al.metadata->>'articleId'=a.id::text) ORDER BY a.published_at DESC NULLS LAST,a.id DESC LIMIT $2`,[body.data.days,body.data.limit])).rows;
+    let analyzed=0,failed=0;const failures:any[]=[];
+    for(const article of articles){try{if(await analyzeArticle(pool,String(article.id)))analyzed++;else failed++;}catch(error){failed++;if(failures.length<20)failures.push({articleId:String(article.id),error:error instanceof Error?error.message:String(error)});}}
+    await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'ONLINE_REANALYSIS_RUN',$2)`,[ctx.id,{days:body.data.days,requested:articles.length,analyzed,failed,failures}]).catch(()=>undefined);
+    return{ok:true,days:body.data.days,requested:articles.length,analyzed,failed,failures};
   });
 
   app.post('/api/online/sources/:id/test',{preHandler:auth},async(request,reply)=>{
