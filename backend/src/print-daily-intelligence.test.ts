@@ -6,14 +6,14 @@ test('print scan uses database OPD name and edition date', () => {
   const row = normalizePrintScan({
     id: 17,
     file_name: 'koran-5-september.jpg',
-    ocr_text: 'Pelayanan Dinas Kesehatan Kota Batam menjadi sorotan karena keluhan warga.',
+    ocr_text: 'Pelayanan Dinas Kesehatan Kota Metro menjadi sorotan karena keluhan warga.',
     created_at: '2026-09-05T03:00:00Z',
     opd_id: 5,
     opd_name: 'Dinas Kesehatan',
     analysis: {
       headline: 'Pelayanan kesehatan menjadi sorotan',
       summary: 'Keluhan warga mengenai pelayanan.',
-      media_name: 'Media Batam',
+      media_name: 'Media Lokal',
       edition_date: '2026-09-05',
       sentiment: 'negative',
       risk_score: 72,
@@ -24,7 +24,7 @@ test('print scan uses database OPD name and edition date', () => {
     }
   });
   assert.equal(row.id, 'print-17');
-  assert.equal(row.source_name, 'Media Batam');
+  assert.equal(row.source_name, 'Media Lokal');
   assert.equal(row.published_at, '2026-09-05');
   assert.equal(row.opd_id, 5);
   assert.equal(row.opd_name, 'Dinas Kesehatan');
