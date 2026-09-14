@@ -16,8 +16,6 @@ function dynamicOpdTerms(row:{name?:string;code?:string}){
   if(withoutDinas.length>=5)terms.add(withoutDinas);
   const withoutBadan=name.replace(/^badan\s+/,'').trim();
   if(withoutBadan.length>=5)terms.add(withoutBadan);
-  const withoutKecamatan=name.replace(/^kecamatan\s+/,'').trim();
-  if(withoutKecamatan.length>=4)terms.add(withoutKecamatan);
   return [...terms];
 }
 function taxonomyTerms(row:{name?:string;description?:string}){
@@ -31,7 +29,7 @@ function taxonomyTerms(row:{name?:string;description?:string}){
   return [...terms];
 }
 function expandKeywordRows(rows:any[]){
-  return rows.flatMap(k=>splitKeyword(k.keyword).map(keyword=>({id:k.id,opd_id:k.opd_id,keyword})));
+  return rows.flatMap(k=>splitKeyword(k.keyword).map(keyword=>({id:k.id,opd_id:k.opd_id,district_id:k.district_id,keyword})));
 }
 function matchKeywords(text:string,rows:any[]){
   const normalized=normalize(text);
@@ -63,15 +61,16 @@ export async function routeArticleHeadline(pool:Pool,articleId:string){
 
   const fullText=`${article.title||''} ${article.summary||''} ${article.content||''}`;
   const titleText=normalize(String(article.title||''));
-  const keywordRows=(await pool.query(`SELECT id,opd_id,keyword FROM keywords WHERE active=true ORDER BY id`)).rows;
+  const keywordRows=(await pool.query(`SELECT id,opd_id,district_id,keyword FROM keywords WHERE active=true ORDER BY id`)).rows;
   const matches=matchKeywords(fullText,keywordRows);
 
   const opdScores=new Map<string,number>();
+  const districtScores=new Map<string,number>();
   for(const match of matches){
     if(match.opd_id!=null)opdScores.set(String(match.opd_id),(opdScores.get(String(match.opd_id))??0)+10);
+    if(match.district_id!=null)districtScores.set(String(match.district_id),(districtScores.get(String(match.district_id))??0)+10);
   }
 
-  // Explicit OPD mentions remain supported, but terms come only from OPD master data.
   const opdRows=(await pool.query(`SELECT id,name,code FROM opd WHERE active=true ORDER BY id`)).rows;
   for(const opd of opdRows){
     const id=String(opd.id);let score=opdScores.get(id)??0;
@@ -79,18 +78,25 @@ export async function routeArticleHeadline(pool:Pool,articleId:string){
     if(score>0)opdScores.set(id,score);
   }
 
-  const opdId=[...opdScores.entries()].sort((a,b)=>b[1]-a[1])[0]?.[0]??null;
-  await pool.query(`UPDATE articles SET opd_id=$2 WHERE id=$1`,[articleId,opdId]);
+  const districtRows=(await pool.query(`SELECT id,name,code FROM districts WHERE active=true ORDER BY id`)).rows;
+  for(const district of districtRows){
+    const id=String(district.id);let score=districtScores.get(id)??0;
+    for(const raw of [district.name,district.code]){const term=normalize(String(raw||''));if(term.length>=3&&containsPhrase(titleText,term))score+=12;}
+    if(score>0)districtScores.set(id,score);
+  }
 
-  // Refresh keyword labels from the active OPD keyword database for every routed article.
+  const opdId=[...opdScores.entries()].sort((a,b)=>b[1]-a[1])[0]?.[0]??null;
+  const districtId=[...districtScores.entries()].sort((a,b)=>b[1]-a[1])[0]?.[0]??null;
+  await pool.query(`UPDATE articles SET opd_id=$2,district_id=$3 WHERE id=$1`,[articleId,opdId,districtId]);
+
   await pool.query(`DELETE FROM article_entities WHERE article_id=$1 AND entity_type='keyword'`,[articleId]);
-  const matchedNames=[...new Set(matches.map(k=>k.keyword))].slice(0,30);
+  const matchedNames=[...new Set(matches.filter(k=>k.opd_id!=null).map(k=>k.keyword))].slice(0,30);
   for(const match of matchedNames){
     await pool.query(`INSERT INTO article_entities(article_id,entity_type,entity_name) VALUES($1,'keyword',$2) ON CONFLICT DO NOTHING`,[articleId,match]);
   }
 
   const issueMatch=await mapHeadlineToExistingIssue(pool,String(articleId),String(article.title||''));
-  return{articleId:String(articleId),opdId,issueId:issueMatch?.id??null,issueMatchScore:issueMatch?.score??0,keywordMatches:matchedNames.length,matchedKeywords:matchedNames};
+  return{articleId:String(articleId),opdId,districtId,issueId:issueMatch?.id??null,issueMatchScore:issueMatch?.score??0,keywordMatches:matchedNames.length,matchedKeywords:matchedNames};
 }
 
 export async function analyzeArticle(pool: Pool, articleId: string) {
@@ -114,5 +120,5 @@ export async function analyzeArticle(pool: Pool, articleId: string) {
   for (const entity of analysis.entities.slice(0,20)) await pool.query(`INSERT INTO article_entities(article_id,entity_type,entity_name) VALUES($1,'entity',$2) ON CONFLICT DO NOTHING`, [articleId, entity]);
 
   const risk = await applyRisk(pool, articleId);
-  return { articleId, opdId, issueId:routing?.issueId??null, issueMatchScore:routing?.issueMatchScore??0, sentiment: analysis.sentiment, importance: analysis.importanceScore, impact: analysis.impactScore, velocity: analysis.velocityScore, highlight: analysis.importanceScore >= 65 || analysis.riskLevel === 'high' || analysis.riskLevel === 'critical', keywordMatches: matchedNames.length, matchedKeywords:matchedNames, entities: analysis.entities, duplicateFingerprint: analysis.duplicateFingerprint, risk };
+  return { articleId, opdId, districtId:routing?.districtId??null, issueId:routing?.issueId??null, issueMatchScore:routing?.issueMatchScore??0, sentiment: analysis.sentiment, importance: analysis.importanceScore, impact: analysis.impactScore, velocity: analysis.velocityScore, highlight: analysis.importanceScore >= 65 || analysis.riskLevel === 'high' || analysis.riskLevel === 'critical', keywordMatches: matchedNames.length, matchedKeywords:matchedNames, entities: analysis.entities, duplicateFingerprint: analysis.duplicateFingerprint, risk };
 }
