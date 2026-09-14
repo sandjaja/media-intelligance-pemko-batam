@@ -8,7 +8,6 @@ export type OrganizationMediaScope = {
   governmentName?: string | null;
   shortName?: string | null;
   cityName?: string | null;
-  provinceName?: string | null;
   tagline?: string | null;
   districts: string[];
 };
@@ -43,8 +42,9 @@ export async function loadOrganizationMediaScope(pool: Pool, organizationId?: nu
   if (!org) return null;
 
   const branding = (await pool.query(
-    `SELECT government_name,short_name,city_name,province_name,tagline
+    `SELECT government_name,short_name,city_name,tagline
        FROM government_branding
+      WHERE is_active=true
       ORDER BY id
       LIMIT 1`
   )).rows[0] ?? {};
@@ -61,7 +61,6 @@ export async function loadOrganizationMediaScope(pool: Pool, organizationId?: nu
     governmentName: branding.government_name ?? null,
     shortName: branding.short_name ?? null,
     cityName: branding.city_name ?? null,
-    provinceName: branding.province_name ?? null,
     tagline: branding.tagline ?? null,
     districts,
   };
@@ -80,7 +79,6 @@ export function organizationScopeTerms(scope: OrganizationMediaScope): {
   ]);
   const supporting = uniqueTerms([
     scope.tagline,
-    scope.provinceName,
     scope.organizationCode?.replace(/_/g, ' '),
   ]);
   return { strong, supporting };
