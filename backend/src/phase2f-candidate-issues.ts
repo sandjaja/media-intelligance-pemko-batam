@@ -4,9 +4,9 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 
-const ENGINE='phase2f-candidate-issue-v1.2-human-validation';
+const ENGINE='phase2f-candidate-issue-v1.3-portable';
 declare module 'fastify' { interface FastifyRequest { phase2fCandidateIssueAuth?: AuthorizationContext } }
-const STOP=new Set(['yang','dengan','untuk','dari','pada','dalam','pemko','batam','pemerintah','dinas','kota','daerah','berita','halaman','koran','batampos','kepri','provinsi','jalan','kembali','akibat','hingga','setelah']);
+const STOP=new Set(['yang','dengan','untuk','dari','pada','dalam','pemko','pemerintah','dinas','kota','daerah','berita','halaman','koran','provinsi','jalan','kembali','akibat','hingga','setelah']);
 const norm=(v:any)=>String(v||'').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}\s-]/gu,' ').replace(/\s+/g,' ').trim();
 const tokens=(v:any)=>[...new Set(norm(v).split(' ').filter(x=>x.length>=4&&/[a-z]/.test(x)&&!STOP.has(x)))];
 const FAMILY:Record<string,Set<string>>={FLOOD:new Set(['banjir','genangan','tergenang','terendam','rendam','meluap','luapan']),TRAFFIC:new Set(['macet','kemacetan']),DISASTER:new Set(['longsor','kebakaran','kecelakaan','darurat','krisis']),ENVIRONMENT:new Set(['sampah','pencemaran','limbah']),PUBLIC_COMPLAINT:new Set(['keluhan','protes','demonstrasi','gangguan'])};
@@ -14,7 +14,7 @@ const families=(ts:string[])=>Object.entries(FAMILY).filter(([,words])=>ts.some(
 const familyTerms=(ts:string[],family:string)=>ts.filter(t=>FAMILY[family]?.has(t));
 const candidateKey=(family:string,ids:number[])=>`${family}:${[...ids].sort((a,b)=>a-b).join(',')}`;
 const canManage=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
-async function resolveOrganizationId(db:Pool|PoolClient,ctx:AuthorizationContext){if(ctx.opdId){const r=await db.query('SELECT organization_id FROM opd WHERE id=$1',[ctx.opdId]);const id=Number(r.rows[0]?.organization_id||0);if(id)return id;}const r=await db.query('SELECT id FROM organizations ORDER BY id LIMIT 2');return r.rowCount===1?Number(r.rows[0].id):0;}
+async function resolveOrganizationId(db:Pool|PoolClient,ctx:AuthorizationContext){if(ctx.opdId){const r=await db.query('SELECT organization_id FROM opd WHERE id=$1',[ctx.opdId]);const id=Number(r.rows[0]?.organization_id||0);if(id)return id;}const r=await db.query('SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 2');return r.rowCount===1?Number(r.rows[0].id):0;}
 async function rejectedKeys(db:Pool|PoolClient,organizationId:number){const r=await db.query(`SELECT metadata->>'candidateKey' candidate_key FROM audit_logs WHERE action='PHASE2F_CANDIDATE_ISSUE_REJECTED' AND (metadata->>'organizationId')::bigint=$1`,[organizationId]);return new Set(r.rows.map(x=>String(x.candidate_key||'')).filter(Boolean));}
 async function detect(db:Pool|PoolClient,organizationId:number){
  const rejected=await rejectedKeys(db,organizationId);
