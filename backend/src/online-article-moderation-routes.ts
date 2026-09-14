@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { collectOnlineSource } from './online-media-collector.js';
+import { loadOrganizationMediaScope, filterArticlesByOrganizationScope } from './organization-media-scope.js';
 import { analyzeArticle, routeArticleHeadline } from './analyzer.js';
 
 declare module 'fastify' { interface FastifyRequest { onlineModerationAuth?: AuthorizationContext } }
@@ -37,7 +38,9 @@ export async function registerOnlineArticleModerationRoutes(app:FastifyInstance,
     const source=(await pool.query(`SELECT id,name,url,tier,active,category FROM media_sources WHERE id=$1 AND active=true AND url IS NOT NULL AND lower(category)='online'`,[id.data])).rows[0];if(!source)return reply.code(404).send({error:'ONLINE_SOURCE_NOT_FOUND'});
     const checkedAt=new Date();
     try{
-      const items=await collectOnlineSource({id:String(source.id),name:source.name,url:source.url,active:true});
+      const scope=await loadOrganizationMediaScope(pool);
+      const rawItems=await collectOnlineSource({id:String(source.id),name:source.name,url:source.url,active:true});
+      const items=filterArticlesByOrganizationScope(rawItems,scope);
       const existing=(await pool.query(`SELECT title FROM articles WHERE source_id=$1 AND COALESCE(published_at,created_at)>=NOW()-INTERVAL '14 days'`,[source.id])).rows.map(r=>String(r.title||''));
       const accepted:any[]=[];const seen=[...existing];let duplicateSkipped=0;
       for(const item of items){if(duplicate(item.title,seen)){duplicateSkipped++;continue;}seen.push(item.title);accepted.push(item);}
@@ -51,7 +54,7 @@ export async function registerOnlineArticleModerationRoutes(app:FastifyInstance,
         }
       }
       await pool.query(`UPDATE media_sources SET last_checked_at=$2,last_success_at=$2,last_error=NULL,last_fetched_count=$3,last_inserted_count=$4 WHERE id=$1`,[source.id,checkedAt,items.length,inserted]);
-      return{source:source.name,sourceId:String(source.id),collector:'online-interactive-v6',fetched:items.length,duplicateSkipped,inserted,routed,analyzed,deferred:Math.max(0,accepted.length-maxInsert)};
+      return{source:source.name,sourceId:String(source.id),collector:'online-interactive-v7-db-scope',rawFetched:rawItems.length,fetched:items.length,scopeFiltered:Math.max(0,rawItems.length-items.length),duplicateSkipped,inserted,routed,analyzed,deferred:Math.max(0,accepted.length-maxInsert),scope:scope?{organizationId:scope.organizationId,cityName:scope.cityName,districtCount:scope.districts.length}:null};
     }catch(error){const message=error instanceof Error?error.message:String(error);await pool.query(`UPDATE media_sources SET last_checked_at=$2,last_error=$3 WHERE id=$1`,[source.id,checkedAt,message]).catch(()=>undefined);request.log.error({err:error,sourceId:source.id},'online source ingestion failed');return reply.code(502).send({error:'SOURCE_INGESTION_FAILED',message,source:source.name,sourceId:String(source.id)});}
   });
 
