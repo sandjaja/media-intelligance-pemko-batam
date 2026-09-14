@@ -35,14 +35,18 @@ export async function registerDistrictRoutes(app: FastifyInstance, pool: Pool, j
     active: z.boolean().default(true),
   });
 
-  const getOrganizationId = async () => {
-    const row = (await pool.query(`SELECT id FROM organizations WHERE code='PEMKO_BATAM' AND active=true ORDER BY id LIMIT 1`)).rows[0];
-    if (!row) throw new Error('PEMKO_BATAM_ORGANIZATION_NOT_FOUND');
-    return row.id;
+  const getOrganizationId = async (ctx: AuthorizationContext) => {
+    if (ctx.opdId) {
+      const row = (await pool.query(`SELECT organization_id FROM opd WHERE id=$1`, [ctx.opdId])).rows[0];
+      if (row?.organization_id) return Number(row.organization_id);
+    }
+    const rows = (await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 2`)).rows;
+    if (rows.length !== 1) throw new Error('ACTIVE_ORGANIZATION_UNRESOLVED');
+    return Number(rows[0].id);
   };
 
-  app.get('/api/admin/districts', { preHandler: authz }, async () => {
-    const organizationId = await getOrganizationId();
+  app.get('/api/admin/districts', { preHandler: authz }, async (request) => {
+    const organizationId = await getOrganizationId(request.districtAuthz!);
     const { rows } = await pool.query(
       `SELECT id,organization_id,name,code,active,created_at
          FROM districts
@@ -56,7 +60,7 @@ export async function registerDistrictRoutes(app: FastifyInstance, pool: Pool, j
   app.post('/api/admin/districts', { preHandler: authz }, async (request, reply) => {
     const parsed = districtInput.safeParse(request.body);
     if (!parsed.success) return reply.code(400).send({ error: 'INVALID_DISTRICT', details: parsed.error.flatten() });
-    const organizationId = await getOrganizationId();
+    const organizationId = await getOrganizationId(request.districtAuthz!);
     try {
       const { rows } = await pool.query(
         `INSERT INTO districts(organization_id,name,code,active)
@@ -66,7 +70,7 @@ export async function registerDistrictRoutes(app: FastifyInstance, pool: Pool, j
       );
       await pool.query(
         `INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'DISTRICT_CREATED',$2)`,
-        [request.districtAuthz!.id, { districtId: rows[0].id, name: rows[0].name, code: rows[0].code }],
+        [request.districtAuthz!.id, { organizationId, districtId: rows[0].id, name: rows[0].name, code: rows[0].code }],
       );
       return reply.code(201).send({ data: rows[0] });
     } catch (error: any) {
@@ -79,7 +83,7 @@ export async function registerDistrictRoutes(app: FastifyInstance, pool: Pool, j
     const id = idParam.safeParse(request.params);
     const parsed = districtInput.partial().safeParse(request.body);
     if (!id.success || !parsed.success) return reply.code(400).send({ error: 'INVALID_DISTRICT' });
-    const organizationId = await getOrganizationId();
+    const organizationId = await getOrganizationId(request.districtAuthz!);
     const current = (await pool.query(
       `SELECT id,name,code,active FROM districts WHERE id=$1 AND organization_id=$2`,
       [id.data.id, organizationId],
@@ -99,7 +103,7 @@ export async function registerDistrictRoutes(app: FastifyInstance, pool: Pool, j
       );
       await pool.query(
         `INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'DISTRICT_UPDATED',$2)`,
-        [request.districtAuthz!.id, { districtId: id.data.id, changes: next }],
+        [request.districtAuthz!.id, { organizationId, districtId: id.data.id, changes: next }],
       );
       return { data: rows[0] };
     } catch (error: any) {
@@ -111,7 +115,7 @@ export async function registerDistrictRoutes(app: FastifyInstance, pool: Pool, j
   app.delete('/api/admin/districts/:id', { preHandler: authz }, async (request, reply) => {
     const id = idParam.safeParse(request.params);
     if (!id.success) return reply.code(400).send({ error: 'INVALID_DISTRICT' });
-    const organizationId = await getOrganizationId();
+    const organizationId = await getOrganizationId(request.districtAuthz!);
     const { rows } = await pool.query(
       `UPDATE districts SET active=false
         WHERE id=$1 AND organization_id=$2
@@ -121,7 +125,7 @@ export async function registerDistrictRoutes(app: FastifyInstance, pool: Pool, j
     if (!rows[0]) return reply.code(404).send({ error: 'DISTRICT_NOT_FOUND' });
     await pool.query(
       `INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'DISTRICT_DEACTIVATED',$2)`,
-      [request.districtAuthz!.id, { districtId: id.data.id }],
+      [request.districtAuthz!.id, { organizationId, districtId: id.data.id }],
     );
     return { data: rows[0] };
   });
