@@ -7,6 +7,7 @@ function containsPhrase(text:string,phrase:string){const t=` ${normalize(text)} 
 function meaningfulTokens(value:string){const stop=new Set(['dan','atau','yang','dengan','untuk','dalam','serta','pemerintah','daerah','masyarakat','kota','kabupaten']);return normalize(value).split(/\s+/).filter(v=>v.length>=4&&!stop.has(v));}
 function dynamicOpdTerms(row:{name?:string;code?:string}){const terms=new Set<string>();const code=normalize(String(row.code||'')),name=normalize(String(row.name||''));if(code.length>=3)terms.add(code);if(name.length>=4)terms.add(name);for(const prefix of ['dinas ','badan ']){const v=name.replace(new RegExp(`^${prefix}`),'').trim();if(v.length>=5)terms.add(v);}return [...terms];}
 function taxonomyTerms(row:{name?:string;description?:string}){const generic=new Set(['dan','atau','yang','dengan','untuk','dalam','serta','pemerintah','daerah','masyarakat']);const terms=new Set<string>();for(const raw of [row.name,row.description])for(const part of String(raw||'').split(/[,;&/]+/)){const term=normalize(part);if(term.length>=4&&!generic.has(term))terms.add(term);}return [...terms];}
+function uptdTerms(row:{name?:string;code?:string;aliases?:unknown}){const terms=new Set<string>();for(const raw of [row.name,row.code]){const term=normalize(String(raw||''));if(term.length>=3)terms.add(term);}const aliases=Array.isArray(row.aliases)?row.aliases:[];for(const raw of aliases){const term=normalize(String(raw||''));if(term.length>=3)terms.add(term);}return [...terms];}
 
 async function mapHeadlineToExistingIssue(pool:Pool,articleId:string,title:string,taxonomyId:string|null){
   const headline=normalize(title);if(!headline)return null;
@@ -32,15 +33,28 @@ export async function routeArticleHeadline(pool:Pool,articleId:string){
   const eligible=[...taxonomyScores.entries()].filter(([,v])=>v.strong||v.keywords.size>=2).sort((a,b)=>b[1].score-a[1].score);
   const taxonomyId=eligible[0]?.[0]??null,taxonomyScore=eligible[0]?.[1].score??0;
 
+  // UPTD is an organizational entity, not a taxonomy keyword. A matched UPTD contributes
+  // to its parent OPD while taxonomy classification remains independent.
+  const uptdRows=(await pool.query(`SELECT id,opd_id,name,code,aliases FROM uptd WHERE active=true ORDER BY id`)).rows;
+  const uptdMatches:{id:string;opdId:string;name:string;score:number;evidence:string[]}[]=[];
+  for(const unit of uptdRows){let score=0;const evidence:string[]=[];for(const term of uptdTerms(unit)){let points=0;if(containsPhrase(titleText,term))points=20;else if(containsPhrase(summaryText,term))points=14;else if(containsPhrase(fullNormalized,term))points=8;if(points>0){score+=points;evidence.push(term);}}if(score>0){const opdId=String(unit.opd_id);uptdMatches.push({id:String(unit.id),opdId,name:String(unit.name||''),score,evidence});opdScores.set(opdId,(opdScores.get(opdId)??0)+score);}}
+  uptdMatches.sort((a,b)=>b.score-a.score||Number(a.id)-Number(b.id));
+
   const opdRows=(await pool.query(`SELECT id,name,code FROM opd WHERE active=true ORDER BY id`)).rows;for(const opd of opdRows){const id=String(opd.id);let score=opdScores.get(id)??0;for(const term of dynamicOpdTerms(opd))if(containsPhrase(titleText,term))score+=12;if(score>0)opdScores.set(id,score);}
   const districtRows=(await pool.query(`SELECT id,name,code FROM districts WHERE active=true ORDER BY id`)).rows;for(const district of districtRows){const id=String(district.id);let score=districtScores.get(id)??0;for(const raw of [district.name,district.code]){const term=normalize(String(raw||''));if(term.length>=3&&containsPhrase(titleText,term))score+=12;}if(score>0)districtScores.set(id,score);}
   const opdId=[...opdScores.entries()].sort((a,b)=>b[1]-a[1])[0]?.[0]??null,districtId=[...districtScores.entries()].sort((a,b)=>b[1]-a[1])[0]?.[0]??null;
   await pool.query(`UPDATE articles SET opd_id=$2,district_id=$3 WHERE id=$1`,[articleId,opdId,districtId]);
-  await pool.query(`DELETE FROM article_entities WHERE article_id=$1 AND entity_type IN ('keyword','taxonomy')`,[articleId]);
+
+  await pool.query(`DELETE FROM article_uptd WHERE article_id=$1`,[articleId]);
+  for(let i=0;i<uptdMatches.length;i++){const unit=uptdMatches[i];await pool.query(`INSERT INTO article_uptd(article_id,uptd_id,relevance_score,evidence,is_primary,updated_at) VALUES($1,$2,$3,$4,$5,NOW()) ON CONFLICT (article_id,uptd_id) DO UPDATE SET relevance_score=EXCLUDED.relevance_score,evidence=EXCLUDED.evidence,is_primary=EXCLUDED.is_primary,updated_at=NOW()`,[articleId,unit.id,unit.score,unit.evidence,i===0]);}
+
+  await pool.query(`DELETE FROM article_entities WHERE article_id=$1 AND entity_type IN ('keyword','taxonomy','uptd')`,[articleId]);
   const matchedNames=[...new Set(matches.map(k=>String(k.keyword)))].slice(0,40);for(const name of matchedNames)await pool.query(`INSERT INTO article_entities(article_id,entity_type,entity_name) VALUES($1,'keyword',$2) ON CONFLICT DO NOTHING`,[articleId,name]);
+  for(const unit of uptdMatches.slice(0,20))await pool.query(`INSERT INTO article_entities(article_id,entity_type,entity_name) VALUES($1,'uptd',$2) ON CONFLICT DO NOTHING`,[articleId,unit.name]);
   let taxonomyName:string|null=null;if(taxonomyId){const t=(await pool.query(`SELECT name FROM taxonomy_categories WHERE id=$1`,[taxonomyId])).rows[0];taxonomyName=t?.name??null;if(taxonomyName)await pool.query(`INSERT INTO article_entities(article_id,entity_type,entity_name) VALUES($1,'taxonomy',$2) ON CONFLICT DO NOTHING`,[articleId,taxonomyName]);}
   const issueMatch=await mapHeadlineToExistingIssue(pool,String(articleId),title,taxonomyId);
-  return{articleId:String(articleId),opdId,districtId,taxonomyId,taxonomyName,taxonomyScore:Number(taxonomyScore.toFixed(2)),issueId:issueMatch?.id??null,issueMatchScore:issueMatch?.score??0,keywordMatches:matchedNames.length,matchedKeywords:matchedNames};
+  const primaryUptd=uptdMatches[0]??null;
+  return{articleId:String(articleId),opdId,districtId,uptdId:primaryUptd?.id??null,uptdName:primaryUptd?.name??null,uptdMatches:uptdMatches.length,taxonomyId,taxonomyName,taxonomyScore:Number(taxonomyScore.toFixed(2)),issueId:issueMatch?.id??null,issueMatchScore:issueMatch?.score??0,keywordMatches:matchedNames.length,matchedKeywords:matchedNames};
 }
 
 export async function analyzeArticle(pool: Pool, articleId: string) {
@@ -50,5 +64,5 @@ export async function analyzeArticle(pool: Pool, articleId: string) {
   const analysis=analyzeCoreArticle({id:article.id,title:article.title,summary:article.summary,content:article.content,sourceName:article.source_name,sourceTier:Number(article.tier??2),mediaKind:article.media_kind==='print'?'print':article.media_kind==='social'?'social':'online',opdId,publishedAt:article.published_at},query,peerCount);
   await pool.query(`UPDATE articles SET opd_id=$2,sentiment=$3,importance_score=$4,impact_score=$5,velocity_score=$6,risk_score=$7,risk_level=$8,is_highlight=$9,summary=COALESCE(NULLIF(summary,''),$10) WHERE id=$1`,[articleId,opdId,analysis.sentiment,analysis.importanceScore,analysis.impactScore,analysis.velocityScore,analysis.riskScore,analysis.riskLevel,analysis.importanceScore>=65||analysis.riskLevel==='high'||analysis.riskLevel==='critical',String(article.content??article.title).slice(0,300)]);
   await pool.query(`DELETE FROM article_entities WHERE article_id=$1 AND entity_type='entity'`,[articleId]);for(const entity of analysis.entities.slice(0,20))await pool.query(`INSERT INTO article_entities(article_id,entity_type,entity_name) VALUES($1,'entity',$2) ON CONFLICT DO NOTHING`,[articleId,entity]);
-  const risk=await applyRisk(pool,articleId);return{articleId,opdId,districtId:routing?.districtId??null,taxonomyId:routing?.taxonomyId??null,taxonomyName:routing?.taxonomyName??null,taxonomyScore:routing?.taxonomyScore??0,issueId:routing?.issueId??null,issueMatchScore:routing?.issueMatchScore??0,sentiment:analysis.sentiment,importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,highlight:analysis.importanceScore>=65||analysis.riskLevel==='high'||analysis.riskLevel==='critical',keywordMatches:matchedNames.length,matchedKeywords:matchedNames,entities:analysis.entities,duplicateFingerprint:analysis.duplicateFingerprint,risk};
+  const risk=await applyRisk(pool,articleId);return{articleId,opdId,districtId:routing?.districtId??null,uptdId:routing?.uptdId??null,uptdName:routing?.uptdName??null,uptdMatches:routing?.uptdMatches??0,taxonomyId:routing?.taxonomyId??null,taxonomyName:routing?.taxonomyName??null,taxonomyScore:routing?.taxonomyScore??0,issueId:routing?.issueId??null,issueMatchScore:routing?.issueMatchScore??0,sentiment:analysis.sentiment,importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,highlight:analysis.importanceScore>=65||analysis.riskLevel==='high'||analysis.riskLevel==='critical',keywordMatches:matchedNames.length,matchedKeywords:matchedNames,entities:analysis.entities,duplicateFingerprint:analysis.duplicateFingerprint,risk};
 }
