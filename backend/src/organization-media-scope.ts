@@ -31,10 +31,15 @@ function containsTerm(text: string, term: string): boolean {
   return (` ${text} `).includes(` ${term} `);
 }
 
-export async function loadOrganizationMediaScope(pool: Pool): Promise<OrganizationMediaScope | null> {
-  const org = (await pool.query(
-    `SELECT id,name,code FROM organizations WHERE active=true ORDER BY id LIMIT 1`
-  )).rows[0];
+export async function loadOrganizationMediaScope(pool: Pool, organizationId?: number | null): Promise<OrganizationMediaScope | null> {
+  let org:any;
+  if (organizationId) {
+    org = (await pool.query(`SELECT id,name,code FROM organizations WHERE id=$1 AND active=true LIMIT 1`, [organizationId])).rows[0];
+  } else {
+    const rows = (await pool.query(`SELECT id,name,code FROM organizations WHERE active=true ORDER BY id LIMIT 2`)).rows;
+    if (rows.length !== 1) return null;
+    org = rows[0];
+  }
   if (!org) return null;
 
   const branding = (await pool.query(
@@ -81,6 +86,11 @@ export function organizationScopeTerms(scope: OrganizationMediaScope): {
   return { strong, supporting };
 }
 
+export function organizationScopeTokens(scope: OrganizationMediaScope): string[] {
+  const { strong, supporting } = organizationScopeTerms(scope);
+  return [...new Set([...strong, ...supporting].flatMap(term => term.split(/\s+/)).filter(token => token.length >= 3))];
+}
+
 export function isArticleInOrganizationScope(article: OnlineArticle, scope: OrganizationMediaScope): boolean {
   const { strong, supporting } = organizationScopeTerms(scope);
   if (!strong.length) return true;
@@ -88,13 +98,9 @@ export function isArticleInOrganizationScope(article: OnlineArticle, scope: Orga
   const title = normalize(article.title);
   const lead = normalize(String(article.excerpt || '').slice(0, 1600));
 
-  // Judul adalah sinyal paling kuat: nama kota, Pemko/Pemerintah Kota, atau kecamatan.
   if (strong.some(term => containsTerm(title, term))) return true;
-
-  // Artikel dengan judul generik tetap diterima bila lead/isi awal jelas menyebut scope pemerintahan/wilayah.
   if (strong.some(term => containsTerm(lead, term))) return true;
 
-  // Tagline/provinsi hanya sinyal pendukung; jangan membiarkannya sendirian meloloskan artikel umum.
   const supportingHit = supporting.some(term => containsTerm(title, term) || containsTerm(lead, term));
   if (supportingHit && scope.cityName) {
     const city = normalize(scope.cityName);
