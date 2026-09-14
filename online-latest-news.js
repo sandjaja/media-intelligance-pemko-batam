@@ -14,10 +14,10 @@
   }
 
   function buttonHost(){
-    const section=root();
-    if(!section)return null;
-    const testBtn=section.querySelector('#onlineRunTest');
-    return testBtn?.parentElement||null;
+    const section=root();if(!section)return null;
+    const header=section.querySelector('.space-y-4 > .glass');
+    const row=header?.querySelector('.flex.flex-wrap.items-start.justify-between');
+    return row||header||null;
   }
 
   function ensureButton(){
@@ -40,8 +40,7 @@
   }
 
   function showResult(rows){
-    const section=root();
-    if(!section)return;
+    const section=root();if(!section)return;
     section.querySelector('#onlineLatestResult')?.remove();
     const card=document.createElement('div');
     card.id='onlineLatestResult';
@@ -55,34 +54,24 @@
 
   async function runLatest(){
     if(running)return;
-    running=true;
-    setState('Menyiapkan...','fa-spinner');
+    running=true;setState('Menyiapkan...','fa-spinner');
     const results=[];
     try{
       const health=await api('/ingestion/status');
       const sources=(health.sources||[]).filter(s=>String(s.category||'').toLowerCase()==='online'&&s.active!==false&&s.url);
       if(!sources.length)throw new Error('Tidak ada sumber media online aktif.');
       for(let i=0;i<sources.length;i++){
-        const s=sources[i];
-        setState(`Mengambil ${i+1}/${sources.length}: ${s.name}`,'fa-spinner');
-        try{
-          const r=await api(`/online/sources/${encodeURIComponent(s.id)}/run`,{method:'POST',body:'{}'});
-          results.push(r);
-        }catch(e){
-          results.push({source:s.name,sourceId:String(s.id),error:e.message});
-        }
+        const s=sources[i];setState(`Mengambil ${i+1}/${sources.length}: ${s.name}`,'fa-spinner');
+        try{results.push(await api(`/online/sources/${encodeURIComponent(s.id)}/run`,{method:'POST',body:'{}'}));}
+        catch(e){results.push({source:s.name,sourceId:String(s.id),error:e.message});}
       }
       showResult(results);
       const failed=results.filter(r=>r.error).length;
       const inserted=results.reduce((n,r)=>n+Number(r.inserted||0),0);
       window.toast?.(failed?`Selesai: ${inserted} berita baru, ${failed} sumber gagal.`:`Selesai: ${inserted} berita baru disimpan.`);
       document.getElementById('onlineRefresh')?.click();
-    }catch(e){
-      window.toast?.(`Gagal mengambil berita: ${e.message}`);
-    }finally{
-      running=false;
-      setTimeout(()=>{ensureButton();setState('Ambil Berita Terbaru');},100);
-    }
+    }catch(e){window.toast?.(`Gagal mengambil berita: ${e.message}`);}
+    finally{running=false;setTimeout(()=>{ensureButton();setState('Ambil Berita Terbaru');},100);}
   }
 
   const obs=new MutationObserver(()=>ensureButton());
