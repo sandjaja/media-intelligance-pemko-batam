@@ -15,6 +15,8 @@
  }
  opdSelect.onchange=async e=>{state.opd=e.target.value;await refresh()};districtSelect.onchange=async e=>{state.district=e.target.value;await refresh()};
  window.addEventListener('media-branding-ready',()=>void options());
- const centerAdmin=()=>{const a=document.getElementById('adminNavBtn');if(a){a.style.textAlign='center';a.style.justifyContent='center';a.style.alignItems='center';a.style.display='flex'}};centerAdmin();new MutationObserver(centerAdmin).observe(document.body,{childList:true,subtree:true});
+ const centerAdmin=()=>{const a=document.getElementById('adminNavBtn');if(a){a.style.textAlign='center';a.style.justifyContent='center';a.style.alignItems='center';a.style.display='flex'}};
+ centerAdmin();
+ window.addEventListener('media:authenticated',()=>setTimeout(centerAdmin,0),{once:true});
  options().then(refresh).catch(e=>console.warn('Scope init failed',e));
 })();
