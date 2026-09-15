@@ -2,9 +2,10 @@ import { Pool } from 'pg';
 import { analyzeArticle as analyzeCoreArticle, parseKeywordQuery } from './media-intelligence-core.js';
 import { applyRisk } from './risk.js';
 
-export const CLASSIFICATION_VERSION='article-opd-v10-20260916';
+export const CLASSIFICATION_VERSION='article-opd-v11-20260916';
 function normalize(value:string){return value.toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}\s-]/gu,' ').replace(/\s+/g,' ').trim();}
 function containsPhrase(text:string,phrase:string){const t=` ${normalize(text)} `,p=normalize(phrase);return p.length>=2&&t.includes(` ${p} `);}
+function isWeakStandaloneKeyword(value:string){return new Set(['viral']).has(normalize(value));}
 function meaningfulTokens(value:string){const stop=new Set(['dan','atau','yang','dengan','untuk','dalam','serta','pemerintah','daerah','masyarakat','kota','kabupaten']);return normalize(value).split(/\s+/).filter(v=>v.length>=4&&!stop.has(v));}
 function dynamicOpdTerms(row:{name?:string;code?:string}){const terms=new Set<string>();const code=normalize(String(row.code||'')),name=normalize(String(row.name||''));if(code.length>=3)terms.add(code);if(name.length>=4)terms.add(name);for(const prefix of ['dinas ','badan ']){const v=name.replace(new RegExp(`^${prefix}`),'').trim();if(v.length>=5)terms.add(v);}return [...terms];}
 function taxonomyTerms(row:{name?:string;description?:string}){const generic=new Set(['dan','atau','yang','dengan','untuk','dalam','serta','pemerintah','daerah','masyarakat']);const terms=new Set<string>();for(const raw of [row.name,row.description])for(const part of String(raw||'').split(/[,;&/]+/)){const term=normalize(part);if(term.length>=4&&!generic.has(term))terms.add(term);}return [...terms];}
@@ -29,7 +30,9 @@ export async function routeArticleHeadline(pool:Pool,articleId:string){
  const masterRows=(await pool.query(`SELECT k.id,k.keyword,kt.category_id,kt.weight,ko.opd_id,ko.weight opd_weight,ko.routing_role,kd.district_id,kd.weight district_weight FROM keywords k JOIN keyword_taxonomy kt ON kt.keyword_id=k.id AND kt.active=true JOIN taxonomy_categories tc ON tc.id=kt.category_id AND tc.active=true JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true LEFT JOIN keyword_opd ko ON ko.keyword_id=k.id AND ko.active=true LEFT JOIN keyword_district kd ON kd.keyword_id=k.id AND kd.active=true WHERE k.active=true AND k.organization_id IS NOT NULL AND k.opd_id IS NULL AND k.district_id IS NULL AND tc.organization_id=k.organization_id AND cs.organization_id=k.organization_id ORDER BY k.id`)).rows;
  const manualIds=new Set((await pool.query(`SELECT keyword_id FROM article_manual_keywords WHERE article_id=$1 AND active=true ORDER BY updated_at DESC,keyword_id`,[articleId])).rows.map((r:any)=>String(r.keyword_id))),hasManual=manualIds.size>0;
  const allMatches=masterRows.filter(k=>containsPhrase(fullNormalized,String(k.keyword||'')));
- const contextualMatches=hasManual?masterRows.filter(k=>manualIds.has(String(k.id))):allMatches.filter(k=>containsPhrase(titleText,String(k.keyword||''))||containsPhrase(summaryText,String(k.keyword||'')));
+ const rawContextualMatches=hasManual?masterRows.filter(k=>manualIds.has(String(k.id))):allMatches.filter(k=>containsPhrase(titleText,String(k.keyword||''))||containsPhrase(summaryText,String(k.keyword||'')));
+ const hasStrongContextualMatch=rawContextualMatches.some(k=>!isWeakStandaloneKeyword(String(k.keyword||'')));
+ const contextualMatches=hasManual?rawContextualMatches:rawContextualMatches.filter(k=>!isWeakStandaloneKeyword(String(k.keyword||''))||hasStrongContextualMatch);
  const taxonomyScores=new Map<string,{score:number;title:Set<string>;summary:Set<string>;supporting:Set<string>;keywords:Set<string>}>(),opdScores=new Map<string,number>(),districtScores=new Map<string,number>();
  const opdEvidence=new Map<string,{title:Set<string>;summary:Set<string>;directHeadline:boolean}>();
  const opdRoles=new Map<string,Set<string>>();
