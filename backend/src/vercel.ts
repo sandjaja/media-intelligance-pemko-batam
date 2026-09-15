@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { bootstrapInitialAdmin } from './bootstrap-admin.js';
 
 const INTERNAL_PORT = 18787;
-const BACKEND_BUILD = 'classification-diagnostic-v1-20260915';
+const BACKEND_BUILD = 'routing-propagation-diagnostic-v2-20260915';
 let backendReady: Promise<void> | null = null;
 
 async function ensureBackend() {
@@ -27,7 +27,16 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       res.setHeader('content-type', 'application/json; charset=utf-8');
       res.setHeader('cache-control', 'no-store');
       res.setHeader('x-media-backend-build', BACKEND_BUILD);
-      res.end(JSON.stringify({ error: 'NOT_FOUND' }));
+      res.end(JSON.stringify({ error: 'NOT_FOUND', backendBuild: BACKEND_BUILD }));
+      return;
+    }
+
+    if ((req.url || '').startsWith('/api/runtime-build')) {
+      res.statusCode = 200;
+      res.setHeader('content-type', 'application/json; charset=utf-8');
+      res.setHeader('cache-control', 'no-store, no-cache, must-revalidate');
+      res.setHeader('x-media-backend-build', BACKEND_BUILD);
+      res.end(JSON.stringify({ ok: true, backendBuild: BACKEND_BUILD }));
       return;
     }
 
@@ -66,7 +75,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       res.setHeader('x-media-backend-build', BACKEND_BUILD);
     }
     if (!res.writableEnded) {
-      res.end(JSON.stringify({ error: 'BACKEND_STARTUP_FAILED' }));
+      res.end(JSON.stringify({ error: 'BACKEND_STARTUP_FAILED', backendBuild: BACKEND_BUILD }));
     }
   }
 }
