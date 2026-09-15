@@ -3,7 +3,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { bootstrapInitialAdmin } from './bootstrap-admin.js';
 
 const INTERNAL_PORT = 18787;
-const BACKEND_BUILD = 'owned-clustering-v1-20260911';
+const BACKEND_BUILD = 'classification-diagnostic-v1-20260915';
 let backendReady: Promise<void> | null = null;
 
 async function ensureBackend() {
