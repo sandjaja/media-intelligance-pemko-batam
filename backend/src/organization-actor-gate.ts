@@ -21,7 +21,7 @@ function roundupHeadline(title: string): boolean {
 }
 
 export function organizationScopeTerms(scope: OrganizationMediaScope) {
-  const strong = uniqueTerms([scope.cityName, scope.organizationName, scope.governmentName, scope.shortName, ...scope.districts]);
+  const strong = uniqueTerms([scope.cityName, scope.organizationName, scope.governmentName, scope.shortName, ...scope.governmentAliases, ...scope.districts]);
   const supporting = uniqueTerms([scope.tagline, scope.organizationCode?.replace(/_/g, ' ')]);
   return { strong, supporting };
 }
@@ -54,7 +54,7 @@ export function classifyOnlineArticleRole(article: OnlineArticle, scope: Organiz
   const actorMatches: ActorMatch[] = [];
 
   // An internal actor is sufficient even when the event itself occurs outside the organization's city.
-  const organizationTerms = uniqueTerms([scope.organizationName, scope.governmentName, scope.shortName]);
+  const organizationTerms = uniqueTerms([scope.organizationName, scope.governmentName, scope.shortName, ...scope.governmentAliases]);
   if (organizationTerms.some(term => containsTerm(title, term))) {
     actorMatches.push({ kind: 'ORGANIZATION', id: scope.organizationId, name: scope.shortName || scope.governmentName || scope.organizationName, opdId: null });
   }
