@@ -4,12 +4,18 @@ import { applyRisk } from './risk.js';
 import { routeArticleV16 } from './atomic-router-v16.js';
 import { getManualNewsClassification, clearSupportingIntelligenceLinks } from './news-classification.js';
 
-export const CLASSIFICATION_VERSION='article-opd-v16.4-20260916';
+export const CLASSIFICATION_VERSION='article-opd-v16.5-20260916';
+export type AnalysisOptions={onlineGateRole?:'UTAMA'|'PENDUKUNG'|null;onlineGateReason?:string|null;onlineGateSignals?:string[]};
 
-export async function analyzeArticle(pool:Pool,articleId:string){
+export async function analyzeArticle(pool:Pool,articleId:string,options:AnalysisOptions={}){
  const article=(await pool.query(`SELECT a.id,a.title,a.content,a.summary,a.published_at,ms.name source_name,ms.tier,ms.category media_kind FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE a.id=$1`,[articleId])).rows[0];
  if(!article)return null;
  let news=await getManualNewsClassification(pool,articleId);
+ const gateRole=article.media_kind==='online'?options.onlineGateRole??null:null;
+ if(!news&&gateRole){
+  news={classification:gateRole,source:'AUTO' as const,reason:options.onlineGateReason||'online organization actor gate',signals:options.onlineGateSignals??[]};
+  await pool.query(`UPDATE articles SET news_classification=$2,news_classification_source='AUTO',news_classification_changed_by=NULL,news_classification_changed_at=NOW() WHERE id=$1 AND news_classification_source<>'MANUAL'`,[articleId,gateRole]);
+ }
  let routing:any=null;
  if(!news||news.classification==='UTAMA'){
   routing=await routeArticleV16(pool,articleId);
@@ -33,10 +39,13 @@ export async function analyzeArticle(pool:Pool,articleId:string){
  const opdId=routing?.opdId??null;
  if(!opdId){
   if(news.source==='MANUAL')throw new Error('MANUAL_UTAMA_REQUIRES_PRIMARY_OPD_ROUTING');
-  if(routing?.routingStatus==='AMBIGUOUS'){
+  const gateUtama=gateRole==='UTAMA';
+  if(routing?.routingStatus==='AMBIGUOUS'||gateUtama){
    await pool.query(`DELETE FROM issue_articles WHERE article_id=$1 AND assignment_source='AUTO'`,[articleId]);
    await pool.query(`UPDATE articles SET opd_id=NULL,news_classification='UTAMA',news_classification_source='AUTO',risk_score=0,risk_level='low',is_highlight=false,classified_at=NOW(),classification_version=$2 WHERE id=$1`,[articleId,CLASSIFICATION_VERSION]);
-   return{articleId,newsClassification:'UTAMA',newsClassificationSource:'AUTO',newsClassificationReason:'relevant headline taxonomy detected but Primary OPD routing is ambiguous',newsClassificationSignals:(routing?.headlineTaxonomyNames??[]).map((t:string)=>`AMBIGUOUS_HEADLINE_TAXONOMY:${t}`),classificationSource:'AUTO_AMBIGUOUS',routingStatus:'AMBIGUOUS',needsVerification:true,classificationVersion:CLASSIFICATION_VERSION,opdId:null,supportingOpdIds:[],districtId:null,uptdId:null,uptdName:null,uptdMatches:0,taxonomyId:routing?.taxonomyId??null,taxonomyName:routing?.taxonomyName??null,taxonomyScore:0,issueId:null,issueMatchScore:0,issueAssignmentSource:null,risk:null};
+   const reason=gateUtama?(options.onlineGateReason||'online actor gate classified article as UTAMA; Primary OPD requires verification'):'relevant headline taxonomy detected but Primary OPD routing is ambiguous';
+   const signals=gateUtama?(options.onlineGateSignals??[]):(routing?.headlineTaxonomyNames??[]).map((t:string)=>`AMBIGUOUS_HEADLINE_TAXONOMY:${t}`);
+   return{articleId,newsClassification:'UTAMA',newsClassificationSource:'AUTO',newsClassificationReason:reason,newsClassificationSignals:signals,classificationSource:gateUtama?'AUTO_ACTOR_GATE_AMBIGUOUS':'AUTO_AMBIGUOUS',routingStatus:'AMBIGUOUS',needsVerification:true,classificationVersion:CLASSIFICATION_VERSION,opdId:null,supportingOpdIds:[],districtId:null,uptdId:null,uptdName:null,uptdMatches:0,taxonomyId:routing?.taxonomyId??null,taxonomyName:routing?.taxonomyName??null,taxonomyScore:0,issueId:null,issueMatchScore:0,issueAssignmentSource:null,risk:null};
   }
   await clearSupportingIntelligenceLinks(pool,articleId);
   await pool.query(`UPDATE articles SET news_classification='PENDUKUNG',news_classification_source='AUTO',risk_score=0,risk_level='low',is_highlight=false,classified_at=NOW(),classification_version=$2 WHERE id=$1`,[articleId,CLASSIFICATION_VERSION]);
