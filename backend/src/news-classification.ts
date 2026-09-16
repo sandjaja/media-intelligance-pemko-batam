@@ -25,6 +25,10 @@ export async function classifyNewsFromRouting(pool:Pool,articleId:string):Promis
  return{classification,source:'AUTO',reason,signals};
 }
 
+// Temporary compatibility export while analyzer sequencing is moved to:
+// Master Classification -> Primary OPD -> news status -> Issue Engine.
+export const classifyNews=classifyNewsFromRouting;
+
 export async function getManualNewsClassification(pool:Pool,articleId:string):Promise<NewsClassificationDecision|null>{
  const row=(await pool.query(`SELECT news_classification,news_classification_source FROM articles WHERE id=$1`,[articleId])).rows[0];
  if(!row)return null;
