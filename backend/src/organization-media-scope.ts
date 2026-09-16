@@ -16,8 +16,6 @@ export type OrganizationMediaScope = {
 
 export type OrganizationScopeStatus = 'RELEVANT' | 'REVIEW' | 'OUT_OF_SCOPE';
 export type OrganizationScopeDecision = { status: OrganizationScopeStatus; reason: string; matchedTerms: string[] };
-export type OnlineNewsRole = 'UTAMA'|'PENDUKUNG'|'OUT_OF_SCOPE';
-export type OnlineNewsRoleDecision = { role:OnlineNewsRole; reason:string; scope:OrganizationScopeDecision; actorMatches:Array<{kind:'ORGANIZATION'|'OPD'|'UPTD'|'DISTRICT';id:number|null;name:string;opdId:number|null}> };
 
 function normalize(value: unknown): string {
   return String(value ?? '').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
@@ -53,27 +51,17 @@ export function organizationScopeTokens(scope:OrganizationMediaScope):string[]{c
 export function classifyArticleOrganizationScope(article:OnlineArticle,scope:OrganizationMediaScope):OrganizationScopeDecision{
   const {strong,supporting}=organizationScopeTerms(scope);if(!strong.length)return{status:'OUT_OF_SCOPE',reason:'organization scope has no strong terms',matchedTerms:[]};
   const title=normalize(article.title),strongHits=strong.filter(term=>containsTerm(title,term)),supportingHits=supporting.filter(term=>containsTerm(title,term));
+  const internalActorHits=[
+    ...uniqueTerms([scope.organizationName,scope.governmentName,scope.shortName]).filter(term=>containsTerm(title,term)),
+    ...scope.actors.flatMap(actor=>actor.aliases.filter(term=>containsTerm(title,term))),
+    ...scope.districts.map(d=>normalize(d)).filter(d=>d&&containsTerm(title,`kecamatan ${d}`)).map(d=>`kecamatan ${d}`)
+  ];
+  // Internal organization actors are sufficient scope evidence even when the event is outside the city.
+  if(internalActorHits.length)return{status:'RELEVANT',reason:'headline contains a database-backed internal government actor',matchedTerms:[...new Set(internalActorHits)]};
   if(roundupHeadline(title))return{status:'REVIEW',reason:'roundup/list headline requires editorial review',matchedTerms:[...strongHits,...supportingHits]};
   if(strongHits.length)return{status:'RELEVANT',reason:'headline contains organization/city/district scope term',matchedTerms:strongHits};
   if(supportingHits.length)return{status:'REVIEW',reason:'headline contains only supporting organization term',matchedTerms:supportingHits};
-  return{status:'OUT_OF_SCOPE',reason:'headline has no organization/city/district scope term',matchedTerms:[]};
-}
-
-export function classifyOnlineArticleRole(article:OnlineArticle,scope:OrganizationMediaScope):OnlineNewsRoleDecision{
-  const scopeDecision=classifyArticleOrganizationScope(article,scope);
-  if(scopeDecision.status==='OUT_OF_SCOPE')return{role:'OUT_OF_SCOPE',reason:scopeDecision.reason,scope:scopeDecision,actorMatches:[]};
-  const title=normalize(article.title);
-  const actorMatches:OnlineNewsRoleDecision['actorMatches']=[];
-  const organizationTerms=uniqueTerms([scope.organizationName,scope.governmentName,scope.shortName]);
-  if(organizationTerms.some(term=>containsTerm(title,term)))actorMatches.push({kind:'ORGANIZATION',id:scope.organizationId,name:scope.shortName||scope.governmentName||scope.organizationName,opdId:null});
-  for(const actor of scope.actors){
-    if(actor.aliases.some(term=>containsTerm(title,term)))actorMatches.push({kind:actor.kind,id:actor.id,name:actor.name,opdId:actor.kind==='OPD'?actor.id:(actor.opdId??null)});
-  }
-  // A district name by itself is a location. Count it as an internal actor only when the headline
-  // explicitly uses an administrative actor form such as "Kecamatan Batu Aji".
-  for(const district of scope.districts){const d=normalize(district);if(d&&containsTerm(title,`kecamatan ${d}`))actorMatches.push({kind:'DISTRICT',id:null,name:`Kecamatan ${district}`,opdId:null});}
-  if(actorMatches.length)return{role:'UTAMA',reason:'headline contains a database-backed internal government actor',scope:scopeDecision,actorMatches};
-  return{role:'PENDUKUNG',reason:scopeDecision.status==='REVIEW'?'organization scope requires review and no internal actor is present':'in organization/city scope but no internal government actor is present',scope:scopeDecision,actorMatches:[]};
+  return{status:'OUT_OF_SCOPE',reason:'headline has no organization/city/district/internal-actor scope term',matchedTerms:[]};
 }
 
 export function isArticleInOrganizationScope(article:OnlineArticle,scope:OrganizationMediaScope):boolean{return classifyArticleOrganizationScope(article,scope).status!=='OUT_OF_SCOPE';}
