@@ -14,12 +14,6 @@ function titleConceptCoverage(title:string,keyword:string){const meaningful=toke
 function sharedConcept(title:string,label:string){const titleTokens=new Set(tokens(title));const concept=tokens(label);const shared=concept.filter(t=>titleTokens.has(t));return shared.length>=2&&shared.length>=Math.min(2,concept.length);}
 const OTHER_REGION=/\b(?:pekanbaru|riau|tanjungpinang|bintan|karimun|natuna|lingga|anambas|jakarta|medan|padang|jambi|palembang)\b/;
 function titleDominatedByOtherRegion(title:string){const n=normalize(title),batam=n.indexOf('batam'),other=n.search(OTHER_REGION);return other>=0&&(batam<0||other<batam);}
-// External/public authorities are a negative gate, not a classifier. If an external authority
-// dominates the headline, automatic Primary routing needs explicit Pemko/target-OPD evidence.
-const EXTERNAL_AUTHORITY=/\b(?:bp batam|badan pengusahaan batam|polda kepri|polresta barelang|polsek\b|polisi\b|bmkg\b|bps\b|pln\b|kementerian\b|menteri\b|wamen\b|wakil menteri\b|pemprov kepri|pemerintah provinsi kepulauan riau|dprd provinsi|kejaksaan\b|kejari\b|kejati\b|pengadilan\b|imigrasi\b|bea cukai\b|ksop\b|basarnas\b|tni\b)\b/;
-function externalAuthorityContext(text:string){return EXTERNAL_AUTHORITY.test(normalize(text));}
-function targetOpdContext(text:string,opdName:string,opdCode:string){const n=normalize(text),name=normalize(opdName),code=normalize(opdCode);if(code.length>=3&&containsPhrase(n,code))return true;if(name.length>=4&&containsPhrase(n,name))return true;const compact=name.replace(/^dinas\s+|^badan\s+|^bagian\s+/,'');return compact.length>=6&&containsPhrase(n,compact);}
-function hasPemkoAuthority(text:string,opdName:string,opdCode:string){return batamGovernmentContext(text)||targetOpdContext(text,opdName,opdCode);}
 
 export type V16HeadlineTaxonomy={id:string;name:string;matchSource?:'TAXONOMY_EXACT'|'TAXONOMY_CONCEPT'|'SECTOR_CONCEPT'};
 export type V16PrimaryEvidence={opdId:string;keywordId:string;keyword:string;taxonomyId:string;taxonomyName:string;score:number;matchType:'MANUAL'|'TITLE_PHRASE'|'TITLE_CONCEPT_LEAD_PHRASE'|'LEAD_PHRASE'|'CONTEXTUAL';supportingOpdIds:string[]};
@@ -45,10 +39,8 @@ export async function getV16PrimaryEvidence(pool:Pool,articleId:string):Promise<
  const candidates:any[]=[];
  for(const r of rows){const keyword=String(r.keyword||''),manual=manualIds.has(String(r.keyword_id)),titlePhrase=containsPhrase(title,keyword),leadPhrase=containsPhrase(lead,keyword),titleConcept=titleConceptCoverage(title,keyword);let matchType:V16PrimaryEvidence['matchType']|null=null,position=0,dominanceBonus=0;
   // Human-selected keywords remain authoritative. Automatic Primary routing requires DIRECT evidence.
+  // Organization/actor scope is intentionally handled upstream for online media, not in the OPD router.
   if(!manual&&String(r.evidence_strength||'REVIEW')!=='DIRECT')continue;
-  // Actor/authority gate: external-authority stories cannot become a Pemko Primary solely from a topic keyword.
-  // Explicit Pemko or target-OPD evidence keeps legitimate cross-agency stories eligible. Manual choices bypass this gate.
-  if(!manual&&externalAuthorityContext(title)&&!hasPemkoAuthority(context,String(r.opd_name||''),String(r.opd_code||'')))continue;
   if(manual){matchType='MANUAL';position=100;}else if(isShortKeyword(keyword)){if(titlePhrase){matchType='TITLE_PHRASE';position=12;}else continue;}else if(titlePhrase){matchType='TITLE_PHRASE';position=12;}else if(leadPhrase&&titleConcept===1&&batamGovernmentContext(context)){matchType='TITLE_CONCEPT_LEAD_PHRASE';position=12;dominanceBonus=50;}else if(leadPhrase){matchType='LEAD_PHRASE';position=6;}else{
    const meaningful=tokens(keyword),coverage=tokenCoverage(context,keyword);
    if((meaningful.length>=2&&coverage===1&&batamGovernmentContext(context))||governmentConceptContext(context,keyword)){matchType='CONTEXTUAL';position=3;}
