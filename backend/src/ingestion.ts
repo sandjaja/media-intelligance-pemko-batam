@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { Pool } from 'pg';
-import { analyzeArticle } from './analyzer.js';
+import { analyzeArticle } from './analyzer-v14.js';
 import { collectOnlineSource, type OnlineSource, type OnlineArticle } from './online-media-collector.js';
 import { loadOrganizationMediaScope, type OrganizationMediaScope } from './organization-media-scope.js';
 
