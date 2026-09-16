@@ -4,8 +4,8 @@ type Article={id:string;source_id:string|null;source_name:string|null;title:stri
 type MemberType='representative'|'identical'|'similar';
 type WorkingMember={article:Article;score:number;type:MemberType};
 type WorkingCluster={representative:Article;members:WorkingMember[]};
-type Similarity={score:number;titleJ:number;titleC:number;bodyJ:number;bodyC:number;hours:number;eventScore:number;eventMatch:boolean;eventSignals:string[]};
-const ENGINE='online-story-rule-v1.3';
+type Similarity={score:number;titleJ:number;titleC:number;bodyJ:number;bodyC:number;hours:number;eventScore:number;eventMatch:boolean;eventSignals:string[];anchorMatch:boolean;anchorSignals:string[]};
+const ENGINE='online-story-rule-v1.4';
 const WINDOW_MS=48*60*60*1000;
 const STOPWORDS=new Set(['dan','yang','di','ke','dari','untuk','pada','dengan','atau','ini','itu','dalam','atas','sebagai','oleh','kota','berita','batam']);
 const SOURCE_SUFFIX=/\s*[-|–—]\s*(tribun\s*batam|tribunbatam(?:\.id)?|antara(?:news)?|batamnews|detik|kompas|tempo|liputan6|cnn\s*indonesia|tvone)(?:\.com|\.id)?\s*$/i;
@@ -42,23 +42,37 @@ function eventEvidence(a:Article,b:Article,hours:number){
  if(locs.length)score+=.30;
  if(nums.length)score+=.16;
  if(hours<=6)score+=.16;else if(hours<=24)score+=.10;else if(hours<=48)score+=.04;
- // Event-aware matching is intentionally conservative: a shared event family and
- // specific location are mandatory. A shared numeric fact or strong textual/body
- // overlap is then required to prevent unrelated stories in the same area merging.
  const eventMatch=hours<=48&&kinds.length>0&&locs.length>0;
  return{score:Math.min(1,score),eventMatch,signals,sharedNumbers:nums.length};
+}
+function anniversaryAnchor(a:Article){
+ const title=cleanDisplayTitle(a.title);
+ const m=title.match(/\b(?:HUT|hari\s+ulang\s+tahun)\s+(?:ke[-\s]*)?(\d{1,3})\s+([^,:;|–—-]{2,90})/i);
+ if(!m)return null;
+ const ordinal=m[1];
+ const entity=tokens(m[2],8).filter(x=>!['tahun','berakhir','digelar','rayakan','peringati','peringatan'].includes(x));
+ return{kind:'anniversary',ordinal,entity};
+}
+function sharedEventAnchor(a:Article,b:Article,hours:number){
+ const A=anniversaryAnchor(a),B=anniversaryAnchor(b);const signals:string[]=[];
+ if(!A||!B||A.kind!==B.kind||A.ordinal!==B.ordinal||hours>72)return{match:false,score:0,signals};
+ const shared=intersection(A.entity,B.entity);
+ const entityContainment=containment(A.entity,B.entity);
+ if(shared.length>=2&&entityContainment>=.5){signals.push(`anchor:${A.kind}:ke-${A.ordinal}`);signals.push('entity:'+shared.join(','));return{match:true,score:Math.min(.98,.78+.05*shared.length),signals};}
+ return{match:false,score:0,signals};
 }
 export function storySimilarity(a:Article,b:Article):Similarity{
  const at=tokens(a.title,60),bt=tokens(b.title,60),titleJ=jaccard(at,bt),titleC=containment(at,bt);
  const as=tokens(a.summary||a.content,180),bs=tokens(b.summary||b.content,180),bodyJ=jaccard(as,bs),bodyC=containment(as,bs);
  const hours=Math.abs(when(a)-when(b))/3600000;
- const ev=eventEvidence(a,b,hours);
+ const ev=eventEvidence(a,b,hours);const anchor=sharedEventAnchor(a,b,hours);
  const lexical=Math.max(titleJ,titleC*.97,bodyJ*.78,bodyC*.70,.72*titleJ+.28*bodyJ);
  const eventQualified=ev.eventMatch&&(ev.sharedNumbers>0||titleJ>=.25||titleC>=.42||bodyJ>=.20||bodyC>=.32);
- const score=Math.max(lexical,eventQualified?Math.min(.92,.55+.45*ev.score):0);
- return{score:Math.max(0,Math.min(1,score)),titleJ,titleC,bodyJ,bodyC,hours,eventScore:ev.score,eventMatch:eventQualified,eventSignals:ev.signals};
+ const score=Math.max(lexical,eventQualified?Math.min(.92,.55+.45*ev.score):0,anchor.match?anchor.score:0);
+ return{score:Math.max(0,Math.min(1,score)),titleJ,titleC,bodyJ,bodyC,hours,eventScore:ev.score,eventMatch:eventQualified,eventSignals:ev.signals,anchorMatch:anchor.match,anchorSignals:anchor.signals};
 }
 function classify(s:Similarity):MemberType|null{
+ if(s.anchorMatch)return'similar';
  if(s.hours>48)return null;
  if(s.titleJ>=.86||s.titleC>=.94)return'identical';
  if((s.titleJ>=.58&&s.titleC>=.72)||(s.titleC>=.82&&s.bodyC>=.45)||(s.titleJ>=.48&&s.bodyJ>=.38))return'similar';
@@ -73,13 +87,13 @@ async function persist(client:PoolClient,clusters:WorkingCluster[]){
   c.representative=chooseRepresentative(c.members);
   const times=c.members.map(x=>when(x.article)).filter(Boolean).sort((a,b)=>a-b),sources=new Set(c.members.map(x=>x.article.source_id).filter(Boolean));
   const ins=await client.query(`INSERT INTO online_story_clusters(canonical_title,representative_article_id,member_count,source_count,first_published_at,last_published_at,engine_version,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,NOW()) RETURNING id`,[cleanDisplayTitle(c.representative.title),c.representative.id,c.members.length,sources.size,times[0]?new Date(times[0]).toISOString():null,times.length?new Date(times[times.length-1]).toISOString():null,ENGINE]);
-  for(const m of c.members){const sim=storySimilarity(m.article,c.representative);const s=m.article.id===c.representative.id?1:sim.score;const type=m.article.id===c.representative.id?'representative':(classify(sim)||m.type);const matched=m.article.id===c.representative.id?ENGINE:(sim.eventMatch?ENGINE+':event-aware':ENGINE+':lexical');await client.query(`INSERT INTO online_story_cluster_members(cluster_id,article_id,similarity_score,similarity_type,matched_by) VALUES($1,$2,$3,$4,$5)`,[ins.rows[0].id,m.article.id,s,type,matched]);}
+  for(const m of c.members){const sim=storySimilarity(m.article,c.representative);const s=m.article.id===c.representative.id?1:sim.score;const type=m.article.id===c.representative.id?'representative':(classify(sim)||m.type);const matched=m.article.id===c.representative.id?ENGINE:(sim.anchorMatch?ENGINE+':event-anchor':sim.eventMatch?ENGINE+':event-aware':ENGINE+':lexical');await client.query(`INSERT INTO online_story_cluster_members(cluster_id,article_id,similarity_score,similarity_type,matched_by) VALUES($1,$2,$3,$4,$5)`,[ins.rows[0].id,m.article.id,s,type,matched]);}
  }
 }
 export async function rebuildOnlineStoryClusters(pool:Pool,days=7,limit=1000){
  const {rows}=await pool.query<Article>(`SELECT a.id,a.source_id,ms.name source_name,a.title,a.summary,a.content,a.published_at,a.created_at FROM articles a JOIN media_sources ms ON ms.id=a.source_id WHERE LOWER(COALESCE(ms.category,''))='online' AND COALESCE(a.published_at,a.created_at)>=NOW()-($1::int*INTERVAL '1 day') ORDER BY COALESCE(a.published_at,a.created_at) ASC,a.id ASC LIMIT $2`,[days,limit]);
  const clusters:WorkingCluster[]=[];
- for(const a of rows){let target:WorkingCluster|null=null,signal:Similarity|null=null;for(let i=clusters.length-1;i>=0;i--){const c=clusters[i];if(when(a)-when(c.representative)>WINDOW_MS)break;const s=best(a,c);if(classify(s)&&(!signal||s.score>signal.score)){target=c;signal=s;}}if(target&&signal)target.members.push({article:a,score:signal.score,type:classify(signal)!});else clusters.push({representative:a,members:[{article:a,score:1,type:'representative'}]});}
+ for(const a of rows){let target:WorkingCluster|null=null,signal:Similarity|null=null;for(let i=clusters.length-1;i>=0;i--){const c=clusters[i];if(when(a)-when(c.representative)>72*60*60*1000)break;const s=best(a,c);if(classify(s)&&(!signal||s.score>signal.score)){target=c;signal=s;}}if(target&&signal)target.members.push({article:a,score:signal.score,type:classify(signal)!});else clusters.push({representative:a,members:[{article:a,score:1,type:'representative'}]});}
  const client=await pool.connect();try{await client.query('BEGIN');await persist(client,clusters);await client.query('COMMIT');}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
  return{articles:rows.length,clusters:clusters.length,multiSource:clusters.filter(c=>new Set(c.members.map(x=>x.article.source_id)).size>1).length,maxSources:clusters.reduce((n,c)=>Math.max(n,new Set(c.members.map(x=>x.article.source_id)).size),0),engine:ENGINE};
 }
