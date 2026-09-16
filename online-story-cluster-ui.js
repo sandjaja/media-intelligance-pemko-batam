@@ -23,7 +23,7 @@
     const root=document.getElementById('online');if(!root)return;
     let clusters;try{clusters=await load();}catch{return;}
     const byArticle=new Map();for(const c of clusters)for(const m of(c.members||[]))byArticle.set(String(m.article_id),c);
-    root.querySelectorAll('article').forEach(article=>{const id=article.querySelector('[data-correct-id]')?.getAttribute('data-correct-id')||article.querySelector('[data-irrel-id]')?.getAttribute('data-irrel-id')||article.querySelector('[data-approve-id]')?.getAttribute('data-approve-id')||article.querySelector('[data-support-id]')?.getAttribute('data-support-id');if(id)decorate(article,byArticle.get(String(id)));});
+    root.querySelectorAll('article[data-online-article-id]').forEach(article=>{const id=article.getAttribute('data-online-article-id');if(id)decorate(article,byArticle.get(String(id)));});
   }
   const obs=new MutationObserver(()=>{clearTimeout(window.__onlineStoryClusterTimer);window.__onlineStoryClusterTimer=setTimeout(apply,80);});
   function start(){const root=document.getElementById('online');if(!root)return;obs.observe(root,{childList:true,subtree:true});apply();document.addEventListener('click',e=>{if(e.target?.closest?.('#onlineRefresh,#onlineRebuildClusters')){invalidate();setTimeout(apply,500);}});}
