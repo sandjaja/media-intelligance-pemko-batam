@@ -11,15 +11,23 @@ function isShortKeyword(keyword:string){const n=normalize(keyword).replace(/\s+/
 function batamGovernmentContext(text:string){return /\b(?:pemkot batam|pemerintah kota batam|pemko batam)\b/.test(normalize(text));}
 function governmentConceptContext(text:string,keyword:string){const raw=rawTokens(keyword),meaningful=tokens(keyword);if(raw.length<2||meaningful.length!==1)return false;const hasGovernmentQualifier=raw.some(t=>t==='pemerintah'||t==='pemerintahan'||t==='daerah'||t==='kota'||t==='kabupaten');return hasGovernmentQualifier&&containsPhrase(text,meaningful[0])&&batamGovernmentContext(text);}
 function titleConceptCoverage(title:string,keyword:string){const meaningful=tokens(keyword);if(!meaningful.length)return 0;const hit=meaningful.filter(p=>containsPhrase(title,p)).length;return hit/meaningful.length;}
+function sharedConcept(title:string,label:string){const titleTokens=new Set(tokens(title));const concept=tokens(label);const shared=concept.filter(t=>titleTokens.has(t));return shared.length>=2&&shared.length>=Math.min(2,concept.length);}
 const OTHER_REGION=/\b(?:pekanbaru|riau|tanjungpinang|bintan|karimun|natuna|lingga|anambas|jakarta|medan|padang|jambi|palembang)\b/;
 function titleDominatedByOtherRegion(title:string){const n=normalize(title),batam=n.indexOf('batam'),other=n.search(OTHER_REGION);return other>=0&&(batam<0||other<batam);}
 
-export type V16HeadlineTaxonomy={id:string;name:string};
+export type V16HeadlineTaxonomy={id:string;name:string;matchSource?:'TAXONOMY_EXACT'|'TAXONOMY_CONCEPT'|'SECTOR_CONCEPT'};
 export type V16PrimaryEvidence={opdId:string;keywordId:string;keyword:string;taxonomyId:string;taxonomyName:string;score:number;matchType:'MANUAL'|'TITLE_PHRASE'|'TITLE_CONCEPT_LEAD_PHRASE'|'LEAD_PHRASE'|'CONTEXTUAL';supportingOpdIds:string[]};
 
 export async function getV16HeadlineTaxonomies(pool:Pool,title:string):Promise<V16HeadlineTaxonomy[]>{
- const rows=(await pool.query(`SELECT tc.id,tc.name FROM taxonomy_categories tc JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true WHERE tc.active=true AND tc.organization_id=cs.organization_id ORDER BY length(tc.name) DESC,tc.id`)).rows;
- return rows.filter((t:any)=>containsPhrase(title,String(t.name||''))).map((t:any)=>({id:String(t.id),name:String(t.name)}));
+ const rows=(await pool.query(`SELECT tc.id,tc.name,cs.name sector_name FROM taxonomy_categories tc JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true WHERE tc.active=true AND tc.organization_id=cs.organization_id ORDER BY length(tc.name) DESC,tc.id`)).rows;
+ const out=new Map<string,V16HeadlineTaxonomy>();
+ for(const r of rows){
+  const id=String(r.id),name=String(r.name||''),sector=String(r.sector_name||'');
+  if(containsPhrase(title,name)){out.set(id,{id,name,matchSource:'TAXONOMY_EXACT'});continue;}
+  if(sharedConcept(title,name)){out.set(id,{id,name,matchSource:'TAXONOMY_CONCEPT'});continue;}
+  if(sharedConcept(title,sector))out.set(id,{id,name,matchSource:'SECTOR_CONCEPT'});
+ }
+ return [...out.values()];
 }
 
 export async function getV16PrimaryEvidence(pool:Pool,articleId:string):Promise<V16PrimaryEvidence|null>{
