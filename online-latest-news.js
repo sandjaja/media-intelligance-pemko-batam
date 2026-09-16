@@ -1,7 +1,7 @@
 (()=>{
   const root=()=>document.getElementById('online');
   const apiBase=()=>window.MEDIA_INTELLIGENCE_API||'/api';
-  let running=false,reanalyzing=false;
+  let running=false,reanalyzing=false,clustering=false;
 
   async function api(path,opt={}){
     const headers={'content-type':'application/json',...(opt.headers||{})};
@@ -34,19 +34,29 @@
       btn.title='Analisis ulang berita online 7 hari terakhir dengan engine klasifikasi terbaru';
       btn.innerHTML='<i class="fa-solid fa-arrows-rotate mr-2"></i>Analisis Ulang 7 Hari';btn.addEventListener('click',runReanalysis);host.appendChild(btn);
     }
+    if(!document.getElementById('onlineRebuildClusters')){
+      const btn=document.createElement('button');btn.id='onlineRebuildClusters';
+      btn.className='px-4 py-2 rounded-lg bg-violet-700 hover:bg-violet-600 disabled:opacity-50 text-xs font-black';
+      btn.title='Bangun ulang pengelompokan berita serupa dari media online 7 hari terakhir';
+      btn.innerHTML='<i class="fa-solid fa-layer-group mr-2"></i>Bangun Ulang Story Cluster';btn.addEventListener('click',runClustering);host.appendChild(btn);
+    }
   }
 
   function setState(text,icon='fa-cloud-arrow-down'){
-    const btn=document.getElementById('onlineFetchLatest');if(!btn)return;btn.disabled=running||reanalyzing;
+    const btn=document.getElementById('onlineFetchLatest');if(!btn)return;btn.disabled=running||reanalyzing||clustering;
     btn.innerHTML=`<i class="fa-solid ${icon} ${running?'fa-spin':''} mr-2"></i>${text}`;
   }
   function setReanalysisState(text,spin=false){
-    const btn=document.getElementById('onlineReanalyze7d');if(!btn)return;btn.disabled=running||reanalyzing;
+    const btn=document.getElementById('onlineReanalyze7d');if(!btn)return;btn.disabled=running||reanalyzing||clustering;
     btn.innerHTML=`<i class="fa-solid fa-arrows-rotate ${spin?'fa-spin':''} mr-2"></i>${text}`;
   }
+  function setClusteringState(text,spin=false){
+    const btn=document.getElementById('onlineRebuildClusters');if(!btn)return;btn.disabled=running||reanalyzing||clustering;
+    btn.innerHTML=`<i class="fa-solid ${spin?'fa-spinner fa-spin':'fa-layer-group'} mr-2"></i>${text}`;
+  }
   function syncButtons(){
-    const fetchBtn=document.getElementById('onlineFetchLatest');const reBtn=document.getElementById('onlineReanalyze7d');
-    if(fetchBtn)fetchBtn.disabled=running||reanalyzing;if(reBtn)reBtn.disabled=running||reanalyzing;
+    const busy=running||reanalyzing||clustering;
+    ['onlineFetchLatest','onlineReanalyze7d','onlineRebuildClusters'].forEach(id=>{const btn=document.getElementById(id);if(btn)btn.disabled=busy;});
   }
 
   function showResult(rows){
@@ -64,23 +74,39 @@
     const header=section.querySelector('.space-y-4 > .glass');if(header?.parentElement)header.insertAdjacentElement('afterend',card);else section.prepend(card);
   }
 
+  function showClusteringResult(result){
+    const section=root();if(!section)return;section.querySelector('#onlineClusteringResult')?.remove();
+    const card=document.createElement('div');card.id='onlineClusteringResult';card.className='glass rounded-2xl p-4 border border-violet-500/20';
+    card.innerHTML=`<div class="flex flex-wrap items-center justify-between gap-2"><b class="text-sm"><i class="fa-solid fa-layer-group text-violet-300 mr-2"></i>Story Cluster 7 Hari</b><span class="text-[11px] text-slate-400">Engine ${String(result.engine||'-')}</span></div><div class="text-xs text-slate-300 mt-3">Artikel <b class="text-white">${Number(result.articles||0)}</b> · Cluster <b class="text-white">${Number(result.clusters||0)}</b> · Multi-media <b class="text-violet-300">${Number(result.multiSource||0)}</b> · Maks. media/cerita <b class="text-white">${Number(result.maxSources||0)}</b></div>`;
+    const header=section.querySelector('.space-y-4 > .glass');if(header?.parentElement)header.insertAdjacentElement('afterend',card);else section.prepend(card);
+  }
+
+  async function runClustering(){
+    if(running||reanalyzing||clustering)return;clustering=true;syncButtons();setClusteringState('Membangun cluster...',true);
+    try{
+      const response=await api('/online/story-clusters/rebuild',{method:'POST',body:JSON.stringify({days:7,limit:1000})});
+      const result=response.result||{};showClusteringResult(result);window.toast?.(`Story cluster selesai: ${Number(result.clusters||0)} cluster, ${Number(result.multiSource||0)} multi-media.`);document.getElementById('onlineRefresh')?.click();
+    }catch(e){window.toast?.(`Gagal membangun story cluster: ${e.message}`);}
+    finally{clustering=false;ensureButton();setClusteringState('Bangun Ulang Story Cluster');setReanalysisState('Analisis Ulang 7 Hari');setState('Ambil Berita Terbaru');syncButtons();}
+  }
+
   async function runReanalysis(){
-    if(running||reanalyzing)return;reanalyzing=true;syncButtons();setReanalysisState('Menganalisis 7 hari...',true);
+    if(running||reanalyzing||clustering)return;reanalyzing=true;syncButtons();setReanalysisState('Menganalisis 7 hari...',true);
     try{
       const result=await api('/online/reanalyze',{method:'POST',body:JSON.stringify({days:7,limit:300})});
       showReanalysisResult(result);window.toast?.(`Analisis ulang selesai: ${Number(result.analyzed||0)} berhasil, ${Number(result.failed||0)} gagal.`);document.getElementById('onlineRefresh')?.click();
     }catch(e){window.toast?.(`Gagal analisis ulang: ${e.message}`);}
-    finally{reanalyzing=false;ensureButton();setReanalysisState('Analisis Ulang 7 Hari');setState('Ambil Berita Terbaru');syncButtons();}
+    finally{reanalyzing=false;ensureButton();setReanalysisState('Analisis Ulang 7 Hari');setState('Ambil Berita Terbaru');setClusteringState('Bangun Ulang Story Cluster');syncButtons();}
   }
 
   async function runLatest(){
-    if(running||reanalyzing)return;running=true;syncButtons();setState('Menyiapkan...','fa-spinner');const results=[];
+    if(running||reanalyzing||clustering)return;running=true;syncButtons();setState('Menyiapkan...','fa-spinner');const results=[];
     try{
       const health=await api('/ingestion/status');const sources=(health.sources||[]).filter(s=>String(s.category||'').toLowerCase()==='online'&&s.active!==false&&s.url);if(!sources.length)throw new Error('Tidak ada sumber media online aktif.');
       for(let i=0;i<sources.length;i++){const s=sources[i];setState(`Mengambil ${i+1}/${sources.length}: ${s.name}`,'fa-spinner');try{results.push(await api(`/online/sources/${encodeURIComponent(s.id)}/run`,{method:'POST',body:'{}'}));}catch(e){results.push({source:s.name,sourceId:String(s.id),error:e.message});}}
       showResult(results);const failed=results.filter(r=>r.error).length,inserted=results.reduce((n,r)=>n+Number(r.inserted||0),0);window.toast?.(failed?`Selesai: ${inserted} berita baru, ${failed} sumber gagal.`:`Selesai: ${inserted} berita baru disimpan.`);document.getElementById('onlineRefresh')?.click();
     }catch(e){window.toast?.(`Gagal mengambil berita: ${e.message}`);}
-    finally{running=false;ensureButton();setState('Ambil Berita Terbaru');setReanalysisState('Analisis Ulang 7 Hari');syncButtons();}
+    finally{running=false;ensureButton();setState('Ambil Berita Terbaru');setReanalysisState('Analisis Ulang 7 Hari');setClusteringState('Bangun Ulang Story Cluster');syncButtons();}
   }
 
   const obs=new MutationObserver(()=>ensureButton());const start=()=>{const el=root();if(el){obs.observe(el,{childList:true,subtree:true});ensureButton();}};
