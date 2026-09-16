@@ -20,9 +20,8 @@ export async function getV16PrimaryEvidence(pool:Pool,articleId:string):Promise<
  const article=(await pool.query(`SELECT id,title,summary,content FROM articles WHERE id=$1`,[articleId])).rows[0];if(!article)return null;
  const title=String(article.title||''),lead=firstLead(String(article.summary||article.content||'')),context=`${title} ${lead}`;
  const manualIds=new Set((await pool.query(`SELECT keyword_id FROM article_manual_keywords WHERE article_id=$1 AND active=true`,[articleId])).rows.map((r:any)=>String(r.keyword_id)));
- const headlineTaxonomies=new Set((await pool.query(`SELECT tc.id FROM taxonomy_categories tc JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true WHERE tc.active=true AND tc.organization_id=cs.organization_id`)).rows.filter((r:any)=>{void r;return true;}).map((r:any)=>String(r.id)));
- const taxonomyNames=(await pool.query(`SELECT tc.id,tc.name FROM taxonomy_categories tc JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true WHERE tc.active=true AND tc.organization_id=cs.organization_id`)).rows;
- headlineTaxonomies.clear();for(const t of taxonomyNames){if(containsPhrase(title,String(t.name||'')))headlineTaxonomies.add(String(t.id));}
+ const taxonomyRows=(await pool.query(`SELECT tc.id,tc.name FROM taxonomy_categories tc JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true WHERE tc.active=true AND tc.organization_id=cs.organization_id`)).rows;
+ const headlineTaxonomies=new Set(taxonomyRows.filter((t:any)=>containsPhrase(title,String(t.name||''))).map((t:any)=>String(t.id)));
  const rows=(await pool.query(`SELECT k.id keyword_id,k.keyword,kt.category_id taxonomy_id,tc.name taxonomy_name,kt.weight taxonomy_weight,ko.opd_id,ko.weight opd_weight FROM keywords k JOIN keyword_taxonomy kt ON kt.keyword_id=k.id AND kt.active=true JOIN taxonomy_categories tc ON tc.id=kt.category_id AND tc.active=true JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true JOIN keyword_opd ko ON ko.keyword_id=k.id AND ko.active=true AND ko.routing_role='PRIMARY' WHERE k.active=true AND k.organization_id IS NOT NULL AND k.opd_id IS NULL AND k.district_id IS NULL AND tc.organization_id=k.organization_id AND cs.organization_id=k.organization_id ORDER BY k.id`)).rows;
  const candidates:any[]=[];
  for(const r of rows){const keyword=String(r.keyword||''),manual=manualIds.has(String(r.keyword_id)),titlePhrase=containsPhrase(title,keyword),leadPhrase=containsPhrase(lead,keyword),titleConcept=titleConceptCoverage(title,keyword);let matchType:V16PrimaryEvidence['matchType']|null=null,position=0,dominanceBonus=0;
@@ -32,8 +31,8 @@ export async function getV16PrimaryEvidence(pool:Pool,articleId:string):Promise<
   }
   if(!matchType)continue;
   if(!manual&&titleDominatedByOtherRegion(title)&&!batamGovernmentContext(title))continue;
-  // A taxonomy explicitly named in the headline is stronger topic evidence than an unrelated
-  // keyword found only in the lead/body. This is database-driven: no topic/OPD is hardcoded.
+  // Database-driven topic guard: an active taxonomy explicitly named in the headline
+  // blocks unrelated lead/body keywords from hijacking the Primary OPD.
   if(!manual&&headlineTaxonomies.size>0&&(matchType==='LEAD_PHRASE'||matchType==='CONTEXTUAL')&&!headlineTaxonomies.has(String(r.taxonomy_id)))continue;
   const score=Number(r.taxonomy_weight||0)*position+Number(r.opd_weight||1)*position+dominanceBonus;candidates.push({...r,keyword,score,matchType,titleConcept});
  }
