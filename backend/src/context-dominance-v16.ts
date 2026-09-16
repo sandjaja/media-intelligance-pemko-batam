@@ -10,10 +10,11 @@ function firstLead(value:string){const text=String(value||'').replace(/\s+/g,' '
 function isShortKeyword(keyword:string){const n=normalize(keyword).replace(/\s+/g,'');return n.length<=3;}
 function batamGovernmentContext(text:string){return /\b(?:pemkot batam|pemerintah kota batam|pemko batam)\b/.test(normalize(text));}
 function governmentConceptContext(text:string,keyword:string){const raw=rawTokens(keyword),meaningful=tokens(keyword);if(raw.length<2||meaningful.length!==1)return false;const hasGovernmentQualifier=raw.some(t=>t==='pemerintah'||t==='pemerintahan'||t==='daerah'||t==='kota'||t==='kabupaten');return hasGovernmentQualifier&&containsPhrase(text,meaningful[0])&&batamGovernmentContext(text);}
+function titleConceptCoverage(title:string,keyword:string){const meaningful=tokens(keyword);if(!meaningful.length)return 0;const hit=meaningful.filter(p=>containsPhrase(title,p)).length;return hit/meaningful.length;}
 const OTHER_REGION=/\b(?:pekanbaru|riau|tanjungpinang|bintan|karimun|natuna|lingga|anambas|jakarta|medan|padang|jambi|palembang)\b/;
 function titleDominatedByOtherRegion(title:string){const n=normalize(title),batam=n.indexOf('batam'),other=n.search(OTHER_REGION);return other>=0&&(batam<0||other<batam);}
 
-export type V16PrimaryEvidence={opdId:string;keywordId:string;keyword:string;taxonomyId:string;taxonomyName:string;score:number;matchType:'MANUAL'|'TITLE_PHRASE'|'LEAD_PHRASE'|'CONTEXTUAL';supportingOpdIds:string[]};
+export type V16PrimaryEvidence={opdId:string;keywordId:string;keyword:string;taxonomyId:string;taxonomyName:string;score:number;matchType:'MANUAL'|'TITLE_PHRASE'|'TITLE_CONCEPT_LEAD_PHRASE'|'LEAD_PHRASE'|'CONTEXTUAL';supportingOpdIds:string[]};
 
 export async function getV16PrimaryEvidence(pool:Pool,articleId:string):Promise<V16PrimaryEvidence|null>{
  const article=(await pool.query(`SELECT id,title,summary,content FROM articles WHERE id=$1`,[articleId])).rows[0];if(!article)return null;
@@ -21,16 +22,17 @@ export async function getV16PrimaryEvidence(pool:Pool,articleId:string):Promise<
  const manualIds=new Set((await pool.query(`SELECT keyword_id FROM article_manual_keywords WHERE article_id=$1 AND active=true`,[articleId])).rows.map((r:any)=>String(r.keyword_id)));
  const rows=(await pool.query(`SELECT k.id keyword_id,k.keyword,kt.category_id taxonomy_id,tc.name taxonomy_name,kt.weight taxonomy_weight,ko.opd_id,ko.weight opd_weight FROM keywords k JOIN keyword_taxonomy kt ON kt.keyword_id=k.id AND kt.active=true JOIN taxonomy_categories tc ON tc.id=kt.category_id AND tc.active=true JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true JOIN keyword_opd ko ON ko.keyword_id=k.id AND ko.active=true AND ko.routing_role='PRIMARY' WHERE k.active=true AND k.organization_id IS NOT NULL AND k.opd_id IS NULL AND k.district_id IS NULL AND tc.organization_id=k.organization_id AND cs.organization_id=k.organization_id ORDER BY k.id`)).rows;
  const candidates:any[]=[];
- for(const r of rows){const keyword=String(r.keyword||''),manual=manualIds.has(String(r.keyword_id)),titlePhrase=containsPhrase(title,keyword),leadPhrase=containsPhrase(lead,keyword);let matchType:V16PrimaryEvidence['matchType']|null=null,position=0;
-  if(manual){matchType='MANUAL';position=100;}else if(isShortKeyword(keyword)){if(titlePhrase){matchType='TITLE_PHRASE';position=12;}else continue;}else if(titlePhrase){matchType='TITLE_PHRASE';position=12;}else if(leadPhrase){matchType='LEAD_PHRASE';position=6;}else{
+ for(const r of rows){const keyword=String(r.keyword||''),manual=manualIds.has(String(r.keyword_id)),titlePhrase=containsPhrase(title,keyword),leadPhrase=containsPhrase(lead,keyword),titleConcept=titleConceptCoverage(title,keyword);let matchType:V16PrimaryEvidence['matchType']|null=null,position=0,dominanceBonus=0;
+  if(manual){matchType='MANUAL';position=100;}else if(isShortKeyword(keyword)){if(titlePhrase){matchType='TITLE_PHRASE';position=12;}else continue;}else if(titlePhrase){matchType='TITLE_PHRASE';position=12;}else if(leadPhrase&&titleConcept===1&&batamGovernmentContext(context)){matchType='TITLE_CONCEPT_LEAD_PHRASE';position=12;dominanceBonus=50;}else if(leadPhrase){matchType='LEAD_PHRASE';position=6;}else{
    const meaningful=tokens(keyword),coverage=tokenCoverage(context,keyword);
    if((meaningful.length>=2&&coverage===1&&batamGovernmentContext(context))||governmentConceptContext(context,keyword)){matchType='CONTEXTUAL';position=3;}
   }
   if(!matchType)continue;
   if(!manual&&titleDominatedByOtherRegion(title)&&!batamGovernmentContext(title))continue;
-  const score=Number(r.taxonomy_weight||0)*position+Number(r.opd_weight||1)*position;candidates.push({...r,keyword,score,matchType});
+  const score=Number(r.taxonomy_weight||0)*position+Number(r.opd_weight||1)*position+dominanceBonus;candidates.push({...r,keyword,score,matchType,titleConcept});
  }
- candidates.sort((a,b)=>b.score-a.score||(['MANUAL','TITLE_PHRASE','LEAD_PHRASE','CONTEXTUAL'].indexOf(a.matchType)-['MANUAL','TITLE_PHRASE','LEAD_PHRASE','CONTEXTUAL'].indexOf(b.matchType))||Number(a.keyword_id)-Number(b.keyword_id));
+ const order=['MANUAL','TITLE_PHRASE','TITLE_CONCEPT_LEAD_PHRASE','LEAD_PHRASE','CONTEXTUAL'];
+ candidates.sort((a,b)=>b.score-a.score||(order.indexOf(a.matchType)-order.indexOf(b.matchType))||Number(a.keyword_id)-Number(b.keyword_id));
  const best=candidates[0];if(!best)return null;
  const supporting=(await pool.query(`SELECT ko.opd_id FROM keyword_opd ko JOIN opd o ON o.id=ko.opd_id AND o.active=true WHERE ko.keyword_id=$1 AND ko.active=true AND ko.routing_role='SUPPORTING' ORDER BY ko.weight DESC,ko.opd_id LIMIT 3`,[best.keyword_id])).rows.map((r:any)=>String(r.opd_id));
  return{opdId:String(best.opd_id),keywordId:String(best.keyword_id),keyword:String(best.keyword),taxonomyId:String(best.taxonomy_id),taxonomyName:String(best.taxonomy_name),score:Number(best.score),matchType:best.matchType,supportingOpdIds:supporting};
