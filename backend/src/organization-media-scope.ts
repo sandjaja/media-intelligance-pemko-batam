@@ -8,6 +8,7 @@ export type OrganizationMediaScope = {
   organizationCode?: string | null;
   governmentName?: string | null;
   shortName?: string | null;
+  governmentAliases: string[];
   cityName?: string | null;
   tagline?: string | null;
   districts: string[];
@@ -30,7 +31,8 @@ export async function loadOrganizationMediaScope(pool: Pool, organizationId?: nu
   else { const rows=(await pool.query(`SELECT id,name,code FROM organizations WHERE active=true ORDER BY id LIMIT 2`)).rows; if(rows.length!==1)return null; org=rows[0]; }
   if(!org)return null;
   // government_branding currently has no organization_id column, so retain the single active branding row.
-  const branding=(await pool.query(`SELECT government_name,short_name,city_name,tagline FROM government_branding WHERE is_active=true ORDER BY id LIMIT 1`)).rows[0]??{};
+  const branding=(await pool.query(`SELECT government_name,short_name,aliases,city_name,tagline FROM government_branding WHERE is_active=true ORDER BY id LIMIT 1`)).rows[0]??{};
+  const governmentAliases=uniqueTerms(Array.isArray(branding.aliases)?branding.aliases:[]);
   const districts=(await pool.query(`SELECT name FROM districts WHERE organization_id=$1 AND active=true ORDER BY name`,[org.id])).rows.map(r=>String(r.name||'').trim()).filter(Boolean);
   const opdRows=(await pool.query(`SELECT id,name,code FROM opd WHERE organization_id=$1 AND active=true ORDER BY name`,[org.id])).rows;
   const uptdRows=(await pool.query(`SELECT id,opd_id,name,code,aliases FROM uptd WHERE organization_id=$1 AND active=true ORDER BY name`,[org.id])).rows;
@@ -38,11 +40,11 @@ export async function loadOrganizationMediaScope(pool: Pool, organizationId?: nu
     ...opdRows.map(r=>({kind:'OPD' as const,id:Number(r.id),name:String(r.name||''),code:r.code??null,aliases:uniqueTerms([r.name,r.code])})),
     ...uptdRows.map(r=>({kind:'UPTD' as const,id:Number(r.id),name:String(r.name||''),code:r.code??null,aliases:uniqueTerms([r.name,r.code,...(Array.isArray(r.aliases)?r.aliases:[])]),opdId:r.opd_id==null?null:Number(r.opd_id)}))
   ];
-  return {organizationId:Number(org.id),organizationName:String(org.name||''),organizationCode:org.code??null,governmentName:branding.government_name??null,shortName:branding.short_name??null,cityName:branding.city_name??null,tagline:branding.tagline??null,districts,actors};
+  return {organizationId:Number(org.id),organizationName:String(org.name||''),organizationCode:org.code??null,governmentName:branding.government_name??null,shortName:branding.short_name??null,governmentAliases,cityName:branding.city_name??null,tagline:branding.tagline??null,districts,actors};
 }
 
 export function organizationScopeTerms(scope:OrganizationMediaScope){
-  const strong=uniqueTerms([scope.cityName,scope.organizationName,scope.governmentName,scope.shortName,...scope.districts]);
+  const strong=uniqueTerms([scope.cityName,scope.organizationName,scope.governmentName,scope.shortName,...scope.governmentAliases,...scope.districts]);
   const supporting=uniqueTerms([scope.tagline,scope.organizationCode?.replace(/_/g,' ')]);
   return{strong,supporting};
 }
@@ -52,7 +54,7 @@ export function classifyArticleOrganizationScope(article:OnlineArticle,scope:Org
   const {strong,supporting}=organizationScopeTerms(scope);if(!strong.length)return{status:'OUT_OF_SCOPE',reason:'organization scope has no strong terms',matchedTerms:[]};
   const title=normalize(article.title),strongHits=strong.filter(term=>containsTerm(title,term)),supportingHits=supporting.filter(term=>containsTerm(title,term));
   const internalActorHits=[
-    ...uniqueTerms([scope.organizationName,scope.governmentName,scope.shortName]).filter(term=>containsTerm(title,term)),
+    ...uniqueTerms([scope.organizationName,scope.governmentName,scope.shortName,...scope.governmentAliases]).filter(term=>containsTerm(title,term)),
     ...scope.actors.flatMap(actor=>actor.aliases.filter(term=>containsTerm(title,term))),
     ...scope.districts.map(d=>normalize(d)).filter(d=>d&&containsTerm(title,`kecamatan ${d}`)).map(d=>`kecamatan ${d}`)
   ];
