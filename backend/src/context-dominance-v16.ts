@@ -14,6 +14,12 @@ function titleConceptCoverage(title:string,keyword:string){const meaningful=toke
 function sharedConcept(title:string,label:string){const titleTokens=new Set(tokens(title));const concept=tokens(label);const shared=concept.filter(t=>titleTokens.has(t));return shared.length>=2&&shared.length>=Math.min(2,concept.length);}
 const OTHER_REGION=/\b(?:pekanbaru|riau|tanjungpinang|bintan|karimun|natuna|lingga|anambas|jakarta|medan|padang|jambi|palembang)\b/;
 function titleDominatedByOtherRegion(title:string){const n=normalize(title),batam=n.indexOf('batam'),other=n.search(OTHER_REGION);return other>=0&&(batam<0||other<batam);}
+// External/public authorities are a negative gate, not a classifier. If an external authority
+// dominates the headline, automatic Primary routing needs explicit Pemko/target-OPD evidence.
+const EXTERNAL_AUTHORITY=/\b(?:bp batam|badan pengusahaan batam|polda kepri|polresta barelang|polsek\b|polisi\b|bmkg\b|bps\b|pln\b|kementerian\b|menteri\b|wamen\b|wakil menteri\b|pemprov kepri|pemerintah provinsi kepulauan riau|dprd provinsi|kejaksaan\b|kejari\b|kejati\b|pengadilan\b|imigrasi\b|bea cukai\b|ksop\b|basarnas\b|tni\b)\b/;
+function externalAuthorityContext(text:string){return EXTERNAL_AUTHORITY.test(normalize(text));}
+function targetOpdContext(text:string,opdName:string,opdCode:string){const n=normalize(text),name=normalize(opdName),code=normalize(opdCode);if(code.length>=3&&containsPhrase(n,code))return true;if(name.length>=4&&containsPhrase(n,name))return true;const compact=name.replace(/^dinas\s+|^badan\s+|^bagian\s+/,'');return compact.length>=6&&containsPhrase(n,compact);}
+function hasPemkoAuthority(text:string,opdName:string,opdCode:string){return batamGovernmentContext(text)||targetOpdContext(text,opdName,opdCode);}
 
 export type V16HeadlineTaxonomy={id:string;name:string;matchSource?:'TAXONOMY_EXACT'|'TAXONOMY_CONCEPT'|'SECTOR_CONCEPT'};
 export type V16PrimaryEvidence={opdId:string;keywordId:string;keyword:string;taxonomyId:string;taxonomyName:string;score:number;matchType:'MANUAL'|'TITLE_PHRASE'|'TITLE_CONCEPT_LEAD_PHRASE'|'LEAD_PHRASE'|'CONTEXTUAL';supportingOpdIds:string[]};
@@ -35,11 +41,14 @@ export async function getV16PrimaryEvidence(pool:Pool,articleId:string):Promise<
  const title=String(article.title||''),lead=firstLead(String(article.summary||article.content||'')),context=`${title} ${lead}`;
  const manualIds=new Set((await pool.query(`SELECT keyword_id FROM article_manual_keywords WHERE article_id=$1 AND active=true`,[articleId])).rows.map((r:any)=>String(r.keyword_id)));
  const headlineTaxonomies=new Set((await getV16HeadlineTaxonomies(pool,title)).map(t=>t.id));
- const rows=(await pool.query(`SELECT k.id keyword_id,k.keyword,k.evidence_strength,kt.category_id taxonomy_id,tc.name taxonomy_name,kt.weight taxonomy_weight,ko.opd_id,ko.weight opd_weight FROM keywords k JOIN keyword_taxonomy kt ON kt.keyword_id=k.id AND kt.active=true JOIN taxonomy_categories tc ON tc.id=kt.category_id AND tc.active=true JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true JOIN keyword_opd ko ON ko.keyword_id=k.id AND ko.active=true AND ko.routing_role='PRIMARY' WHERE k.active=true AND k.organization_id IS NOT NULL AND k.opd_id IS NULL AND k.district_id IS NULL AND tc.organization_id=k.organization_id AND cs.organization_id=k.organization_id ORDER BY k.id`)).rows;
+ const rows=(await pool.query(`SELECT k.id keyword_id,k.keyword,k.evidence_strength,kt.category_id taxonomy_id,tc.name taxonomy_name,kt.weight taxonomy_weight,ko.opd_id,ko.weight opd_weight,o.name opd_name,o.code opd_code FROM keywords k JOIN keyword_taxonomy kt ON kt.keyword_id=k.id AND kt.active=true JOIN taxonomy_categories tc ON tc.id=kt.category_id AND tc.active=true JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true JOIN keyword_opd ko ON ko.keyword_id=k.id AND ko.active=true AND ko.routing_role='PRIMARY' JOIN opd o ON o.id=ko.opd_id AND o.active=true WHERE k.active=true AND k.organization_id IS NOT NULL AND k.opd_id IS NULL AND k.district_id IS NULL AND tc.organization_id=k.organization_id AND cs.organization_id=k.organization_id ORDER BY k.id`)).rows;
  const candidates:any[]=[];
  for(const r of rows){const keyword=String(r.keyword||''),manual=manualIds.has(String(r.keyword_id)),titlePhrase=containsPhrase(title,keyword),leadPhrase=containsPhrase(lead,keyword),titleConcept=titleConceptCoverage(title,keyword);let matchType:V16PrimaryEvidence['matchType']|null=null,position=0,dominanceBonus=0;
   // Human-selected keywords remain authoritative. Automatic Primary routing requires DIRECT evidence.
   if(!manual&&String(r.evidence_strength||'REVIEW')!=='DIRECT')continue;
+  // Actor/authority gate: external-authority stories cannot become a Pemko Primary solely from a topic keyword.
+  // Explicit Pemko or target-OPD evidence keeps legitimate cross-agency stories eligible. Manual choices bypass this gate.
+  if(!manual&&externalAuthorityContext(title)&&!hasPemkoAuthority(context,String(r.opd_name||''),String(r.opd_code||'')))continue;
   if(manual){matchType='MANUAL';position=100;}else if(isShortKeyword(keyword)){if(titlePhrase){matchType='TITLE_PHRASE';position=12;}else continue;}else if(titlePhrase){matchType='TITLE_PHRASE';position=12;}else if(leadPhrase&&titleConcept===1&&batamGovernmentContext(context)){matchType='TITLE_CONCEPT_LEAD_PHRASE';position=12;dominanceBonus=50;}else if(leadPhrase){matchType='LEAD_PHRASE';position=6;}else{
    const meaningful=tokens(keyword),coverage=tokenCoverage(context,keyword);
    if((meaningful.length>=2&&coverage===1&&batamGovernmentContext(context))||governmentConceptContext(context,keyword)){matchType='CONTEXTUAL';position=3;}
