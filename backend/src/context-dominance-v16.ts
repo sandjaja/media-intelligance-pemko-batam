@@ -14,14 +14,19 @@ function titleConceptCoverage(title:string,keyword:string){const meaningful=toke
 const OTHER_REGION=/\b(?:pekanbaru|riau|tanjungpinang|bintan|karimun|natuna|lingga|anambas|jakarta|medan|padang|jambi|palembang)\b/;
 function titleDominatedByOtherRegion(title:string){const n=normalize(title),batam=n.indexOf('batam'),other=n.search(OTHER_REGION);return other>=0&&(batam<0||other<batam);}
 
+export type V16HeadlineTaxonomy={id:string;name:string};
 export type V16PrimaryEvidence={opdId:string;keywordId:string;keyword:string;taxonomyId:string;taxonomyName:string;score:number;matchType:'MANUAL'|'TITLE_PHRASE'|'TITLE_CONCEPT_LEAD_PHRASE'|'LEAD_PHRASE'|'CONTEXTUAL';supportingOpdIds:string[]};
+
+export async function getV16HeadlineTaxonomies(pool:Pool,title:string):Promise<V16HeadlineTaxonomy[]>{
+ const rows=(await pool.query(`SELECT tc.id,tc.name FROM taxonomy_categories tc JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true WHERE tc.active=true AND tc.organization_id=cs.organization_id ORDER BY length(tc.name) DESC,tc.id`)).rows;
+ return rows.filter((t:any)=>containsPhrase(title,String(t.name||''))).map((t:any)=>({id:String(t.id),name:String(t.name)}));
+}
 
 export async function getV16PrimaryEvidence(pool:Pool,articleId:string):Promise<V16PrimaryEvidence|null>{
  const article=(await pool.query(`SELECT id,title,summary,content FROM articles WHERE id=$1`,[articleId])).rows[0];if(!article)return null;
  const title=String(article.title||''),lead=firstLead(String(article.summary||article.content||'')),context=`${title} ${lead}`;
  const manualIds=new Set((await pool.query(`SELECT keyword_id FROM article_manual_keywords WHERE article_id=$1 AND active=true`,[articleId])).rows.map((r:any)=>String(r.keyword_id)));
- const taxonomyRows=(await pool.query(`SELECT tc.id,tc.name FROM taxonomy_categories tc JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true WHERE tc.active=true AND tc.organization_id=cs.organization_id`)).rows;
- const headlineTaxonomies=new Set(taxonomyRows.filter((t:any)=>containsPhrase(title,String(t.name||''))).map((t:any)=>String(t.id)));
+ const headlineTaxonomies=new Set((await getV16HeadlineTaxonomies(pool,title)).map(t=>t.id));
  const rows=(await pool.query(`SELECT k.id keyword_id,k.keyword,kt.category_id taxonomy_id,tc.name taxonomy_name,kt.weight taxonomy_weight,ko.opd_id,ko.weight opd_weight FROM keywords k JOIN keyword_taxonomy kt ON kt.keyword_id=k.id AND kt.active=true JOIN taxonomy_categories tc ON tc.id=kt.category_id AND tc.active=true JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true JOIN keyword_opd ko ON ko.keyword_id=k.id AND ko.active=true AND ko.routing_role='PRIMARY' WHERE k.active=true AND k.organization_id IS NOT NULL AND k.opd_id IS NULL AND k.district_id IS NULL AND tc.organization_id=k.organization_id AND cs.organization_id=k.organization_id ORDER BY k.id`)).rows;
  const candidates:any[]=[];
  for(const r of rows){const keyword=String(r.keyword||''),manual=manualIds.has(String(r.keyword_id)),titlePhrase=containsPhrase(title,keyword),leadPhrase=containsPhrase(lead,keyword),titleConcept=titleConceptCoverage(title,keyword);let matchType:V16PrimaryEvidence['matchType']|null=null,position=0,dominanceBonus=0;
@@ -31,9 +36,6 @@ export async function getV16PrimaryEvidence(pool:Pool,articleId:string):Promise<
   }
   if(!matchType)continue;
   if(!manual&&titleDominatedByOtherRegion(title)&&!batamGovernmentContext(title))continue;
-  // v16.4 headline-domain-first: when an active taxonomy is explicitly named in the headline,
-  // only manual evidence, direct title evidence, or candidates inside that headline taxonomy may route.
-  // This prevents incidental lead/body examples from hijacking the Primary OPD without hardcoded topics/OPDs.
   if(!manual&&headlineTaxonomies.size>0&&!titlePhrase&&!headlineTaxonomies.has(String(r.taxonomy_id)))continue;
   const score=Number(r.taxonomy_weight||0)*position+Number(r.opd_weight||1)*position+dominanceBonus;candidates.push({...r,keyword,score,matchType,titleConcept});
  }
