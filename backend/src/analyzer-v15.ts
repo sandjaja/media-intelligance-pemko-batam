@@ -1,10 +1,10 @@
 import type { Pool } from 'pg';
 import { analyzeArticle as analyzeCoreArticle, parseKeywordQuery } from './media-intelligence-core.js';
 import { applyRisk } from './risk.js';
-import { routeArticleHeadline } from './analyzer.js';
+import { routeArticleV16 } from './atomic-router-v16.js';
 import { classifyNewsFromRouting, getManualNewsClassification, clearSupportingIntelligenceLinks } from './news-classification.js';
 
-export const CLASSIFICATION_VERSION='article-opd-v15-20260916';
+export const CLASSIFICATION_VERSION='article-opd-v16-20260916';
 
 export async function analyzeArticle(pool:Pool,articleId:string){
  const article=(await pool.query(`SELECT a.id,a.title,a.content,a.summary,a.published_at,ms.name source_name,ms.tier,ms.category media_kind FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE a.id=$1`,[articleId])).rows[0];
@@ -12,7 +12,7 @@ export async function analyzeArticle(pool:Pool,articleId:string){
  let news=await getManualNewsClassification(pool,articleId);
  let routing:any=null;
  if(!news||news.classification==='UTAMA'){
-  routing=await routeArticleHeadline(pool,articleId);
+  routing=await routeArticleV16(pool,articleId);
   if(!news)news=await classifyNewsFromRouting(pool,articleId);
  }
  if(!news)return null;
@@ -31,7 +31,7 @@ export async function analyzeArticle(pool:Pool,articleId:string){
   if(news.source==='MANUAL')throw new Error('MANUAL_UTAMA_REQUIRES_PRIMARY_OPD_ROUTING');
   await clearSupportingIntelligenceLinks(pool,articleId);
   await pool.query(`UPDATE articles SET news_classification='PENDUKUNG',news_classification_source='AUTO',risk_score=0,risk_level='low',is_highlight=false,classified_at=NOW(),classification_version=$2 WHERE id=$1`,[articleId,CLASSIFICATION_VERSION]);
-  return{articleId,newsClassification:'PENDUKUNG',newsClassificationSource:'AUTO',newsClassificationReason:'no Master PRIMARY OPD routing',newsClassificationSignals:[],classificationVersion:CLASSIFICATION_VERSION,opdId:null,supportingOpdIds:[],districtId:null,uptdId:null,uptdName:null,uptdMatches:0,taxonomyId:null,taxonomyName:null,taxonomyScore:0,issueId:null,issueMatchScore:0,issueAssignmentSource:null,risk:null};
+  return{articleId,newsClassification:'PENDUKUNG',newsClassificationSource:'AUTO',newsClassificationReason:'no v16 Master PRIMARY OPD routing',newsClassificationSignals:[],classificationVersion:CLASSIFICATION_VERSION,opdId:null,supportingOpdIds:[],districtId:null,uptdId:null,uptdName:null,uptdMatches:0,taxonomyId:null,taxonomyName:null,taxonomyScore:0,issueId:null,issueMatchScore:0,issueAssignmentSource:null,risk:null};
  }
  const matchedNames=routing?.matchedKeywords??[],query=parseKeywordQuery(matchedNames.join(' | '));
  const peerResult=await pool.query(`SELECT COUNT(*)::int count FROM articles WHERE id<>$1 AND (title ILIKE $2 OR summary ILIKE $2)`,[articleId,`%${String(article.title).slice(0,80)}%`]);
@@ -42,5 +42,5 @@ export async function analyzeArticle(pool:Pool,articleId:string){
  for(const entity of analysis.entities.slice(0,20))await pool.query(`INSERT INTO article_entities(article_id,entity_type,entity_name) VALUES($1,'entity',$2) ON CONFLICT DO NOTHING`,[articleId,entity]);
  const risk=await applyRisk(pool,articleId);
  await pool.query(`UPDATE articles SET classified_at=NOW(),classification_version=$2 WHERE id=$1`,[articleId,CLASSIFICATION_VERSION]);
- return{articleId,newsClassification:news.classification,newsClassificationSource:news.source,newsClassificationReason:news.reason,newsClassificationSignals:news.signals,classificationSource:routing?.classificationSource??'AUTO',classificationVersion:CLASSIFICATION_VERSION,opdId,supportingOpdIds:routing?.supportingOpdIds??[],districtId:routing?.districtId??null,uptdId:routing?.uptdId??null,uptdName:routing?.uptdName??null,uptdMatches:routing?.uptdMatches??0,taxonomyId:routing?.taxonomyId??null,taxonomyName:routing?.taxonomyName??null,taxonomyScore:routing?.taxonomyScore??0,issueId:routing?.issueId??null,issueMatchScore:routing?.issueMatchScore??0,issueAssignmentSource:routing?.issueAssignmentSource??null,sentiment:analysis.sentiment,importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,highlight:analysis.importanceScore>=65||analysis.riskLevel==='high'||analysis.riskLevel==='critical',keywordMatches:matchedNames.length,matchedKeywords:matchedNames,entities:analysis.entities,duplicateFingerprint:analysis.duplicateFingerprint,risk};
+ return{articleId,newsClassification:news.classification,newsClassificationSource:news.source,newsClassificationReason:news.reason,newsClassificationSignals:news.signals,classificationSource:routing?.classificationSource??'AUTO_V16',classificationVersion:CLASSIFICATION_VERSION,opdId,supportingOpdIds:routing?.supportingOpdIds??[],districtId:routing?.districtId??null,uptdId:routing?.uptdId??null,uptdName:routing?.uptdName??null,uptdMatches:routing?.uptdMatches??0,taxonomyId:routing?.taxonomyId??null,taxonomyName:routing?.taxonomyName??null,taxonomyScore:routing?.taxonomyScore??0,issueId:routing?.issueId??null,issueMatchScore:routing?.issueMatchScore??0,issueAssignmentSource:routing?.issueAssignmentSource??null,sentiment:analysis.sentiment,importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,highlight:analysis.importanceScore>=65||analysis.riskLevel==='high'||analysis.riskLevel==='critical',keywordMatches:matchedNames.length,matchedKeywords:matchedNames,entities:analysis.entities,duplicateFingerprint:analysis.duplicateFingerprint,risk};
 }
