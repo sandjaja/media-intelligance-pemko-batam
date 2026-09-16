@@ -1,5 +1,6 @@
 import { XMLParser } from 'fast-xml-parser';
 import { filterArticlesByOrganizationScope, organizationScopeTerms, type OrganizationMediaScope } from './organization-media-scope.js';
+import { verifyDiscoveredArticles } from './online-article-verification-gate.js';
 
 export type OnlineSource = { id:string; name:string; url:string; active?:boolean };
 export type OnlineArticle = { sourceId:string; title:string; url:string; publishedAt:Date; excerpt?:string };
@@ -28,6 +29,7 @@ function parseDate(value?:string):Date|null{
 function isFresh(article:OnlineArticle,now=Date.now()){const t=article.publishedAt.getTime();return Number.isFinite(t)&&t>=now-MAX_ARTICLE_AGE_MS&&t<=now+FUTURE_TOLERANCE_MS}
 function freshOnly(items:OnlineArticle[]){const now=Date.now();return items.filter(item=>isFresh(item,now))}
 function scopeOnly(items:OnlineArticle[],scope:OrganizationMediaScope|null|undefined){return scope?filterArticlesByOrganizationScope(items,scope):items}
+async function verifyCandidates(items:OnlineArticle[],scope?:OrganizationMediaScope|null){const verified=await verifyDiscoveredArticles(items,{concurrency:4,limit:120});return scopeOnly(verified.map(({publishedAtEvidence:_,...item})=>item),scope);}
 
 function normalizeSourceUrl(source:OnlineSource){try{return new URL(source.url).toString()}catch{return source.url}}
 function sourceDomain(url:string){try{return new URL(url).hostname.replace(/^www\./i,'')}catch{return''}}
@@ -121,7 +123,7 @@ function discoverFeed(html:string,baseUrl:string){
 function commonFeeds(baseUrl:string){try{const origin=new URL(baseUrl).origin;return [`${origin}/feed/`,`${origin}/feed`,`${origin}/rss`,`${origin}/rss/`,`${origin}/feed.xml`,`${origin}/index.xml`]}catch{return[]}}
 async function tryFeeds(source:OnlineSource,urls:string[],scope?:OrganizationMediaScope|null){
   for(const url of [...new Set(urls.filter(Boolean))]){
-    try{const {response,body}=await fetchText(url);if(!response.ok)continue;const type=response.headers.get('content-type')?.toLowerCase()??'';if(!looksXml(type,body))continue;const items=parseFeed(body,source,scope);if(items.length)return items}catch{}
+    try{const {response,body}=await fetchText(url);if(!response.ok)continue;const type=response.headers.get('content-type')?.toLowerCase()??'';if(!looksXml(type,body))continue;const items=parseFeed(body,source,scope);if(items.length){const verified=await verifyCandidates(items,scope);if(verified.length)return verified}}catch{}
   }
   return [] as OnlineArticle[];
 }
@@ -131,7 +133,8 @@ async function tryExternalNewsFallback(source:OnlineSource,targetUrl:string,scop
   try{
     const {response,body}=await fetchText(url,10000);
     if(!response.ok)return[];
-    return parseGoogleNewsFeed(body,source,scope);
+    const candidates=parseGoogleNewsFeed(body,source,scope);
+    return await verifyCandidates(candidates,scope);
   }catch{return[]}
 }
 function meta(html:string,key:string){const patterns=[new RegExp(`<meta[^>]+(?:property|name)=["']${key}["'][^>]+content=["']([^"']+)["']`,'i'),new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${key}["'][^>]*>`,'i')];for(const p of patterns){const v=html.match(p)?.[1];if(v)return stripHtml(v)}return undefined}
@@ -224,7 +227,7 @@ export async function collectOnlineSource(source:OnlineSource,scope?:Organizatio
     const {response,body}=await fetchText(targetUrl);
     if(response.ok){
       const pageUrl=response.url||targetUrl,type=response.headers.get('content-type')?.toLowerCase()??'';
-      if(looksXml(type,body)){const items=parseFeed(body,source,scope);if(items.length)return items}
+      if(looksXml(type,body)){const candidates=parseFeed(body,source,scope);if(candidates.length){const items=await verifyCandidates(candidates,scope);if(items.length)return items}}
       if(isScopedPage(pageUrl)){
         const html=await crawlScopedPages(source,body,pageUrl,scope);if(html.length)return html;
         const discovered=discoverFeed(body,pageUrl);if(discovered){const items=await tryFeeds(source,[discovered],scope);if(items.length)return items}
