@@ -31,9 +31,10 @@ export async function getV16PrimaryEvidence(pool:Pool,articleId:string):Promise<
   }
   if(!matchType)continue;
   if(!manual&&titleDominatedByOtherRegion(title)&&!batamGovernmentContext(title))continue;
-  // Database-driven topic guard: an active taxonomy explicitly named in the headline
-  // blocks unrelated lead/body keywords from hijacking the Primary OPD.
-  if(!manual&&headlineTaxonomies.size>0&&(matchType==='LEAD_PHRASE'||matchType==='CONTEXTUAL')&&!headlineTaxonomies.has(String(r.taxonomy_id)))continue;
+  // v16.4 headline-domain-first: when an active taxonomy is explicitly named in the headline,
+  // only manual evidence, direct title evidence, or candidates inside that headline taxonomy may route.
+  // This prevents incidental lead/body examples from hijacking the Primary OPD without hardcoded topics/OPDs.
+  if(!manual&&headlineTaxonomies.size>0&&!titlePhrase&&!headlineTaxonomies.has(String(r.taxonomy_id)))continue;
   const score=Number(r.taxonomy_weight||0)*position+Number(r.opd_weight||1)*position+dominanceBonus;candidates.push({...r,keyword,score,matchType,titleConcept});
  }
  const order=['MANUAL','TITLE_PHRASE','TITLE_CONCEPT_LEAD_PHRASE','LEAD_PHRASE','CONTEXTUAL'];
