@@ -2,9 +2,9 @@ import type { Pool } from 'pg';
 import { analyzeArticle as analyzeCoreArticle, parseKeywordQuery } from './media-intelligence-core.js';
 import { applyRisk } from './risk.js';
 import { routeArticleV16 } from './atomic-router-v16.js';
-import { classifyNewsFromRouting, getManualNewsClassification, clearSupportingIntelligenceLinks } from './news-classification.js';
+import { getManualNewsClassification, clearSupportingIntelligenceLinks } from './news-classification.js';
 
-export const CLASSIFICATION_VERSION='article-opd-v16.2-20260916';
+export const CLASSIFICATION_VERSION='article-opd-v16.3-20260916';
 
 export async function analyzeArticle(pool:Pool,articleId:string){
  const article=(await pool.query(`SELECT a.id,a.title,a.content,a.summary,a.published_at,ms.name source_name,ms.tier,ms.category media_kind FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE a.id=$1`,[articleId])).rows[0];
@@ -13,7 +13,11 @@ export async function analyzeArticle(pool:Pool,articleId:string){
  let routing:any=null;
  if(!news||news.classification==='UTAMA'){
   routing=await routeArticleV16(pool,articleId);
-  if(!news)news=await classifyNewsFromRouting(pool,articleId);
+  if(!news){
+   const hasPrimary=Boolean(routing?.opdId);
+   news={classification:hasPrimary?'UTAMA':'PENDUKUNG',source:'AUTO' as const,reason:hasPrimary?'valid v16 Master PRIMARY OPD routing':'no v16 Master PRIMARY OPD routing',signals:hasPrimary?[`MASTER_PRIMARY_OPD:${routing.opdId}`,...(routing?.matchedKeywords??[]).slice(0,8).map((k:string)=>`MASTER_KEYWORD:${k}`)]:[]};
+   await pool.query(`UPDATE articles SET news_classification=$2,news_classification_source='AUTO',news_classification_changed_by=NULL,news_classification_changed_at=NOW() WHERE id=$1 AND news_classification_source<>'MANUAL'`,[articleId,news.classification]);
+  }
  }
  if(!news)return null;
  if(news.classification==='PENDUKUNG'){
