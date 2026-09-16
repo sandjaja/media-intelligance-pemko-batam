@@ -4,7 +4,7 @@ import { applyRisk } from './risk.js';
 import { routeArticleV16 } from './atomic-router-v16.js';
 import { classifyNewsFromRouting, getManualNewsClassification, clearSupportingIntelligenceLinks } from './news-classification.js';
 
-export const CLASSIFICATION_VERSION='article-opd-v16-20260916';
+export const CLASSIFICATION_VERSION='article-opd-v16.1-20260916';
 
 export async function analyzeArticle(pool:Pool,articleId:string){
  const article=(await pool.query(`SELECT a.id,a.title,a.content,a.summary,a.published_at,ms.name source_name,ms.tier,ms.category media_kind FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE a.id=$1`,[articleId])).rows[0];
