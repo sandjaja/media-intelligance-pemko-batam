@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import type { OnlineArticle } from './online-media-collector.js';
 
+export type OrganizationUnitActor = { kind:'OPD'|'UPTD'; id:number; name:string; code?:string|null; aliases:string[]; opdId?:number|null };
 export type OrganizationMediaScope = {
   organizationId: number;
   organizationName: string;
@@ -10,10 +11,13 @@ export type OrganizationMediaScope = {
   cityName?: string | null;
   tagline?: string | null;
   districts: string[];
+  actors: OrganizationUnitActor[];
 };
 
 export type OrganizationScopeStatus = 'RELEVANT' | 'REVIEW' | 'OUT_OF_SCOPE';
 export type OrganizationScopeDecision = { status: OrganizationScopeStatus; reason: string; matchedTerms: string[] };
+export type OnlineNewsRole = 'UTAMA'|'PENDUKUNG'|'OUT_OF_SCOPE';
+export type OnlineNewsRoleDecision = { role:OnlineNewsRole; reason:string; scope:OrganizationScopeDecision; actorMatches:Array<{kind:'ORGANIZATION'|'OPD'|'UPTD'|'DISTRICT';id:number|null;name:string;opdId:number|null}> };
 
 function normalize(value: unknown): string {
   return String(value ?? '').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
@@ -30,7 +34,13 @@ export async function loadOrganizationMediaScope(pool: Pool, organizationId?: nu
   // government_branding currently has no organization_id column, so retain the single active branding row.
   const branding=(await pool.query(`SELECT government_name,short_name,city_name,tagline FROM government_branding WHERE is_active=true ORDER BY id LIMIT 1`)).rows[0]??{};
   const districts=(await pool.query(`SELECT name FROM districts WHERE organization_id=$1 AND active=true ORDER BY name`,[org.id])).rows.map(r=>String(r.name||'').trim()).filter(Boolean);
-  return {organizationId:Number(org.id),organizationName:String(org.name||''),organizationCode:org.code??null,governmentName:branding.government_name??null,shortName:branding.short_name??null,cityName:branding.city_name??null,tagline:branding.tagline??null,districts};
+  const opdRows=(await pool.query(`SELECT id,name,code FROM opd WHERE organization_id=$1 AND active=true ORDER BY name`,[org.id])).rows;
+  const uptdRows=(await pool.query(`SELECT id,opd_id,name,code,aliases FROM uptd WHERE organization_id=$1 AND active=true ORDER BY name`,[org.id])).rows;
+  const actors:OrganizationUnitActor[]=[
+    ...opdRows.map(r=>({kind:'OPD' as const,id:Number(r.id),name:String(r.name||''),code:r.code??null,aliases:uniqueTerms([r.name,r.code])})),
+    ...uptdRows.map(r=>({kind:'UPTD' as const,id:Number(r.id),name:String(r.name||''),code:r.code??null,aliases:uniqueTerms([r.name,r.code,...(Array.isArray(r.aliases)?r.aliases:[])]),opdId:r.opd_id==null?null:Number(r.opd_id)}))
+  ];
+  return {organizationId:Number(org.id),organizationName:String(org.name||''),organizationCode:org.code??null,governmentName:branding.government_name??null,shortName:branding.short_name??null,cityName:branding.city_name??null,tagline:branding.tagline??null,districts,actors};
 }
 
 export function organizationScopeTerms(scope:OrganizationMediaScope){
@@ -48,5 +58,23 @@ export function classifyArticleOrganizationScope(article:OnlineArticle,scope:Org
   if(supportingHits.length)return{status:'REVIEW',reason:'headline contains only supporting organization term',matchedTerms:supportingHits};
   return{status:'OUT_OF_SCOPE',reason:'headline has no organization/city/district scope term',matchedTerms:[]};
 }
+
+export function classifyOnlineArticleRole(article:OnlineArticle,scope:OrganizationMediaScope):OnlineNewsRoleDecision{
+  const scopeDecision=classifyArticleOrganizationScope(article,scope);
+  if(scopeDecision.status==='OUT_OF_SCOPE')return{role:'OUT_OF_SCOPE',reason:scopeDecision.reason,scope:scopeDecision,actorMatches:[]};
+  const title=normalize(article.title);
+  const actorMatches:OnlineNewsRoleDecision['actorMatches']=[];
+  const organizationTerms=uniqueTerms([scope.organizationName,scope.governmentName,scope.shortName]);
+  if(organizationTerms.some(term=>containsTerm(title,term)))actorMatches.push({kind:'ORGANIZATION',id:scope.organizationId,name:scope.shortName||scope.governmentName||scope.organizationName,opdId:null});
+  for(const actor of scope.actors){
+    if(actor.aliases.some(term=>containsTerm(title,term)))actorMatches.push({kind:actor.kind,id:actor.id,name:actor.name,opdId:actor.kind==='OPD'?actor.id:(actor.opdId??null)});
+  }
+  // A district name by itself is a location. Count it as an internal actor only when the headline
+  // explicitly uses an administrative actor form such as "Kecamatan Batu Aji".
+  for(const district of scope.districts){const d=normalize(district);if(d&&containsTerm(title,`kecamatan ${d}`))actorMatches.push({kind:'DISTRICT',id:null,name:`Kecamatan ${district}`,opdId:null});}
+  if(actorMatches.length)return{role:'UTAMA',reason:'headline contains a database-backed internal government actor',scope:scopeDecision,actorMatches};
+  return{role:'PENDUKUNG',reason:scopeDecision.status==='REVIEW'?'organization scope requires review and no internal actor is present':'in organization/city scope but no internal government actor is present',scope:scopeDecision,actorMatches:[]};
+}
+
 export function isArticleInOrganizationScope(article:OnlineArticle,scope:OrganizationMediaScope):boolean{return classifyArticleOrganizationScope(article,scope).status!=='OUT_OF_SCOPE';}
 export function filterArticlesByOrganizationScope(articles:OnlineArticle[],scope:OrganizationMediaScope|null):OnlineArticle[]{if(!scope)return[];return articles.filter(article=>classifyArticleOrganizationScope(article,scope).status==='RELEVANT');}
