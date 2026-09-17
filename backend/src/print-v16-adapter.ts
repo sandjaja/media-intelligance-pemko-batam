@@ -7,6 +7,7 @@ export type PrintV16Input = {
   title?: string | null;
   summary?: string | null;
   bodyText?: string | null;
+  manualKeywordId?: string | number | null;
 };
 
 type NamedOpd = { id: string; code: string | null; name: string };
@@ -26,6 +27,7 @@ export type PrintV16RoutingResult = {
   uptdMatches: UPTDMatch[];
   keywordId: string | null;
   keyword: string | null;
+  keywordSource: 'AUTO' | 'MANUAL';
   taxonomyId: string | null;
   taxonomyName: string | null;
   matchType: V16PrimaryEvidence['matchType'] | null;
@@ -65,8 +67,10 @@ export async function analyzePrintRoutingV16(pool: Pool, input: PrintV16Input): 
   const ocrLead = summary ? '' : controlledOcrLead(String(input.bodyText || ''));
   const routingLead = summary || ocrLead;
   const evidenceSource: PrintV16RoutingResult['evidenceSource'] = summary ? 'TITLE_SUMMARY' : 'TITLE_OCR_LEAD';
+  const manualKeywordIds = input.manualKeywordId == null ? [] : [input.manualKeywordId];
+  const keywordSource: PrintV16RoutingResult['keywordSource'] = manualKeywordIds.length ? 'MANUAL' : 'AUTO';
   const headlineTaxonomies = await getV16HeadlineTaxonomies(pool, title);
-  const evidence = await getV16PrimaryEvidenceForInput(pool, { title, summary: routingLead, content: '', manualKeywordIds: [] });
+  const evidence = await getV16PrimaryEvidenceForInput(pool, { title, summary: routingLead, content: '', manualKeywordIds });
 
   const empty = {
     primaryOpdId: null, primaryOpdName: null, primaryOpdCode: null,
@@ -78,12 +82,14 @@ export async function analyzePrintRoutingV16(pool: Pool, input: PrintV16Input): 
     const routingStatus: PrintV16RoutingResult['routingStatus'] = headlineTaxonomies.length ? 'AMBIGUOUS' : 'UNROUTED';
     return {
       engine: PRINT_CLASSIFICATION_VERSION, generatedAt: new Date().toISOString(), routingStatus, ...empty,
-      keywordId: null, keyword: null,
+      keywordId: null, keyword: null, keywordSource,
       taxonomyId: headlineTaxonomies[0]?.id || null, taxonomyName: headlineTaxonomies[0]?.name || null,
       matchType: null, score: 0, headlineTaxonomies, needsVerification: true, evidenceSource,
-      note: headlineTaxonomies.length
-        ? 'Headline taxonomy terdeteksi, tetapi belum ada Master Classification evidence yang cukup untuk Primary OPD.'
-        : 'Tidak ada Master Classification evidence atau headline taxonomy yang cukup untuk menentukan Primary OPD.',
+      note: manualKeywordIds.length
+        ? 'Master Keyword pilihan tidak memiliki mapping aktif yang cukup untuk routing V16.5.'
+        : headlineTaxonomies.length
+          ? 'Headline taxonomy terdeteksi, tetapi belum ada Master Classification evidence yang cukup untuk Primary OPD.'
+          : 'Tidak ada Master Classification evidence atau headline taxonomy yang cukup untuk menentukan Primary OPD.',
     };
   }
 
@@ -93,8 +99,6 @@ export async function analyzePrintRoutingV16(pool: Pool, input: PrintV16Input): 
   const primaryOpd = opdMap.get(String(evidence.opdId)) || null;
   const supportingOpds = evidence.supportingOpdIds.map(id => opdMap.get(String(id))).filter(Boolean) as NamedOpd[];
 
-  // Same UPTD evidence policy as Online atomic-router-v16: active UPTD under routed OPDs,
-  // exact name/code/alias phrase in title (24) or verified lead (16), threshold >=16.
   const units = (await pool.query(`SELECT id,opd_id,name,code,aliases FROM uptd WHERE active=true AND opd_id=ANY($1::bigint[]) ORDER BY id`, [routedIds])).rows;
   const matches: UPTDMatch[] = [];
   for (const unit of units) {
@@ -114,9 +118,11 @@ export async function analyzePrintRoutingV16(pool: Pool, input: PrintV16Input): 
     primaryOpdId: evidence.opdId, primaryOpdName: primaryOpd?.name || null, primaryOpdCode: primaryOpd?.code || null,
     supportingOpdIds: evidence.supportingOpdIds, supportingOpds,
     uptdId: primaryUnit?.id || null, uptdName: primaryUnit?.name || null, uptdMatches: matches,
-    keywordId: evidence.keywordId, keyword: evidence.keyword,
+    keywordId: evidence.keywordId, keyword: evidence.keyword, keywordSource,
     taxonomyId: evidence.taxonomyId, taxonomyName: evidence.taxonomyName,
     matchType: evidence.matchType, score: evidence.score, headlineTaxonomies, needsVerification: false, evidenceSource,
-    note: 'Routing Media Cetak menggunakan Master Classification dan Context Dominance V16.5. UPTD memakai aturan evidence V16.5 yang sama dengan Online. Full OCR body tidak digunakan sebagai evidence routing.',
+    note: keywordSource === 'MANUAL'
+      ? 'Routing Media Cetak dihitung ulang dari Master Keyword yang diverifikasi operator menggunakan mapping Master Classification V16.5.'
+      : 'Routing Media Cetak menggunakan Master Classification dan Context Dominance V16.5. UPTD memakai aturan evidence V16.5 yang sama dengan Online. Full OCR body tidak digunakan sebagai evidence routing.',
   };
 }
