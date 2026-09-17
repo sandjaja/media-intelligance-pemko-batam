@@ -21,7 +21,9 @@ export async function registerOwnedSocialRoutes(app: FastifyInstance, pool: Pool
 
   const idParam = z.object({ id: z.string().regex(/^\d+$/) });
   const accountFields = {
+    ownerType: z.enum(['pemko','opd','district']).optional(),
     opdId: z.coerce.number().int().positive().nullable().optional(),
+    districtId: z.coerce.number().int().positive().nullable().optional(),
     platform: z.enum(['instagram','facebook','tiktok','x','youtube','website','threads']),
     accountName: z.string().trim().min(2).max(200),
     handle: z.string().trim().min(1).max(200),
@@ -32,23 +34,43 @@ export async function registerOwnedSocialRoutes(app: FastifyInstance, pool: Pool
   };
   const validateRules = (data: any, ctx: z.RefinementCtx) => {
     if (data.platform === 'website' && !data.profileUrl) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['profileUrl'], message: 'Website resmi wajib memiliki URL.' });
-    if (data.opdId && data.isPrimarySource) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['isPrimarySource'], message: 'Sumber utama Pemko hanya dapat digunakan oleh kanal Pemko/lintas OPD.' });
+    const ownerType = data.ownerType || (data.districtId ? 'district' : data.opdId ? 'opd' : 'pemko');
+    if (ownerType === 'opd' && !data.opdId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['opdId'], message: 'Pemilik OPD wajib memilih OPD.' });
+    if (ownerType === 'district' && !data.districtId) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['districtId'], message: 'Pemilik Kecamatan wajib memilih kecamatan.' });
+    if (ownerType !== 'pemko' && data.isPrimarySource) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['isPrimarySource'], message: 'Sumber utama Pemko hanya dapat digunakan oleh kanal Pemko/lintas OPD.' });
   };
   const accountInput = z.object(accountFields).superRefine(validateRules);
-  // IMPORTANT: partial() must be applied to the ZodObject before superRefine.
-  // Calling partial() on the ZodEffects returned by superRefine causes a runtime 500.
   const accountPatchInput = z.object(accountFields).partial().superRefine(validateRules);
   const audit = async (userId: string, action: string, metadata: any) => { try { await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,$2,$3)`, [userId, action, metadata]); } catch (e) { app.log.warn({ err: e, action }, 'owned social audit failed'); } };
+  const resolveOwner = (data: any, current?: any) => {
+    const ownershipLevel = data.ownerType || (data.districtId ? 'district' : data.opdId ? 'opd' : current?.ownership_level || 'pemko');
+    return {
+      ownershipLevel,
+      opdId: ownershipLevel === 'opd' ? (data.opdId === undefined ? current?.opd_id : data.opdId) : null,
+      districtId: ownershipLevel === 'district' ? (data.districtId === undefined ? current?.district_id : data.districtId) : null,
+    };
+  };
+  const validateOwner = async (owner: any, reply: any) => {
+    if (owner.ownershipLevel === 'opd') {
+      if (!owner.opdId) { reply.code(400).send({ error: 'OPD_REQUIRED' }); return false; }
+      if (!(await pool.query(`SELECT id FROM opd WHERE id=$1 AND active=true`, [owner.opdId])).rows[0]) { reply.code(404).send({ error: 'OPD_NOT_FOUND' }); return false; }
+    }
+    if (owner.ownershipLevel === 'district') {
+      if (!owner.districtId) { reply.code(400).send({ error: 'DISTRICT_REQUIRED' }); return false; }
+      if (!(await pool.query(`SELECT id FROM districts WHERE id=$1 AND active=true`, [owner.districtId])).rows[0]) { reply.code(404).send({ error: 'DISTRICT_NOT_FOUND' }); return false; }
+    }
+    return true;
+  };
 
-  app.get('/api/admin/owned-social-accounts', { preHandler: auth }, async () => ({ data: (await pool.query(`SELECT a.id,a.opd_id,a.platform,a.account_name,a.handle,a.profile_url,a.account_type,a.active,a.ownership_level,a.is_primary_source,a.source_priority,a.created_at,a.updated_at,o.name AS opd_name,o.code AS opd_code FROM owned_social_accounts a LEFT JOIN opd o ON o.id=a.opd_id ORDER BY a.active DESC,a.platform ASC,a.account_name ASC`)).rows }));
+  app.get('/api/admin/owned-social-accounts', { preHandler: auth }, async () => ({ data: (await pool.query(`SELECT a.id,a.opd_id,a.district_id,a.platform,a.account_name,a.handle,a.profile_url,a.account_type,a.active,a.ownership_level,a.is_primary_source,a.source_priority,a.created_at,a.updated_at,o.name AS opd_name,o.code AS opd_code,d.name AS district_name,d.code AS district_code FROM owned_social_accounts a LEFT JOIN opd o ON o.id=a.opd_id LEFT JOIN districts d ON d.id=a.district_id ORDER BY a.active DESC,a.platform ASC,a.account_name ASC`)).rows }));
 
   app.post('/api/admin/owned-social-accounts', { preHandler: auth }, async (request, reply) => {
     const parsed = accountInput.safeParse(request.body); if (!parsed.success) return reply.code(400).send({ error: 'INVALID_OWNED_SOCIAL_ACCOUNT', details: parsed.error.flatten() });
-    if (parsed.data.opdId && !(await pool.query(`SELECT id FROM opd WHERE id=$1`, [parsed.data.opdId])).rows[0]) return reply.code(404).send({ error: 'OPD_NOT_FOUND' });
-    const ownershipLevel = parsed.data.opdId ? 'opd' : 'pemko'; const isPrimarySource = ownershipLevel === 'pemko' && parsed.data.isPrimarySource; const sourcePriority = ownershipLevel === 'pemko' ? 100 : 10;
+    const owner = resolveOwner(parsed.data); if (!(await validateOwner(owner, reply))) return;
+    const isPrimarySource = owner.ownershipLevel === 'pemko' && parsed.data.isPrimarySource; const sourcePriority = owner.ownershipLevel === 'pemko' ? 100 : 10;
     try {
-      const { rows } = await pool.query(`INSERT INTO owned_social_accounts(opd_id,platform,account_name,handle,profile_url,account_type,active,ownership_level,is_primary_source,source_priority) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id,opd_id,platform,account_name,handle,profile_url,account_type,active,ownership_level,is_primary_source,source_priority,created_at,updated_at`, [parsed.data.opdId ?? null,parsed.data.platform,parsed.data.accountName,parsed.data.handle,parsed.data.profileUrl || null,parsed.data.accountType,parsed.data.active,ownershipLevel,isPrimarySource,sourcePriority]);
-      await audit((request as any).ownedSocialAdminUserId,'OWNED_SOCIAL_ACCOUNT_CREATED',{ accountId: rows[0].id, platform: rows[0].platform, handle: rows[0].handle, ownershipLevel, isPrimarySource });
+      const { rows } = await pool.query(`INSERT INTO owned_social_accounts(opd_id,district_id,platform,account_name,handle,profile_url,account_type,active,ownership_level,is_primary_source,source_priority) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id,opd_id,district_id,platform,account_name,handle,profile_url,account_type,active,ownership_level,is_primary_source,source_priority,created_at,updated_at`, [owner.opdId,owner.districtId,parsed.data.platform,parsed.data.accountName,parsed.data.handle,parsed.data.profileUrl || null,parsed.data.accountType,parsed.data.active,owner.ownershipLevel,isPrimarySource,sourcePriority]);
+      await audit((request as any).ownedSocialAdminUserId,'OWNED_SOCIAL_ACCOUNT_CREATED',{ accountId: rows[0].id, platform: rows[0].platform, handle: rows[0].handle, ownershipLevel: owner.ownershipLevel, isPrimarySource });
       return reply.code(201).send({ data: rows[0] });
     } catch (error: any) { if (error?.code === '23505') return reply.code(409).send({ error: 'OWNED_SOCIAL_ACCOUNT_ALREADY_EXISTS' }); app.log.error({err:error},'create owned social account failed'); return reply.code(500).send({error:'OWNED_SOCIAL_ACCOUNT_SAVE_FAILED',detail:error?.message||'Unknown database error'}); }
   });
@@ -57,13 +79,13 @@ export async function registerOwnedSocialRoutes(app: FastifyInstance, pool: Pool
     const id = idParam.safeParse(request.params); const parsed = accountPatchInput.safeParse(request.body);
     if (!id.success || !parsed.success) return reply.code(400).send({ error: 'INVALID_OWNED_SOCIAL_ACCOUNT', details: parsed.success ? undefined : parsed.error.flatten() });
     const current = (await pool.query(`SELECT * FROM owned_social_accounts WHERE id=$1`, [id.data.id])).rows[0]; if (!current) return reply.code(404).send({ error: 'OWNED_SOCIAL_ACCOUNT_NOT_FOUND' });
-    const next = { opdId: parsed.data.opdId === undefined ? current.opd_id : parsed.data.opdId, platform: parsed.data.platform ?? current.platform, accountName: parsed.data.accountName ?? current.account_name, handle: parsed.data.handle ?? current.handle, profileUrl: parsed.data.profileUrl === '' ? null : (parsed.data.profileUrl ?? current.profile_url), accountType: parsed.data.accountType ?? current.account_type, active: parsed.data.active ?? current.active, isPrimarySource: parsed.data.isPrimarySource ?? current.is_primary_source };
+    const owner = resolveOwner(parsed.data, current); if (!(await validateOwner(owner, reply))) return;
+    const next = { platform: parsed.data.platform ?? current.platform, accountName: parsed.data.accountName ?? current.account_name, handle: parsed.data.handle ?? current.handle, profileUrl: parsed.data.profileUrl === '' ? null : (parsed.data.profileUrl ?? current.profile_url), accountType: parsed.data.accountType ?? current.account_type, active: parsed.data.active ?? current.active, isPrimarySource: parsed.data.isPrimarySource ?? current.is_primary_source };
     if (next.platform === 'website' && !next.profileUrl) return reply.code(400).send({ error: 'WEBSITE_URL_REQUIRED' });
-    if (next.opdId && !(await pool.query(`SELECT id FROM opd WHERE id=$1`, [next.opdId])).rows[0]) return reply.code(404).send({ error: 'OPD_NOT_FOUND' });
-    const ownershipLevel = next.opdId ? 'opd' : 'pemko'; if (ownershipLevel === 'opd') next.isPrimarySource = false; const sourcePriority = ownershipLevel === 'pemko' ? 100 : 10;
+    if (owner.ownershipLevel !== 'pemko') next.isPrimarySource = false; const sourcePriority = owner.ownershipLevel === 'pemko' ? 100 : 10;
     try {
-      const { rows } = await pool.query(`UPDATE owned_social_accounts SET opd_id=$1,platform=$2,account_name=$3,handle=$4,profile_url=$5,account_type=$6,active=$7,ownership_level=$8,is_primary_source=$9,source_priority=$10,updated_at=now() WHERE id=$11 RETURNING id,opd_id,platform,account_name,handle,profile_url,account_type,active,ownership_level,is_primary_source,source_priority,created_at,updated_at`, [next.opdId,next.platform,next.accountName,next.handle,next.profileUrl,next.accountType,next.active,ownershipLevel,next.isPrimarySource,sourcePriority,id.data.id]);
-      await audit((request as any).ownedSocialAdminUserId,'OWNED_SOCIAL_ACCOUNT_UPDATED',{ accountId: id.data.id, ownershipLevel, isPrimarySource: next.isPrimarySource });
+      const { rows } = await pool.query(`UPDATE owned_social_accounts SET opd_id=$1,district_id=$2,platform=$3,account_name=$4,handle=$5,profile_url=$6,account_type=$7,active=$8,ownership_level=$9,is_primary_source=$10,source_priority=$11,updated_at=now() WHERE id=$12 RETURNING id,opd_id,district_id,platform,account_name,handle,profile_url,account_type,active,ownership_level,is_primary_source,source_priority,created_at,updated_at`, [owner.opdId,owner.districtId,next.platform,next.accountName,next.handle,next.profileUrl,next.accountType,next.active,owner.ownershipLevel,next.isPrimarySource,sourcePriority,id.data.id]);
+      await audit((request as any).ownedSocialAdminUserId,'OWNED_SOCIAL_ACCOUNT_UPDATED',{ accountId: id.data.id, ownershipLevel: owner.ownershipLevel, isPrimarySource: next.isPrimarySource });
       return { data: rows[0] };
     } catch (error: any) { if (error?.code === '23505') return reply.code(409).send({ error: 'OWNED_SOCIAL_ACCOUNT_ALREADY_EXISTS' }); app.log.error({err:error,accountId:id.data.id},'update owned social account failed'); return reply.code(500).send({error:'OWNED_SOCIAL_ACCOUNT_SAVE_FAILED',detail:error?.message||'Unknown database error'}); }
   });
