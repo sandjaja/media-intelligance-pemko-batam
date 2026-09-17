@@ -12,7 +12,7 @@ export type PrintV16Input = {
 export type PrintV16RoutingResult = {
   engine: typeof PRINT_CLASSIFICATION_VERSION;
   generatedAt: string;
-  routingStatus: 'ROUTED' | 'AMBIGUOUS';
+  routingStatus: 'ROUTED' | 'AMBIGUOUS' | 'UNROUTED';
   primaryOpdId: string | null;
   supportingOpdIds: string[];
   keywordId: string | null;
@@ -62,10 +62,11 @@ export async function analyzePrintRoutingV16(pool: Pool, input: PrintV16Input): 
   });
 
   if (!evidence) {
+    const routingStatus: PrintV16RoutingResult['routingStatus'] = headlineTaxonomies.length ? 'AMBIGUOUS' : 'UNROUTED';
     return {
       engine: PRINT_CLASSIFICATION_VERSION,
       generatedAt: new Date().toISOString(),
-      routingStatus: 'AMBIGUOUS',
+      routingStatus,
       primaryOpdId: null,
       supportingOpdIds: [],
       keywordId: null,
@@ -78,8 +79,8 @@ export async function analyzePrintRoutingV16(pool: Pool, input: PrintV16Input): 
       needsVerification: true,
       evidenceSource,
       note: headlineTaxonomies.length
-        ? 'Headline taxonomy terdeteksi, tetapi tidak ada DIRECT Master Classification evidence yang cukup untuk Primary OPD.'
-        : 'Tidak ada DIRECT Master Classification evidence yang cukup untuk menentukan Primary OPD.',
+        ? 'Headline taxonomy terdeteksi, tetapi belum ada Master Classification evidence yang cukup untuk Primary OPD.'
+        : 'Tidak ada Master Classification evidence atau headline taxonomy yang cukup untuk menentukan Primary OPD.',
     };
   }
 
