@@ -6,6 +6,10 @@ import { generateDailyIntelligence } from './daily-intelligence.js';
 const databaseUrl = process.env.DATABASE_URL ?? process.env.POSTGRES_URL ?? '';
 if (!databaseUrl) throw new Error('DATABASE_URL or POSTGRES_URL is required');
 
+// Safety switch: automatic ingestion/intelligence is OFF by default while the
+// application is under active development. Set SCHEDULER_ENABLED=true explicitly
+// in the runtime environment when automatic cycles should be enabled again.
+const schedulerEnabled = process.env.SCHEDULER_ENABLED === 'true';
 const minutes = Math.max(1, Number(process.env.RUN_INTERVAL_MINUTES ?? 30));
 const runOnStart = process.env.RUN_ON_START !== 'false';
 const pool = new Pool({ connectionString: databaseUrl, max: 5 });
@@ -15,7 +19,7 @@ let shuttingDown = false;
 let running = false;
 
 async function runCycle() {
-  if (shuttingDown || running) return;
+  if (!schedulerEnabled || shuttingDown || running) return;
   running = true;
   const startedAt = Date.now();
   const startedIso = new Date(startedAt).toISOString();
@@ -55,7 +59,7 @@ async function runCycle() {
 }
 
 async function scheduleNext() {
-  if (shuttingDown) return;
+  if (!schedulerEnabled || shuttingDown) return;
   await runCycle();
   if (shuttingDown) return;
   timer = setTimeout(() => { void scheduleNext(); }, minutes * 60_000);
@@ -71,7 +75,12 @@ async function shutdown(signal: string) {
   process.exit(0);
 }
 
-if (runOnStart) {
+if (!schedulerEnabled) {
+  console.log(JSON.stringify({
+    event: 'scheduler_disabled',
+    message: 'Automatic ingestion and daily intelligence are disabled. Set SCHEDULER_ENABLED=true to enable.'
+  }));
+} else if (runOnStart) {
   await scheduleNext();
 } else {
   timer = setTimeout(() => { void scheduleNext(); }, minutes * 60_000);
