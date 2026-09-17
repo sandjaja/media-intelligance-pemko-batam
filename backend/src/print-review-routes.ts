@@ -109,12 +109,14 @@ export async function registerPrintReviewRoutes(app: FastifyInstance, pool: Pool
           evidenceSource: analysis.evidenceSource,
           note: analysis.note,
         }]);
-        return reply.code(409).send({
-          error: 'PRINT_ROUTING_AMBIGUOUS',
-          message: 'V16.5 belum memiliki evidence yang cukup untuk menentukan Primary OPD. Clipping tetap berstatus Verified.',
+        // AMBIGUOUS is a valid V16.5 routing outcome, not a transport/API error.
+        // Keep the clipping VERIFIED and return 200 so the UI can render the
+        // diagnostic routing result and explain why Primary OPD was not forced.
+        return {
           data: keptVerified,
           analysis,
-        });
+          message: 'V16.5 belum memiliki evidence yang cukup untuk menentukan Primary OPD. Clipping tetap berstatus Verified.',
+        };
       }
 
       const analyzed = (await pool.query(
