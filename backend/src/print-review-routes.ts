@@ -29,6 +29,23 @@ export async function registerPrintReviewRoutes(app: FastifyInstance, pool: Pool
     data: { canReviewAndVerify: canReview(request.printReviewAuth!), canAdvanceAnalysis: canReview(request.printReviewAuth!), canReopenAnalyzed: canReview(request.printReviewAuth!) },
   }));
 
+  app.get('/api/print/keyword-options', { preHandler: auth }, async (request, reply) => {
+    if (!canReview(request.printReviewAuth!)) return reply.code(403).send({ error: 'KEYWORD_EDIT_REQUIRES_HUMAS_OR_SUPER_ADMIN' });
+    const rows = (await pool.query(`
+      SELECT DISTINCT k.id,k.keyword,tc.id taxonomy_id,tc.name taxonomy_name,o.id opd_id,o.name opd_name
+      FROM keywords k
+      JOIN keyword_taxonomy kt ON kt.keyword_id=k.id AND kt.active=true
+      JOIN taxonomy_categories tc ON tc.id=kt.category_id AND tc.active=true
+      JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true
+      JOIN keyword_opd ko ON ko.keyword_id=k.id AND ko.active=true AND ko.routing_role='PRIMARY'
+      JOIN opd o ON o.id=ko.opd_id AND o.active=true
+      WHERE k.active=true AND k.organization_id IS NOT NULL AND k.opd_id IS NULL AND k.district_id IS NULL
+        AND tc.organization_id=k.organization_id AND cs.organization_id=k.organization_id
+      ORDER BY k.keyword,tc.name,o.name
+    `)).rows;
+    return { data: rows };
+  });
+
   app.post('/api/print/articles/:id/review-verify', { preHandler: auth }, async (request, reply) => {
     const ctx = request.printReviewAuth!;
     if (!canReview(ctx)) return reply.code(403).send({ error: 'REVIEW_VERIFY_REQUIRES_HUMAS_OR_SUPER_ADMIN' });
@@ -47,6 +64,7 @@ export async function registerPrintReviewRoutes(app: FastifyInstance, pool: Pool
     } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
   });
 
+  // Analysis is now a preview. A routed keyword must be accepted or edited before the clipping is locked as Analyzed.
   app.post('/api/print/articles/:id/mark-analyzed', { preHandler: auth }, async (request, reply) => {
     const ctx = request.printReviewAuth!;
     if (!canReview(ctx)) return reply.code(403).send({ error: 'ANALYSIS_REQUIRES_HUMAS_OR_SUPER_ADMIN' });
@@ -54,45 +72,64 @@ export async function registerPrintReviewRoutes(app: FastifyInstance, pool: Pool
     if (!id.success) return reply.code(400).send({ error: 'INVALID_ID' });
     const current = (await pool.query(`SELECT pa.id,pa.title,pa.summary,pa.body_text,pa.status,pa.verified_by,pa.verified_at FROM print_articles pa WHERE pa.id=$1`, [id.data])).rows[0];
     if (!current) return reply.code(404).send({ error: 'NOT_FOUND' });
-    if (String(current.status) !== 'verified') return reply.code(409).send({ error: 'ARTICLE_MUST_BE_VERIFIED_FIRST', message: `Clipping harus berstatus Verified sebelum masuk ke Analyzed. Status saat ini: ${current.status}.` });
-
+    if (String(current.status) !== 'verified') return reply.code(409).send({ error: 'ARTICLE_MUST_BE_VERIFIED_FIRST', message: `Clipping harus berstatus Verified sebelum proses analisis. Status saat ini: ${current.status}.` });
     try {
       const analysis = await analyzePrintRoutingV16(pool, { title: current.title, summary: current.summary, bodyText: current.body_text });
-      if (analysis.routingStatus !== 'ROUTED') {
-        const keptVerified = (await pool.query(
-          `UPDATE print_articles SET opd_id=NULL, ai_metadata=jsonb_set(COALESCE(ai_metadata,'{}'::jsonb),'{v16Routing}',$2::jsonb,true), updated_at=now() WHERE id=$1 AND status='verified' RETURNING id,title,status,opd_id,ai_metadata,verified_by,verified_at,updated_at`,
-          [id.data, JSON.stringify(analysis)],
-        )).rows[0];
-        if (!keptVerified) return reply.code(409).send({ error: 'ARTICLE_STATE_CHANGED', message: 'Status clipping berubah saat proses analisis. Muat ulang data dan coba lagi.' });
-        const auditAction = analysis.routingStatus === 'AMBIGUOUS' ? 'PRINT_ARTICLE_ROUTING_AMBIGUOUS' : 'PRINT_ARTICLE_ROUTING_UNROUTED';
-        await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,$2,$3)`, [ctx.id, auditAction, {
-          printArticleId: id.data, previousStatus: current.status, engine: analysis.engine, routingStatus: analysis.routingStatus,
-          taxonomyId: analysis.taxonomyId, taxonomyName: analysis.taxonomyName, evidenceSource: analysis.evidenceSource, note: analysis.note,
-        }]);
-        return {
-          data: keptVerified,
-          analysis,
-          message: analysis.routingStatus === 'AMBIGUOUS'
-            ? 'V16.5 mendeteksi indikasi taxonomy tetapi belum cukup evidence untuk Primary OPD. Clipping tetap berstatus Verified.'
-            : 'V16.5 belum menemukan evidence atau headline taxonomy yang cukup untuk Primary OPD. Clipping tetap berstatus Verified.',
-        };
-      }
-
-      const analyzed = (await pool.query(
-        `UPDATE print_articles SET status='analyzed',opd_id=$2,sentiment=NULL,risk_score=0,importance_score=0,ai_metadata=jsonb_set(COALESCE(ai_metadata,'{}'::jsonb),'{v16Routing}',$3::jsonb,true),updated_at=now() WHERE id=$1 AND status='verified' RETURNING id,title,status,opd_id,sentiment,risk_score,importance_score,ai_metadata,verified_by,verified_at,updated_at`,
-        [id.data, analysis.primaryOpdId, JSON.stringify(analysis)],
+      const preview = { ...analysis, keywordVerification: analysis.routingStatus === 'ROUTED' ? 'PENDING' : 'NOT_AVAILABLE', originalKeywordId: analysis.keywordId, originalKeyword: analysis.keyword };
+      const keptVerified = (await pool.query(
+        `UPDATE print_articles SET opd_id=NULL,ai_metadata=jsonb_set(COALESCE(ai_metadata,'{}'::jsonb),'{v16Routing}',$2::jsonb,true),updated_at=now() WHERE id=$1 AND status='verified' RETURNING id,title,status,opd_id,ai_metadata,verified_by,verified_at,updated_at`,
+        [id.data, JSON.stringify(preview)],
       )).rows[0];
-      if (!analyzed) return reply.code(409).send({ error: 'ARTICLE_STATE_CHANGED', message: 'Status clipping berubah saat proses analisis. Muat ulang data dan coba lagi.' });
-      await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'PRINT_ARTICLE_ANALYZED',$2)`, [ctx.id, {
-        printArticleId: id.data, previousStatus: current.status, engine: analysis.engine, routingStatus: analysis.routingStatus,
-        primaryOpdId: analysis.primaryOpdId, supportingOpdIds: analysis.supportingOpdIds, keywordId: analysis.keywordId,
-        keyword: analysis.keyword, taxonomyId: analysis.taxonomyId, taxonomyName: analysis.taxonomyName, matchType: analysis.matchType, evidenceSource: analysis.evidenceSource,
+      if (!keptVerified) return reply.code(409).send({ error: 'ARTICLE_STATE_CHANGED', message: 'Status clipping berubah saat proses analisis. Muat ulang data dan coba lagi.' });
+      const auditAction = analysis.routingStatus === 'ROUTED' ? 'PRINT_ARTICLE_KEYWORD_REVIEW_PENDING' : analysis.routingStatus === 'AMBIGUOUS' ? 'PRINT_ARTICLE_ROUTING_AMBIGUOUS' : 'PRINT_ARTICLE_ROUTING_UNROUTED';
+      await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,$2,$3)`, [ctx.id, auditAction, {
+        printArticleId: id.data, engine: analysis.engine, routingStatus: analysis.routingStatus, primaryOpdId: analysis.primaryOpdId,
+        keywordId: analysis.keywordId, keyword: analysis.keyword, taxonomyId: analysis.taxonomyId, taxonomyName: analysis.taxonomyName, evidenceSource: analysis.evidenceSource,
       }]);
-      return { data: analyzed, analysis };
+      return { data: keptVerified, analysis: preview, requiresKeywordVerification: analysis.routingStatus === 'ROUTED', message: analysis.routingStatus === 'ROUTED' ? 'Analisis V16.5 selesai. Verifikasi keyword dengan Terima Keyword atau Edit Keyword sebelum data dikunci.' : analysis.note };
     } catch (error: any) {
       request.log.error({ err: error, printArticleId: id.data }, 'print V16.5 routing failed');
       return reply.code(500).send({ error: 'PRINT_ANALYSIS_FAILED', message: error?.message || 'Proses analisis gagal.' });
     }
+  });
+
+  app.post('/api/print/articles/:id/finalize-keyword', { preHandler: auth }, async (request, reply) => {
+    const ctx = request.printReviewAuth!;
+    if (!canReview(ctx)) return reply.code(403).send({ error: 'KEYWORD_VERIFY_REQUIRES_HUMAS_OR_SUPER_ADMIN' });
+    const id = z.coerce.number().int().positive().safeParse((request.params as any).id);
+    const body = z.object({ keywordId: z.coerce.number().int().positive().optional() }).safeParse(request.body ?? {});
+    if (!id.success || !body.success) return reply.code(400).send({ error: 'INVALID_KEYWORD_VERIFICATION' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const current = (await client.query(`SELECT id,title,summary,body_text,status,ai_metadata,verified_by,verified_at FROM print_articles WHERE id=$1 FOR UPDATE`, [id.data])).rows[0];
+      if (!current) { await client.query('ROLLBACK'); return reply.code(404).send({ error: 'NOT_FOUND' }); }
+      if (String(current.status) !== 'verified') { await client.query('ROLLBACK'); return reply.code(409).send({ error: 'ARTICLE_MUST_BE_VERIFIED_FIRST' }); }
+      const preview = current.ai_metadata?.v16Routing;
+      if (!preview || preview.routingStatus !== 'ROUTED' || preview.keywordVerification !== 'PENDING') { await client.query('ROLLBACK'); return reply.code(409).send({ error: 'NO_PENDING_KEYWORD_REVIEW', message: 'Jalankan Proses Analisis terlebih dahulu.' }); }
+      const selectedKeywordId = body.data.keywordId ?? Number(preview.keywordId);
+      const edited = String(selectedKeywordId) !== String(preview.keywordId);
+      const finalAnalysis = edited
+        ? await analyzePrintRoutingV16(client as any, { title: current.title, summary: current.summary, bodyText: current.body_text, manualKeywordId: selectedKeywordId })
+        : { ...preview, keywordSource: 'AUTO' as const };
+      if (finalAnalysis.routingStatus !== 'ROUTED' || !finalAnalysis.primaryOpdId || !finalAnalysis.keywordId) { await client.query('ROLLBACK'); return reply.code(409).send({ error: 'KEYWORD_HAS_NO_VALID_ROUTING', message: 'Keyword pilihan tidak memiliki routing Master Classification yang valid.' }); }
+      const lockedRouting = { ...finalAnalysis, keywordVerification: 'ACCEPTED', keywordSource: edited ? 'MANUAL' : 'AUTO', originalKeywordId: preview.originalKeywordId ?? preview.keywordId, originalKeyword: preview.originalKeyword ?? preview.keyword, finalizedAt: new Date().toISOString(), finalizedBy: ctx.id };
+      const analyzed = (await client.query(
+        `UPDATE print_articles SET status='analyzed',opd_id=$2,sentiment=NULL,risk_score=0,importance_score=0,ai_metadata=jsonb_set(COALESCE(ai_metadata,'{}'::jsonb),'{v16Routing}',$3::jsonb,true),updated_at=now() WHERE id=$1 RETURNING id,title,status,opd_id,sentiment,risk_score,importance_score,ai_metadata,verified_by,verified_at,updated_at`,
+        [id.data, finalAnalysis.primaryOpdId, JSON.stringify(lockedRouting)],
+      )).rows[0];
+      await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'PRINT_ARTICLE_KEYWORD_FINALIZED',$2)`, [ctx.id, {
+        printArticleId: id.data, keywordSource: edited ? 'MANUAL' : 'AUTO', originalKeywordId: preview.keywordId, originalKeyword: preview.keyword,
+        finalKeywordId: finalAnalysis.keywordId, finalKeyword: finalAnalysis.keyword, primaryOpdId: finalAnalysis.primaryOpdId,
+        supportingOpdIds: finalAnalysis.supportingOpdIds, taxonomyId: finalAnalysis.taxonomyId, taxonomyName: finalAnalysis.taxonomyName,
+      }]);
+      await client.query('COMMIT');
+      return { data: analyzed, analysis: lockedRouting };
+    } catch (error: any) {
+      await client.query('ROLLBACK');
+      request.log.error({ err: error, printArticleId: id.success ? id.data : null }, 'print keyword finalization failed');
+      return reply.code(500).send({ error: 'PRINT_KEYWORD_FINALIZATION_FAILED', message: error?.message || 'Penyimpanan keyword gagal.' });
+    } finally { client.release(); }
   });
 
   app.post('/api/print/articles/:id/reopen', { preHandler: auth }, async (request, reply) => {
