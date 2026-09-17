@@ -15,6 +15,18 @@ function sharedConcept(title:string,label:string){const titleTokens=new Set(toke
 const OTHER_REGION=/\b(?:pekanbaru|riau|tanjungpinang|bintan|karimun|natuna|lingga|anambas|jakarta|medan|padang|jambi|palembang)\b/;
 function titleDominatedByOtherRegion(title:string){const n=normalize(title),batam=n.indexOf('batam'),other=n.search(OTHER_REGION);return other>=0&&(batam<0||other<batam);}
 
+// Some infrastructure terms are also common metaphors. Exact-title matching alone must not
+// turn figurative language into an infrastructure routing signal.
+const BRIDGE_INFRA_CONTEXT=/\b(?:jalan|ruas|simpang|akses|infrastruktur|konstruksi|proyek|pembangunan|bangun|dibangun|membangun|perbaikan|perbaiki|diperbaiki|rehabilitasi|renovasi|pemeliharaan|rusak|ambruk|roboh|retak|struktur|beton|baja|bentang|tiang|pondasi|drainase|transportasi|kendaraan|lalu lintas|jembatan penyeberangan|jembatan layang|flyover|underpass)\b/;
+const BRIDGE_FIGURATIVE_CONTEXT=/\b(?:jadi|menjadi|sebagai)\s+jembatan\b|\bjembatan\s+(?:masyarakat|komunikasi|aspirasi|silaturahmi|penghubung|dialog|kolaborasi|kerja sama|kerjasama|kepentingan|pemerintah)\b/;
+function isFigurativeInfrastructureUse(keyword:string,title:string,lead:string){
+ const k=normalize(keyword),text=normalize(`${title} ${lead}`);
+ if(k!=='jembatan')return false;
+ const figurative=BRIDGE_FIGURATIVE_CONTEXT.test(text);
+ const infrastructure=BRIDGE_INFRA_CONTEXT.test(text);
+ return figurative&&!infrastructure;
+}
+
 export type V16HeadlineTaxonomy={id:string;name:string;matchSource?:'TAXONOMY_EXACT'|'TAXONOMY_CONCEPT'|'SECTOR_CONCEPT'};
 export type V16PrimaryEvidence={opdId:string;keywordId:string;keyword:string;taxonomyId:string;taxonomyName:string;score:number;matchType:'MANUAL'|'TITLE_PHRASE'|'TITLE_CONCEPT_LEAD_PHRASE'|'LEAD_PHRASE'|'CONTEXTUAL';supportingOpdIds:string[]};
 export type V16RoutingInput={title:string;summary?:string|null;content?:string|null;manualKeywordIds?:Array<string|number>};
@@ -45,6 +57,9 @@ export async function getV16PrimaryEvidenceForInput(pool:Pool,input:V16RoutingIn
   // Organization/actor scope is intentionally handled upstream for online media, not in the OPD router.
   const evidenceStrength=String(r.evidence_strength||'REVIEW');
   if(!manual&&evidenceStrength!=='DIRECT'&&!(evidenceStrength==='CONTEXT'&&titlePhrase))continue;
+  // Context guard: reject an automatic infrastructure candidate when a polysemous keyword is
+  // clearly used figuratively. A manual Humas correction remains authoritative by design.
+  if(!manual&&isFigurativeInfrastructureUse(keyword,title,lead))continue;
   if(manual){matchType='MANUAL';position=100;}else if(evidenceStrength==='CONTEXT'){matchType='TITLE_PHRASE';position=12;}else if(isShortKeyword(keyword)){if(titlePhrase){matchType='TITLE_PHRASE';position=12;}else continue;}else if(titlePhrase){matchType='TITLE_PHRASE';position=12;}else if(leadPhrase&&titleConcept===1&&batamGovernmentContext(context)){matchType='TITLE_CONCEPT_LEAD_PHRASE';position=12;dominanceBonus=50;}else if(leadPhrase){matchType='LEAD_PHRASE';position=6;}else{
    const meaningful=tokens(keyword),coverage=tokenCoverage(context,keyword);
    if((meaningful.length>=2&&coverage===1&&batamGovernmentContext(context))||governmentConceptContext(context,keyword)){matchType='CONTEXTUAL';position=3;}
