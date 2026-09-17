@@ -15,16 +15,16 @@ function sharedConcept(title:string,label:string){const titleTokens=new Set(toke
 const OTHER_REGION=/\b(?:pekanbaru|riau|tanjungpinang|bintan|karimun|natuna|lingga|anambas|jakarta|medan|padang|jambi|palembang)\b/;
 function titleDominatedByOtherRegion(title:string){const n=normalize(title),batam=n.indexOf('batam'),other=n.search(OTHER_REGION);return other>=0&&(batam<0||other<batam);}
 
-// Some infrastructure terms are also common metaphors. Exact-title matching alone must not
-// turn figurative language into an infrastructure routing signal.
-const BRIDGE_INFRA_CONTEXT=/\b(?:jalan|ruas|simpang|akses|infrastruktur|konstruksi|proyek|pembangunan|bangun|dibangun|membangun|perbaikan|perbaiki|diperbaiki|rehabilitasi|renovasi|pemeliharaan|rusak|ambruk|roboh|retak|struktur|beton|baja|bentang|tiang|pondasi|drainase|transportasi|kendaraan|lalu lintas|jembatan penyeberangan|jembatan layang|flyover|underpass)\b/;
-const BRIDGE_FIGURATIVE_CONTEXT=/\b(?:jadi|menjadi|sebagai)\s+jembatan\b|\bjembatan\s+(?:masyarakat|komunikasi|aspirasi|silaturahmi|penghubung|dialog|kolaborasi|kerja sama|kerjasama|kepentingan|pemerintah)\b/;
-function isFigurativeInfrastructureUse(keyword:string,title:string,lead:string){
- const k=normalize(keyword),text=normalize(`${title} ${lead}`);
+// Polysemous infrastructure terms must be validated from the headline sentence first.
+// Lead/body vocabulary must not rescue a clearly figurative headline use.
+const BRIDGE_TITLE_PHYSICAL=/\b(?:jembatan\s+(?:jalan|penyeberangan|layang|beton|baja)|(?:bangun|membangun|dibangun|pembangunan|proyek|konstruksi|perbaikan|memperbaiki|diperbaiki|rehabilitasi|pemeliharaan|rusak|ambruk|roboh|retak|struktur|tiang|pondasi|akses|lalu lintas|kendaraan|flyover)\b[^.]{0,80}\bjembatan\b|\bjembatan\b[^.]{0,80}\b(?:dibangun|pembangunan|proyek|konstruksi|diperbaiki|perbaikan|rehabilitasi|pemeliharaan|rusak|ambruk|roboh|retak|struktur|tiang|pondasi|akses|lalu lintas|kendaraan))\b/;
+const BRIDGE_TITLE_FIGURATIVE=/\b(?:jadi|menjadi|sebagai)\s+(?:sebuah\s+)?jembatan\b|\bjembatan\s+(?:antara\s+)?(?:masyarakat|komunikasi|aspirasi|silaturahmi|dialog|kolaborasi|kerja sama|kerjasama|kepentingan|pemerintah|warga|organisasi)\b/;
+function rejectAutomaticPolysemousTitleUse(keyword:string,title:string){
+ const k=normalize(keyword),headline=normalize(title);
  if(k!=='jembatan')return false;
- const figurative=BRIDGE_FIGURATIVE_CONTEXT.test(text);
- const infrastructure=BRIDGE_INFRA_CONTEXT.test(text);
- return figurative&&!infrastructure;
+ if(!containsPhrase(headline,'jembatan'))return false;
+ if(BRIDGE_TITLE_PHYSICAL.test(headline))return false;
+ return BRIDGE_TITLE_FIGURATIVE.test(headline);
 }
 
 export type V16HeadlineTaxonomy={id:string;name:string;matchSource?:'TAXONOMY_EXACT'|'TAXONOMY_CONCEPT'|'SECTOR_CONCEPT'};
@@ -51,15 +51,12 @@ export async function getV16PrimaryEvidenceForInput(pool:Pool,input:V16RoutingIn
  const rows=(await pool.query(`SELECT k.id keyword_id,k.keyword,k.evidence_strength,kt.category_id taxonomy_id,tc.name taxonomy_name,kt.weight taxonomy_weight,ko.opd_id,ko.weight opd_weight,o.name opd_name,o.code opd_code FROM keywords k JOIN keyword_taxonomy kt ON kt.keyword_id=k.id AND kt.active=true JOIN taxonomy_categories tc ON tc.id=kt.category_id AND tc.active=true JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true JOIN keyword_opd ko ON ko.keyword_id=k.id AND ko.active=true AND ko.routing_role='PRIMARY' JOIN opd o ON o.id=ko.opd_id AND o.active=true WHERE k.active=true AND k.organization_id IS NOT NULL AND k.opd_id IS NULL AND k.district_id IS NULL AND tc.organization_id=k.organization_id AND cs.organization_id=k.organization_id ORDER BY k.id`)).rows;
  const candidates:any[]=[];
  for(const r of rows){const keyword=String(r.keyword||''),manual=manualIds.has(String(r.keyword_id)),titlePhrase=containsPhrase(title,keyword),leadPhrase=containsPhrase(lead,keyword),titleConcept=titleConceptCoverage(title,keyword);let matchType:V16PrimaryEvidence['matchType']|null=null,position=0,dominanceBonus=0;
-  // Human-selected keywords remain authoritative. DIRECT evidence uses the full V16 pipeline.
-  // CONTEXT evidence may auto-route only when the exact keyword phrase is present in the headline.
-  // REVIEW (and unknown strengths) never auto-route.
-  // Organization/actor scope is intentionally handled upstream for online media, not in the OPD router.
   const evidenceStrength=String(r.evidence_strength||'REVIEW');
   if(!manual&&evidenceStrength!=='DIRECT'&&!(evidenceStrength==='CONTEXT'&&titlePhrase))continue;
-  // Context guard: reject an automatic infrastructure candidate when a polysemous keyword is
-  // clearly used figuratively. A manual Humas correction remains authoritative by design.
-  if(!manual&&isFigurativeInfrastructureUse(keyword,title,lead))continue;
+  // A figurative headline is authoritative for intent: unrelated words in the lead/body cannot
+  // turn that same headline phrase back into physical-infrastructure evidence. Manual Humas
+  // correction remains authoritative and bypasses this automatic guard.
+  if(!manual&&rejectAutomaticPolysemousTitleUse(keyword,title))continue;
   if(manual){matchType='MANUAL';position=100;}else if(evidenceStrength==='CONTEXT'){matchType='TITLE_PHRASE';position=12;}else if(isShortKeyword(keyword)){if(titlePhrase){matchType='TITLE_PHRASE';position=12;}else continue;}else if(titlePhrase){matchType='TITLE_PHRASE';position=12;}else if(leadPhrase&&titleConcept===1&&batamGovernmentContext(context)){matchType='TITLE_CONCEPT_LEAD_PHRASE';position=12;dominanceBonus=50;}else if(leadPhrase){matchType='LEAD_PHRASE';position=6;}else{
    const meaningful=tokens(keyword),coverage=tokenCoverage(context,keyword);
    if((meaningful.length>=2&&coverage===1&&batamGovernmentContext(context))||governmentConceptContext(context,keyword)){matchType='CONTEXTUAL';position=3;}
