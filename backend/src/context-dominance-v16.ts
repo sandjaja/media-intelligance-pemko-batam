@@ -17,6 +17,7 @@ function titleDominatedByOtherRegion(title:string){const n=normalize(title),bata
 
 export type V16HeadlineTaxonomy={id:string;name:string;matchSource?:'TAXONOMY_EXACT'|'TAXONOMY_CONCEPT'|'SECTOR_CONCEPT'};
 export type V16PrimaryEvidence={opdId:string;keywordId:string;keyword:string;taxonomyId:string;taxonomyName:string;score:number;matchType:'MANUAL'|'TITLE_PHRASE'|'TITLE_CONCEPT_LEAD_PHRASE'|'LEAD_PHRASE'|'CONTEXTUAL';supportingOpdIds:string[]};
+export type V16RoutingInput={title:string;summary?:string|null;content?:string|null;manualKeywordIds?:Array<string|number>};
 
 export async function getV16HeadlineTaxonomies(pool:Pool,title:string):Promise<V16HeadlineTaxonomy[]>{
  const rows=(await pool.query(`SELECT tc.id,tc.name,cs.name sector_name FROM taxonomy_categories tc JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true WHERE tc.active=true AND tc.organization_id=cs.organization_id ORDER BY length(tc.name) DESC,tc.id`)).rows;
@@ -30,10 +31,10 @@ export async function getV16HeadlineTaxonomies(pool:Pool,title:string):Promise<V
  return [...out.values()];
 }
 
-export async function getV16PrimaryEvidence(pool:Pool,articleId:string):Promise<V16PrimaryEvidence|null>{
- const article=(await pool.query(`SELECT id,title,summary,content FROM articles WHERE id=$1`,[articleId])).rows[0];if(!article)return null;
- const title=String(article.title||''),lead=firstLead(String(article.summary||article.content||'')),context=`${title} ${lead}`;
- const manualIds=new Set((await pool.query(`SELECT keyword_id FROM article_manual_keywords WHERE article_id=$1 AND active=true`,[articleId])).rows.map((r:any)=>String(r.keyword_id)));
+/** Shared V16.5 decision layer. It reads Master Classification but does not read/write articles. */
+export async function getV16PrimaryEvidenceForInput(pool:Pool,input:V16RoutingInput):Promise<V16PrimaryEvidence|null>{
+ const title=String(input.title||''),lead=firstLead(String(input.summary||input.content||'')),context=`${title} ${lead}`;
+ const manualIds=new Set((input.manualKeywordIds??[]).map(id=>String(id)));
  const headlineTaxonomies=new Set((await getV16HeadlineTaxonomies(pool,title)).map(t=>t.id));
  const rows=(await pool.query(`SELECT k.id keyword_id,k.keyword,k.evidence_strength,kt.category_id taxonomy_id,tc.name taxonomy_name,kt.weight taxonomy_weight,ko.opd_id,ko.weight opd_weight,o.name opd_name,o.code opd_code FROM keywords k JOIN keyword_taxonomy kt ON kt.keyword_id=k.id AND kt.active=true JOIN taxonomy_categories tc ON tc.id=kt.category_id AND tc.active=true JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true JOIN keyword_opd ko ON ko.keyword_id=k.id AND ko.active=true AND ko.routing_role='PRIMARY' JOIN opd o ON o.id=ko.opd_id AND o.active=true WHERE k.active=true AND k.organization_id IS NOT NULL AND k.opd_id IS NULL AND k.district_id IS NULL AND tc.organization_id=k.organization_id AND cs.organization_id=k.organization_id ORDER BY k.id`)).rows;
  const candidates:any[]=[];
@@ -55,4 +56,10 @@ export async function getV16PrimaryEvidence(pool:Pool,articleId:string):Promise<
  const best=candidates[0];if(!best)return null;
  const supporting=(await pool.query(`SELECT ko.opd_id FROM keyword_opd ko JOIN opd o ON o.id=ko.opd_id AND o.active=true WHERE ko.keyword_id=$1 AND ko.active=true AND ko.routing_role='SUPPORTING' ORDER BY ko.weight DESC,ko.opd_id LIMIT 3`,[best.keyword_id])).rows.map((r:any)=>String(r.opd_id));
  return{opdId:String(best.opd_id),keywordId:String(best.keyword_id),keyword:String(best.keyword),taxonomyId:String(best.taxonomy_id),taxonomyName:String(best.taxonomy_name),score:Number(best.score),matchType:best.matchType,supportingOpdIds:supporting};
+}
+
+export async function getV16PrimaryEvidence(pool:Pool,articleId:string):Promise<V16PrimaryEvidence|null>{
+ const article=(await pool.query(`SELECT id,title,summary,content FROM articles WHERE id=$1`,[articleId])).rows[0];if(!article)return null;
+ const manualKeywordIds=(await pool.query(`SELECT keyword_id FROM article_manual_keywords WHERE article_id=$1 AND active=true`,[articleId])).rows.map((r:any)=>String(r.keyword_id));
+ return getV16PrimaryEvidenceForInput(pool,{title:String(article.title||''),summary:article.summary,content:article.content,manualKeywordIds});
 }
