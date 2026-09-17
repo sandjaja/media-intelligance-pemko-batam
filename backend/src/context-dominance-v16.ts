@@ -39,10 +39,13 @@ export async function getV16PrimaryEvidenceForInput(pool:Pool,input:V16RoutingIn
  const rows=(await pool.query(`SELECT k.id keyword_id,k.keyword,k.evidence_strength,kt.category_id taxonomy_id,tc.name taxonomy_name,kt.weight taxonomy_weight,ko.opd_id,ko.weight opd_weight,o.name opd_name,o.code opd_code FROM keywords k JOIN keyword_taxonomy kt ON kt.keyword_id=k.id AND kt.active=true JOIN taxonomy_categories tc ON tc.id=kt.category_id AND tc.active=true JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true JOIN keyword_opd ko ON ko.keyword_id=k.id AND ko.active=true AND ko.routing_role='PRIMARY' JOIN opd o ON o.id=ko.opd_id AND o.active=true WHERE k.active=true AND k.organization_id IS NOT NULL AND k.opd_id IS NULL AND k.district_id IS NULL AND tc.organization_id=k.organization_id AND cs.organization_id=k.organization_id ORDER BY k.id`)).rows;
  const candidates:any[]=[];
  for(const r of rows){const keyword=String(r.keyword||''),manual=manualIds.has(String(r.keyword_id)),titlePhrase=containsPhrase(title,keyword),leadPhrase=containsPhrase(lead,keyword),titleConcept=titleConceptCoverage(title,keyword);let matchType:V16PrimaryEvidence['matchType']|null=null,position=0,dominanceBonus=0;
-  // Human-selected keywords remain authoritative. Automatic Primary routing requires DIRECT evidence.
+  // Human-selected keywords remain authoritative. DIRECT evidence uses the full V16 pipeline.
+  // CONTEXT evidence may auto-route only when the exact keyword phrase is present in the headline.
+  // REVIEW (and unknown strengths) never auto-route.
   // Organization/actor scope is intentionally handled upstream for online media, not in the OPD router.
-  if(!manual&&String(r.evidence_strength||'REVIEW')!=='DIRECT')continue;
-  if(manual){matchType='MANUAL';position=100;}else if(isShortKeyword(keyword)){if(titlePhrase){matchType='TITLE_PHRASE';position=12;}else continue;}else if(titlePhrase){matchType='TITLE_PHRASE';position=12;}else if(leadPhrase&&titleConcept===1&&batamGovernmentContext(context)){matchType='TITLE_CONCEPT_LEAD_PHRASE';position=12;dominanceBonus=50;}else if(leadPhrase){matchType='LEAD_PHRASE';position=6;}else{
+  const evidenceStrength=String(r.evidence_strength||'REVIEW');
+  if(!manual&&evidenceStrength!=='DIRECT'&&!(evidenceStrength==='CONTEXT'&&titlePhrase))continue;
+  if(manual){matchType='MANUAL';position=100;}else if(evidenceStrength==='CONTEXT'){matchType='TITLE_PHRASE';position=12;}else if(isShortKeyword(keyword)){if(titlePhrase){matchType='TITLE_PHRASE';position=12;}else continue;}else if(titlePhrase){matchType='TITLE_PHRASE';position=12;}else if(leadPhrase&&titleConcept===1&&batamGovernmentContext(context)){matchType='TITLE_CONCEPT_LEAD_PHRASE';position=12;dominanceBonus=50;}else if(leadPhrase){matchType='LEAD_PHRASE';position=6;}else{
    const meaningful=tokens(keyword),coverage=tokenCoverage(context,keyword);
    if((meaningful.length>=2&&coverage===1&&batamGovernmentContext(context))||governmentConceptContext(context,keyword)){matchType='CONTEXTUAL';position=3;}
   }
