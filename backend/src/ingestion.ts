@@ -3,6 +3,7 @@ import { Pool } from 'pg';
 import { analyzeArticle } from './analyzer-v14.js';
 import { collectOnlineSource, type OnlineSource, type OnlineArticle } from './online-media-collector.js';
 import { loadOrganizationMediaScope, type OrganizationMediaScope } from './organization-media-scope.js';
+import { rebuildOnlineStoryClusters } from './online-story-clustering.js';
 
 export type FeedSource = OnlineSource & { tier?: number; category?: string };
 export type IngestedArticle = OnlineArticle;
@@ -104,6 +105,25 @@ export async function ingestEnabledSources(pool: Pool): Promise<Record<string, u
     const failedSources = results.length - successfulSources;
     const fetchedCount = results.reduce((sum, r) => sum + (typeof r.fetched === 'number' ? r.fetched : 0), 0);
     const insertedCount = results.reduce((sum, r) => sum + (typeof r.inserted === 'number' ? r.inserted : 0), 0);
+
+    // Rebuild story clusters once per completed ingestion batch, not once per article/source.
+    // Skip the work entirely when the batch did not insert anything new.
+    if (insertedCount > 0) {
+      try {
+        const clustering = await rebuildOnlineStoryClusters(pool, 7, 1000);
+        await pool.query(
+          `INSERT INTO audit_logs (action,metadata) VALUES ('AUTO_STORY_CLUSTERS_REBUILT',$1)`,
+          [{ runId, trigger: 'online_ingestion_batch', insertedCount, ...clustering }]
+        );
+      } catch (error) {
+        // Clustering is derived data: an error here must not turn a successful ingestion into a failed run.
+        await pool.query(
+          `INSERT INTO audit_logs (action,metadata) VALUES ('AUTO_STORY_CLUSTER_REBUILD_FAILED',$1)`,
+          [{ runId, trigger: 'online_ingestion_batch', insertedCount, error: error instanceof Error ? error.message : String(error) }]
+        ).catch(() => undefined);
+      }
+    }
+
     await pool.query(
       `UPDATE ingestion_runs
        SET finished_at=NOW(),status='completed',successful_sources=$2,failed_sources=$3,fetched_count=$4,inserted_count=$5,details=$6
