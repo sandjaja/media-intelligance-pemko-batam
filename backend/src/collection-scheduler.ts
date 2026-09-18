@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import { runOnlineSourceCollection } from './online-article-moderation-routes.js';
-import { rebuildOnlineStoryClusters } from './online-story-clustering.js';
+import { clusterNewOnlineArticles } from './online-story-clustering.js';
 import { collectOwnedWebsiteAccount } from './website-collector.js';
 import { rebuildOwnedContentClusters } from './owned-content-clustering.js';
 
@@ -25,7 +25,7 @@ async function collectOnline(pool:Pool){
     catch(error){results.push({source:source.name,sourceId:String(source.id),collector:'online-interactive-v13-shared-runner',error:error instanceof Error?error.message:String(error)})}
   }
   let clustering:any=null;
-  if(inserted>0){try{clustering=await rebuildOnlineStoryClusters(pool)}catch(error){clustering={error:error instanceof Error?error.message:String(error)}}}
+  if(inserted>0){try{clustering=await clusterNewOnlineArticles(pool)}catch(error){clustering={error:error instanceof Error?error.message:String(error)}}}
   return {results,clustering};
 }
 
