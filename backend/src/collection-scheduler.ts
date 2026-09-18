@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { ingestEnabledSources } from './ingestion.js';
+import { ingestSource } from './ingestion.js';
 import { collectOwnedWebsiteAccount } from './website-collector.js';
 import { rebuildOwnedContentClusters } from './owned-content-clustering.js';
 
@@ -9,6 +9,17 @@ export type CollectionTrigger='SCHEDULED'|'MANUAL';
 export async function getCollectionConfig(pool:Pool){
   const {rows}=await pool.query(`SELECT id,enabled,timezone,run_time,online_enabled,owned_enabled,social_enabled,last_run_at,next_run_at,updated_at FROM collection_scheduler_config WHERE id=1`);
   return rows[0]??null;
+}
+
+async function collectOnline(pool:Pool){
+  // Use the same per-source runner as the Media Online "Ambil Berita Terbaru" action.
+  const {rows}=await pool.query(`SELECT id,name,url,tier,active,category FROM media_sources WHERE active=true AND url IS NOT NULL AND lower(category)='online' ORDER BY tier ASC,name ASC`);
+  const results:Record<string,unknown>[]=[];
+  for(const source of rows){
+    try{results.push({source:source.name,sourceId:String(source.id),collector:'online-hybrid-v5-dynamic-scope',...(await ingestSource(pool,source))})}
+    catch(error){results.push({source:source.name,sourceId:String(source.id),collector:'online-hybrid-v5-dynamic-scope',error:error instanceof Error?error.message:String(error)})}
+  }
+  return results;
 }
 
 async function collectOwned(pool:Pool){
@@ -44,7 +55,7 @@ export async function runCollection(pool:Pool,trigger:CollectionTrigger,requeste
     const run=await pool.query(`INSERT INTO collection_scheduler_runs(trigger_type,status,requested_by,sources) VALUES($1,'RUNNING',$2,$3::jsonb) RETURNING id`,[trigger,requestedBy,JSON.stringify({selected:sources})]);
     runId=String(run.rows[0].id);
     const result:any={};
-    if(sources.includes('online'))result.online=summarizeOnline(await ingestEnabledSources(pool));
+    if(sources.includes('online'))result.online=summarizeOnline(await collectOnline(pool));
     if(sources.includes('owned'))result.owned=await collectOwned(pool);
     if(sources.includes('social'))result.social={skipped:true,reason:'SOCIAL_AUTOMATIC_COLLECTOR_NOT_READY'};
     const failed=Number(result.online?.failed||0)+Number(result.owned?.failed||0);
