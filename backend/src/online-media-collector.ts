@@ -33,6 +33,8 @@ async function verifyCandidates(items:OnlineArticle[],scope?:OrganizationMediaSc
 
 function normalizeSourceUrl(source:OnlineSource){try{return new URL(source.url).toString()}catch{return source.url}}
 function sourceDomain(url:string){try{return new URL(url).hostname.replace(/^www\./i,'')}catch{return''}}
+function publisherDomain(url:string){const host=sourceDomain(url);if(!host)return'';const parts=host.split('.').filter(Boolean);if(parts.length<=2)return host;const secondLevelCountry=new Set(['co.id','ac.id','or.id','go.id','sch.id','web.id','my.id','biz.id']);const suffix=parts.slice(-2).join('.');return secondLevelCountry.has(suffix)&&parts.length>=3?parts.slice(-3).join('.'):parts.slice(-2).join('.')}
+function samePublisherDomain(a:string,b:string){const left=publisherDomain(a),right=publisherDomain(b);return!!left&&left===right}
 function sourcePathTerms(source:OnlineSource){
   try{
     return new URL(source.url).pathname.toLowerCase().split('/').filter(Boolean)
@@ -48,7 +50,7 @@ function sourceContext(source:OnlineSource,scope?:OrganizationMediaScope|null){
   return [...new Set(terms.map(x=>x.trim()).filter(Boolean))].slice(0,4);
 }
 function googleNewsUrl(source:OnlineSource,targetUrl:string,scope?:OrganizationMediaScope|null){
-  const domain=sourceDomain(targetUrl)||sourceDomain(source.url);
+  const domain=publisherDomain(targetUrl)||publisherDomain(source.url);
   if(!domain)return null;
   const terms=sourceContext(source,scope);
   const localQuery=terms.length?`(${terms.map(term=>`"${term.replace(/"/g,'')}"`).join(' OR ')})`:sourcePathTerms(source).join(' ');
@@ -139,11 +141,11 @@ async function tryExternalNewsFallback(source:OnlineSource,targetUrl:string,scop
     // Google News RSS links can resolve through an interstitial instead of the
     // publisher. Prefer the publisher URL embedded in the RSS description
     // before the normal verification gate. This is generic for every source.
-    const domain=sourceDomain(targetUrl)||sourceDomain(source.url);
+    const domain=publisherDomain(targetUrl)||publisherDomain(source.url);
     const resolved=candidates.map(candidate=>{
       const description=candidate.excerpt||'';
       const hrefs=[...description.matchAll(/https?:\/\/[^\s"'<>]+/gi)].map(m=>m[0].replace(/&amp;/gi,'&'));
-      const publisher=hrefs.find(href=>sourceDomain(href)===domain||sourceDomain(href).endsWith(`.${domain}`));
+      const publisher=hrefs.find(href=>publisherDomain(href)===domain);
       return publisher?{...candidate,url:publisher}:candidate;
     });
     return await verifyCandidates(resolved,scope);
