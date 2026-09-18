@@ -46,6 +46,7 @@ export async function getV16HeadlineTaxonomies(pool:Pool,title:string):Promise<V
 /** Shared V16.5 decision layer. It reads Master Classification but does not read/write articles. */
 export async function getV16PrimaryEvidenceForInput(pool:Pool,input:V16RoutingInput):Promise<V16PrimaryEvidence|null>{
  const title=String(input.title||''),lead=firstLead(String(input.summary||input.content||'')),context=`${title} ${lead}`;
+ const orgContext=await organizationContext(pool);
  const manualIds=new Set((input.manualKeywordIds??[]).map(id=>String(id)));
  const headlineTaxonomies=new Set((await getV16HeadlineTaxonomies(pool,title)).map(t=>t.id));
  const rows=(await pool.query(`SELECT k.id keyword_id,k.keyword,k.evidence_strength,kt.category_id taxonomy_id,tc.name taxonomy_name,kt.weight taxonomy_weight,ko.opd_id,ko.weight opd_weight,o.name opd_name,o.code opd_code FROM keywords k JOIN keyword_taxonomy kt ON kt.keyword_id=k.id AND kt.active=true JOIN taxonomy_categories tc ON tc.id=kt.category_id AND tc.active=true JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true JOIN keyword_opd ko ON ko.keyword_id=k.id AND ko.active=true AND ko.routing_role='PRIMARY' JOIN opd o ON o.id=ko.opd_id AND o.active=true WHERE k.active=true AND k.organization_id IS NOT NULL AND k.opd_id IS NULL AND k.district_id IS NULL AND tc.organization_id=k.organization_id AND cs.organization_id=k.organization_id ORDER BY k.id`)).rows;
@@ -57,12 +58,13 @@ export async function getV16PrimaryEvidenceForInput(pool:Pool,input:V16RoutingIn
   // turn that same headline phrase back into physical-infrastructure evidence. Manual Humas
   // correction remains authoritative and bypasses this automatic guard.
   if(!manual&&rejectAutomaticPolysemousTitleUse(keyword,title))continue;
-  if(manual){matchType='MANUAL';position=100;}else if(evidenceStrength==='CONTEXT'){matchType='TITLE_PHRASE';position=12;}else if(isShortKeyword(keyword)){if(titlePhrase){matchType='TITLE_PHRASE';position=12;}else continue;}else if(titlePhrase){matchType='TITLE_PHRASE';position=12;}else if(leadPhrase&&titleConcept===1&&batamGovernmentContext(context)){matchType='TITLE_CONCEPT_LEAD_PHRASE';position=12;dominanceBonus=50;}else if(leadPhrase){matchType='LEAD_PHRASE';position=6;}else{
+  if(manual){matchType='MANUAL';position=100;}else if(evidenceStrength==='CONTEXT'){matchType='TITLE_PHRASE';position=12;}else if(isShortKeyword(keyword)){if(titlePhrase){matchType='TITLE_PHRASE';position=12;}else continue;}else if(titlePhrase){matchType='TITLE_PHRASE';position=12;}else if(leadPhrase&&titleConcept===1&&organizationGovernmentContext(context,orgContext)){matchType='TITLE_CONCEPT_LEAD_PHRASE';position=12;dominanceBonus=50;}else if(leadPhrase){matchType='LEAD_PHRASE';position=6;}else{
    const meaningful=tokens(keyword),coverage=tokenCoverage(context,keyword);
-   if((meaningful.length>=2&&coverage===1&&batamGovernmentContext(context))||governmentConceptContext(context,keyword)){matchType='CONTEXTUAL';position=3;}
+   if((meaningful.length>=2&&coverage===1&&organizationGovernmentContext(context,orgContext))||governmentConceptContext(context,keyword,orgContext)){matchType='CONTEXTUAL';position=3;}
   }
   if(!matchType)continue;
-  if(!manual&&titleDominatedByOtherRegion(title)&&!batamGovernmentContext(title))continue;
+  // Geographic relevance is enforced by the shared Organization Scope Filter before routing.
+  // V16.5 therefore uses only the active organization's database-backed identity as positive context.
   if(!manual&&headlineTaxonomies.size>0&&!titlePhrase&&!headlineTaxonomies.has(String(r.taxonomy_id)))continue;
   const score=Number(r.taxonomy_weight||0)*position+Number(r.opd_weight||1)*position+dominanceBonus;candidates.push({...r,keyword,score,matchType,titleConcept});
  }
