@@ -135,14 +135,19 @@ async function tryFeeds(source:OnlineSource,urls:string[],scope?:OrganizationMed
 }
 async function tryExternalNewsFallback(source:OnlineSource,targetUrl:string,scope?:OrganizationMediaScope|null){
   const url=googleNewsUrl(source,targetUrl,scope);
-  if(!url)return[] as OnlineArticle[];
+  const diag={sourceId:source.id,source:source.name,publisherDomain:publisherDomain(targetUrl)||publisherDomain(source.url)};
+  if(!url){console.info({...diag,stage:'google_news',reason:'NO_QUERY'},'online collector fallback diagnostic');return[] as OnlineArticle[]}
   try{
     const {response,body}=await fetchText(url,10000);
-    if(!response.ok)return[];
+    if(!response.ok){console.info({...diag,stage:'google_news',httpStatus:response.status,reason:'RSS_HTTP_ERROR'},'online collector fallback diagnostic');return[]}
     const candidates=parseGoogleNewsFeed(body,source,scope);
+    const publisherResolved=candidates.filter(item=>samePublisherDomain(item.url,targetUrl)).length;
+    console.info({...diag,stage:'google_news_candidates',candidates:candidates.length,publisherResolved},'online collector fallback diagnostic');
     if(!candidates.length)return[];
-    return await verifyCandidates(candidates,scope);
-  }catch{return[]}
+    const verified=await verifyCandidates(candidates,scope);
+    console.info({...diag,stage:'google_news_verified',candidates:candidates.length,publisherResolved,verified:verified.length},'online collector fallback diagnostic');
+    return verified;
+  }catch(error){console.info({...diag,stage:'google_news',reason:'EXCEPTION',error:error instanceof Error?error.message:String(error)},'online collector fallback diagnostic');return[]}
 }
 function meta(html:string,key:string){const patterns=[new RegExp(`<meta[^>]+(?:property|name)=["']${key}["'][^>]+content=["']([^"']+)["']`,'i'),new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${key}["'][^>]*>`,'i')];for(const p of patterns){const v=html.match(p)?.[1];if(v)return stripHtml(v)}return undefined}
 function canonical(html:string,fallback:string){const href=html.match(/<link\b[^>]*rel=["'][^"']*canonical[^"']*["'][^>]*href=["']([^"']+)["']/i)?.[1];try{return href?new URL(href,fallback).toString():fallback}catch{return fallback}}
@@ -246,7 +251,8 @@ export async function collectOnlineSource(source:OnlineSource,scope?:Organizatio
     }else homepageError=new Error(`Media ${source.name} returned HTTP ${response.status}`);
   }catch(error){homepageError=error instanceof Error?error:new Error(String(error))}
 
-  const directFeedFallback=await tryFeeds(source,commonFeeds(targetUrl),scope);if(directFeedFallback.length)return directFeedFallback;
+  console.info({sourceId:source.id,source:source.name,targetUrl,homepageError:homepageError?.message??null,stage:'fallback_start'},'online collector fallback diagnostic');
+  const directFeedFallback=await tryFeeds(source,commonFeeds(targetUrl),scope);console.info({sourceId:source.id,source:source.name,stage:'direct_feed_fallback',verified:directFeedFallback.length},'online collector fallback diagnostic');if(directFeedFallback.length)return directFeedFallback;
   const newsFallback=await tryExternalNewsFallback(source,targetUrl,scope);if(newsFallback.length)return newsFallback;
   throw homepageError??new Error(`Media ${source.name} tidak menghasilkan artikel relevan dalam 7 hari terakhir`);
 }
