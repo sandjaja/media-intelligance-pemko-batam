@@ -60,6 +60,8 @@ export function classifyArticleOrganizationScope(article:OnlineArticle,scope:Org
   ];
   // Generic OPD/UPTD names only become strong evidence when the headline also carries organization/area identity from the active database scope.
   if(internalActorHits.length)return{status:'RELEVANT',reason:'headline contains a database-backed organization/area identity with internal government actor evidence',matchedTerms:[...new Set(internalActorHits)]};
+  const genericActorHits=[...new Set(scope.actors.flatMap(actor=>actor.aliases.filter(term=>containsTerm(title,term))))];
+  if(genericActorHits.length)return{status:'REVIEW',reason:'headline contains a database-backed OPD/UPTD actor but lacks confirmed organization/area identity',matchedTerms:genericActorHits};
   if(roundupHeadline(title))return{status:'REVIEW',reason:'roundup/list headline requires editorial review',matchedTerms:[...strongHits,...supportingHits]};
   if(strongHits.length)return{status:'RELEVANT',reason:'headline contains organization/city/district scope term',matchedTerms:strongHits};
   if(supportingHits.length)return{status:'REVIEW',reason:'headline contains only supporting organization term',matchedTerms:supportingHits};
