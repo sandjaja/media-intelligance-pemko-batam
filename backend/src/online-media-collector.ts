@@ -143,7 +143,7 @@ async function tryExternalNewsFallback(source:OnlineSource,targetUrl:string,scop
     const resolved=candidates.map(candidate=>{
       const description=candidate.excerpt||'';
       const hrefs=[...description.matchAll(/https?:\/\/[^\s"'<>]+/gi)].map(m=>m[0].replace(/&amp;/gi,'&'));
-      const publisher=hrefs.find(href=>sourceDomain(href)===domain||sourceDomain(href).endsWith(\`.\${domain}\`));
+      const publisher=hrefs.find(href=>sourceDomain(href)===domain||sourceDomain(href).endsWith(`.${domain}`));
       return publisher?{...candidate,url:publisher}:candidate;
     });
     return await verifyCandidates(resolved,scope);
