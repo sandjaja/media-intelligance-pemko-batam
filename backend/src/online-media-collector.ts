@@ -107,8 +107,12 @@ function parseGoogleNewsFeed(xml:string,source:OnlineSource,scope?:OrganizationM
     const publishedAt=parseDate(firstString(item.pubDate));
     if(!title||!url||!publishedAt)continue;
     title=title.replace(outletSuffix,'').trim();
-    const excerpt=stripHtml(firstString(item.description))?.slice(0,100000);
-    out.push({sourceId:source.id,title,url,publishedAt,excerpt});
+    const rawDescription=firstString(item.description);
+    const excerpt=stripHtml(rawDescription)?.slice(0,100000);
+    const domain=publisherDomain(source.url);
+    const descriptionHrefs=[...rawDescription.matchAll(/href=["']([^"']+)["']/gi)].map(m=>m[1].replace(/&amp;/gi,'&'));
+    const publisherUrl=descriptionHrefs.find(href=>publisherDomain(href)===domain);
+    out.push({sourceId:source.id,title,url:publisherUrl||url,publishedAt,excerpt});
   }
   return scopeOnly(freshOnly(out),scope).filter(item=>item.title.length>=5).slice(0,50);
 }
@@ -137,18 +141,7 @@ async function tryExternalNewsFallback(source:OnlineSource,targetUrl:string,scop
     if(!response.ok)return[];
     const candidates=parseGoogleNewsFeed(body,source,scope);
     if(!candidates.length)return[];
-
-    // Google News RSS links can resolve through an interstitial instead of the
-    // publisher. Prefer the publisher URL embedded in the RSS description
-    // before the normal verification gate. This is generic for every source.
-    const domain=publisherDomain(targetUrl)||publisherDomain(source.url);
-    const resolved=candidates.map(candidate=>{
-      const description=candidate.excerpt||'';
-      const hrefs=[...description.matchAll(/https?:\/\/[^\s"'<>]+/gi)].map(m=>m[0].replace(/&amp;/gi,'&'));
-      const publisher=hrefs.find(href=>publisherDomain(href)===domain);
-      return publisher?{...candidate,url:publisher}:candidate;
-    });
-    return await verifyCandidates(resolved,scope);
+    return await verifyCandidates(candidates,scope);
   }catch{return[]}
 }
 function meta(html:string,key:string){const patterns=[new RegExp(`<meta[^>]+(?:property|name)=["']${key}["'][^>]+content=["']([^"']+)["']`,'i'),new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${key}["'][^>]*>`,'i')];for(const p of patterns){const v=html.match(p)?.[1];if(v)return stripHtml(v)}return undefined}
