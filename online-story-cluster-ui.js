@@ -8,41 +8,41 @@
     loading=fetch(base()+'/online/story-clusters?days=7&limit=300',{credentials:'include'}).then(async r=>{const b=await r.json().catch(()=>({}));if(!r.ok)throw new Error(b.message||b.error||`HTTP ${r.status}`);return b.data||[];}).then(rows=>{cache=rows;return rows;}).finally(()=>loading=null);return loading;
   }
   function invalidate(){cache=null;}
-  function cleanMemberClone(articleEl){
-    const clone=articleEl.cloneNode(true);
-    clone.style.display='';
-    clone.removeAttribute('data-story-cluster-hidden');
-    clone.removeAttribute('data-story-cluster-representative');
-    clone.removeAttribute('data-story-cluster-id');
-    clone.querySelectorAll('.onlineStoryClusterBox').forEach(x=>x.remove());
-    clone.querySelectorAll('[data-story-cluster-id]').forEach(x=>x.removeAttribute('data-story-cluster-id'));
-    // Inside a cluster, a publication is just a normal article card. Remove feed-level
-    // STORY chrome while preserving V16.5 badges, actions, and bulk selection controls.
-    const first=clone.firstElementChild;
-    if(first?.textContent?.trim().startsWith('STORY ·'))first.remove();
-    clone.classList.add('rounded-xl','border','border-slate-800','bg-slate-950/60','p-3');
-    return clone;
-  }
-  function fallbackMemberCard(m){return `<article data-online-article-id="${esc(m.article_id)}" class="rounded-xl border border-slate-800 bg-slate-950/60 p-3"><div class="flex flex-wrap items-center justify-between gap-2"><span class="text-[10px] font-bold text-cyan-300">${esc(m.source_name||'-')}</span><span class="text-[10px] text-slate-500">${fmt(m.published_at)}</span></div><a href="${esc(m.url||'#')}" target="_blank" rel="noopener" class="block mt-1 text-sm font-semibold text-slate-200 hover:text-cyan-300">${esc(m.title||'-')}</a></article>`;}
-  function decorate(article,cluster,articles){
-    if(!article||!cluster||Number(cluster.member_count)<=1)return;
-    article.querySelector('.onlineStoryClusterBox')?.remove();
+  function buildClusterBox(cluster){
     const publications=Array.isArray(cluster.publications)?cluster.publications:[];
-    const box=document.createElement('div');box.className='onlineStoryClusterBox rounded-xl border border-violet-500/30 bg-violet-500/5 p-3';box.dataset.clusterId=String(cluster.id||'');
+    const box=document.createElement('section');
+    box.className='onlineStoryClusterBox rounded-xl border border-violet-500/30 bg-violet-500/5 p-3';
+    box.dataset.clusterId=String(cluster.id||'');
     const clusterTitle=cluster.canonical_title||cluster.story_title||cluster.title||publications[0]?.title||'Story Media Online';
     box.innerHTML=`<div class="mb-3"><div class="text-[9px] uppercase tracking-widest text-violet-400 font-black">Judul Kluster</div><div class="mt-1 text-sm font-bold text-slate-100">${esc(clusterTitle)}</div></div><div class="flex flex-wrap items-center justify-between gap-2"><div class="flex flex-wrap gap-2 text-[10px]"><span class="px-2 py-1 rounded bg-violet-500/15 text-violet-300 font-bold"><i class="fa-solid fa-layer-group mr-1"></i>${Number(cluster.source_count||0)} Media</span><span class="px-2 py-1 rounded bg-slate-800 text-slate-300">${Number(cluster.member_count||0)} Publikasi</span></div><button type="button" class="onlineStoryToggle text-[10px] font-semibold text-violet-300 hover:text-violet-200">Lihat ${Number(cluster.member_count||0)} Publikasi <i class="fa-solid fa-chevron-down ml-1"></i></button></div><div class="onlineStoryMembers hidden mt-3 space-y-3"></div>`;
-    const members=box.querySelector('.onlineStoryMembers');
-    for(const m of publications){const source=articles.get(String(m.article_id));if(source)members.appendChild(cleanMemberClone(source));else members.insertAdjacentHTML('beforeend',fallbackMemberCard(m));}
-    box.querySelector('.onlineStoryToggle')?.addEventListener('click',()=>{const members=box.querySelector('.onlineStoryMembers'),btn=box.querySelector('.onlineStoryToggle');const open=members?.classList.contains('hidden');members?.classList.toggle('hidden',!open);if(btn)btn.innerHTML=`${open?'Tutup':'Lihat '+Number(cluster.member_count||0)+' Publikasi'} <i class="fa-solid fa-chevron-${open?'up':'down'} ml-1"></i>`;});
-    box.querySelectorAll('.onlineApprove').forEach(b=>b.addEventListener('click',()=>document.querySelector(`#online > * article[data-online-article-id="${CSS.escape(String(b.dataset.approveId))}"] .onlineApprove`)?.click()));
-    box.querySelectorAll('.onlineClassificationCorrection').forEach(b=>b.addEventListener('click',()=>window.openOnlineClassificationCorrection?.(b.dataset.correctId,b.dataset.correctTitle)));
-    box.querySelectorAll('.onlineSupporting').forEach(b=>b.addEventListener('click',()=>document.querySelector(`#online > * article[data-online-article-id="${CSS.escape(String(b.dataset.supportId))}"] .onlineSupporting`)?.click()));
-    box.querySelectorAll('.onlineIrrelevant').forEach(b=>b.addEventListener('click',()=>document.querySelector(`#online > * article[data-online-article-id="${CSS.escape(String(b.dataset.irrelId))}"] .onlineIrrelevant`)?.click()));
-    article.appendChild(box);
+    box.querySelector('.onlineStoryToggle')?.addEventListener('click',()=>{
+      const members=box.querySelector('.onlineStoryMembers'),btn=box.querySelector('.onlineStoryToggle');
+      const open=members?.classList.contains('hidden');members?.classList.toggle('hidden',!open);
+      if(btn)btn.innerHTML=`${open?'Tutup':'Lihat '+Number(cluster.member_count||0)+' Publikasi'} <i class="fa-solid fa-chevron-${open?'up':'down'} ml-1"></i>`;
+    });
+    return box;
+  }
+  function stripStoryChrome(article){
+    article.querySelectorAll(':scope > [data-online-cluster-feed-chrome="1"]').forEach(x=>x.remove());
+    const first=article.firstElementChild;
+    if(first?.textContent?.trim().startsWith('STORY ·')){first.dataset.onlineClusterFeedChrome='1';first.style.display='none';}
+    article.classList.add('rounded-xl','border','border-slate-800','bg-slate-950/60','p-3');
   }
   function reset(root){
-    root.querySelectorAll('article[data-story-cluster-hidden="1"]').forEach(a=>{a.style.display='';delete a.dataset.storyClusterHidden;});
-    root.querySelectorAll('article[data-story-cluster-representative="1"]').forEach(a=>{[...a.children].forEach(child=>child.style.display='');delete a.dataset.storyClusterRepresentative;delete a.dataset.storyClusterId;});
+    // Restore the real article nodes to their exact feed positions. No clones are used.
+    root.querySelectorAll('.onlineStoryClusterBox').forEach(box=>{
+      const members=box.querySelector('.onlineStoryMembers');
+      [...(members?.querySelectorAll(':scope > article[data-online-article-id]')||[])].forEach(article=>{
+        const id=String(article.getAttribute('data-online-article-id')||'');
+        const marker=root.querySelector(`template[data-online-cluster-placeholder="${CSS.escape(id)}"]`);
+        article.querySelectorAll(':scope > [data-online-cluster-feed-chrome="1"]').forEach(x=>{x.style.display='';delete x.dataset.onlineClusterFeedChrome;});
+        article.classList.remove('rounded-xl','border','border-slate-800','bg-slate-950/60','p-3');
+        delete article.dataset.storyClusterId;
+        if(marker){marker.replaceWith(article);}else root.appendChild(article);
+      });
+      box.remove();
+    });
+    root.querySelectorAll('template[data-online-cluster-placeholder]').forEach(x=>x.remove());
   }
   function scheduleRetry(ms=350){clearTimeout(retryTimer);retryTimer=setTimeout(()=>apply(),ms);}
   async function apply(){
@@ -55,22 +55,21 @@
       for(const cluster of clusters){
         const pubs=Array.isArray(cluster.publications)?cluster.publications:[];if(Number(cluster.member_count)<=1||pubs.length<=1)continue;
         const present=pubs.map(p=>({p,a:articles.get(String(p.article_id))})).filter(x=>x.a);if(!present.length)continue;
-        // A cluster may have only one member visible in the current page/filter. Still
-        // decorate that card with the full cluster from the API. Prefer the canonical
-        // representative when visible; otherwise use the newest visible publication.
         const representativeId=String(cluster.representative_article_id||'');
-        const representative=present.find(x=>String(x.p.article_id)===representativeId)||present.slice().sort((x,y)=>new Date(y.p.published_at||0)-new Date(x.p.published_at||0))[0];
-        decorate(representative.a,cluster,articles);
-        representative.a.dataset.storyClusterRepresentative='1';representative.a.dataset.storyClusterId=String(cluster.id||'');
-        // The cluster card is the feed-level object. Keep the representative article only
-        // as an invisible host for the cluster box; every publication is shown inside it.
-        const clusterBox=representative.a.querySelector('.onlineStoryClusterBox');
-        if(clusterBox){
-          [...representative.a.children].forEach(child=>{if(child!==clusterBox)child.style.display='none';});
-          clusterBox.style.display='';
-          clusterBox.classList.remove('mt-3');
+        const anchor=present.find(x=>String(x.p.article_id)===representativeId)||present.slice().sort((x,y)=>new Date(y.p.published_at||0)-new Date(x.p.published_at||0))[0];
+        const box=buildClusterBox(cluster);
+        anchor.a.before(box);
+        const members=box.querySelector('.onlineStoryMembers');
+        // Move the ORIGINAL feed cards into the cluster. This keeps one renderer, one DOM
+        // node and the original approval/correction event handlers for every publication.
+        for(const item of present){
+          const article=item.a,id=String(item.p.article_id);
+          const marker=document.createElement('template');marker.dataset.onlineClusterPlaceholder=id;
+          article.before(marker);
+          stripStoryChrome(article);
+          article.dataset.storyClusterId=String(cluster.id||'');
+          members.appendChild(article);
         }
-        for(const item of present){if(item.a===representative.a)continue;item.a.dataset.storyClusterHidden='1';item.a.dataset.storyClusterId=String(cluster.id||'');item.a.style.display='none';}
       }
       // Diagnostic bar removed now that database clustering is verified. Remove an old
       // bar left by a previous render/deployment if it exists.
