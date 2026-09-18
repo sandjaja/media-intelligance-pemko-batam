@@ -7,7 +7,7 @@ async function api(path,options={}){const r=await fetch(API+path,{credentials:'i
 function toast(msg,ok=true){const t=$('#toast');if(!t)return;t.textContent=msg;t.className=`fixed bottom-5 right-5 glass rounded-xl px-4 py-3 text-xs shadow-2xl ${ok?'text-emerald-300':'text-rose-300'}`;t.classList.remove('hidden');setTimeout(()=>t.classList.add('hidden'),3500)}
 function fmt(v){if(!v)return'-';try{return new Intl.DateTimeFormat('id-ID',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Jakarta'}).format(new Date(v))}catch{return String(v)}}
 function ensureUI(){
- const ws=$('#workspace');if(!ws||$('#schedulerPanel'))return false;
+ const ws=$('#workspace');if(!ws)return false;if($('#schedulerPanel'))return true;
  const nav=ws.querySelector('.flex.gap-2.border-b')||ws.querySelector('.border-b');if(!nav)return false;
  const b=document.createElement('button');b.dataset.tab='scheduler';b.className='tab px-4 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 font-bold text-sm';b.textContent='Scheduler';nav.appendChild(b);
  ws.insertAdjacentHTML('beforeend',`<section id="schedulerPanel" class="hidden space-y-5">
