@@ -5,7 +5,13 @@
  const governmentShort=()=>branding().short_name||branding().government_name||'Pemerintah Daerah';
  const cityName=()=>branding().city_name||'';
  state.district=state.district||'all';state.districtList=state.districtList||[];
- async function options(){if(window.MEDIA_BRANDING_READY)await window.MEDIA_BRANDING_READY.catch(()=>null);const [o,d]=await Promise.all([api('/opd'),api('/districts')]);state.opdList=o.data||[];state.districtList=d.data||[];opdSelect.innerHTML=`<option value="all">Semua OPD / ${esc(governmentShort())}</option>`+state.opdList.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');districtSelect.innerHTML=`<option value="all">${cityName()?`Semua Kecamatan / ${esc(cityName())}`:'Semua Kecamatan'}</option>`+state.districtList.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');opdSelect.value=state.opd;districtSelect.value=state.district}
+ let masterOptionsPromise=null;
+ async function loadMasterOptions(){
+  if(state.opdList?.length&&state.districtList?.length)return {opd:state.opdList,districts:state.districtList};
+  if(!masterOptionsPromise)masterOptionsPromise=Promise.all([api('/opd'),api('/districts')]).then(([o,d])=>({opd:o.data||[],districts:d.data||[]})).catch(err=>{masterOptionsPromise=null;throw err});
+  return masterOptionsPromise;
+ }
+ async function options(){if(window.MEDIA_BRANDING_READY)await window.MEDIA_BRANDING_READY.catch(()=>null);const master=await loadMasterOptions();state.opdList=master.opd;state.districtList=master.districts;opdSelect.innerHTML=`<option value="all">Semua OPD / ${esc(governmentShort())}</option>`+state.opdList.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');districtSelect.innerHTML=`<option value="all">${cityName()?`Semua Kecamatan / ${esc(cityName())}`:'Semua Kecamatan'}</option>`+state.districtList.map(x=>`<option value="${esc(x.id)}">${esc(x.name)}</option>`).join('');opdSelect.value=state.opd;districtSelect.value=state.district}
  async function refresh(){
   if(state.tab==='printarchive'){
    try{await window.renderPrintArchive?.();setTimeout(()=>window.applyPrintArchiveGlobalScope?.(),80);return}catch(err){console.warn('Print archive scope refresh failed',err);window.toast?.('Filter Arsip Media Cetak gagal dimuat: '+err.message);return}
