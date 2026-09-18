@@ -121,7 +121,7 @@ async function resolveGoogleNewsPublisherUrl(url:string){
         const payload=typeof row[2]==='string'?row[2]:JSON.stringify(row[2]??'');
         let decoded=payload;
         try{const nested=JSON.parse(payload);decoded=typeof nested==='string'?nested:JSON.stringify(nested)}catch{}
-        const urls=decoded.match(/https?:\\/\\/[^"\\\\\s]+/g)??[];
+        const urls=decoded.match(new RegExp('https?://[^"\\\\\\s]+','g'))??[];
         const candidate=urls.map(value=>value.replace(/\\\\u003d/g,'=').replace(/\\\\u0026/g,'&').replace(/\\\\\//g,'/')).find(value=>{try{new URL(value);return true}catch{return false}});
         if(candidate){resolved=candidate;break}
       }
