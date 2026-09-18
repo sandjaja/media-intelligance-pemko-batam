@@ -1,4 +1,4 @@
-export type ArticleDateEvidence = 'META_ARTICLE_PUBLISHED' | 'META_OG_PUBLISHED' | 'META_DATE_PUBLISHED' | 'JSON_LD' | 'HTML_TIME' | 'VISIBLE_PUBLISHED';
+export type ArticleDateEvidence = 'META_ARTICLE_PUBLISHED' | 'META_OG_PUBLISHED' | 'META_DATE_PUBLISHED' | 'JSON_LD' | 'HTML_TIME' | 'VISIBLE_PUBLISHED' | 'GOOGLE_NEWS_RSS';
 
 export type VerifiedOnlineArticle = {
   title: string;
