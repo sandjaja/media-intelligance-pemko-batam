@@ -1,0 +1,34 @@
+(()=>{
+'use strict';
+const API=(window.MEDIA_INTELLIGENCE_API||'/api').replace(/\/$/,'');
+const $=s=>document.querySelector(s);
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function api(path,options={}){const r=await fetch(API+path,{credentials:'include',cache:'no-store',headers:{'Content-Type':'application/json',...(options.headers||{})},...options});const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.detail||d.error||`HTTP ${r.status}`);return d}
+function toast(msg,ok=true){const t=$('#toast');if(!t)return;t.textContent=msg;t.className=`fixed bottom-5 right-5 glass rounded-xl px-4 py-3 text-xs shadow-2xl ${ok?'text-emerald-300':'text-rose-300'}`;t.classList.remove('hidden');setTimeout(()=>t.classList.add('hidden'),3500)}
+function fmt(v){if(!v)return'-';try{return new Intl.DateTimeFormat('id-ID',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Jakarta'}).format(new Date(v))}catch{return String(v)}}
+function ensureUI(){
+ const ws=$('#workspace');if(!ws||$('#schedulerPanel'))return false;
+ const nav=ws.querySelector('.flex.gap-2.border-b')||ws.querySelector('.border-b');if(!nav)return false;
+ const b=document.createElement('button');b.dataset.tab='scheduler';b.className='tab px-4 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 font-bold text-sm';b.textContent='Scheduler';nav.appendChild(b);
+ ws.insertAdjacentHTML('beforeend',`<section id="schedulerPanel" class="hidden space-y-5">
+ <div class="glass rounded-2xl p-5"><div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-[10px] tracking-widest text-cyan-400 font-black">DATA COLLECTION ORCHESTRATOR</div><h2 class="text-xl font-black mt-1">Scheduler Pengumpulan Data</h2><p class="text-xs text-slate-500 mt-1">Satu jadwal untuk mengendalikan collector Media Online, Owned Channel, dan Media Sosial.</p></div><span id="schedState" class="px-3 py-1 rounded-full text-xs font-black bg-slate-800">NONAKTIF</span></div>
+ <form id="schedForm" class="mt-5 space-y-5"><div class="grid md:grid-cols-3 gap-4"><label class="rounded-xl border border-slate-800 p-4"><div class="text-xs text-slate-400">Pengumpulan otomatis</div><div class="mt-2 flex items-center gap-2"><input id="schedEnabled" type="checkbox" class="w-5 h-5"><b>Aktifkan Scheduler</b></div></label><label class="rounded-xl border border-slate-800 p-4"><div class="text-xs text-slate-400">Jam eksekusi (WIB)</div><select id="schedTime" class="mt-2 w-full rounded-lg px-3 py-2"></select></label><div class="rounded-xl border border-slate-800 p-4"><div class="text-xs text-slate-400">Timezone</div><div class="mt-2 font-bold">Asia/Jakarta · WIB</div></div></div>
+ <div class="grid md:grid-cols-3 gap-4">
+ <label class="rounded-xl border border-slate-800 p-4 flex gap-3"><input id="schedOnline" type="checkbox" class="w-5 h-5 mt-1"><div><b>Media Online</b><div class="text-xs text-slate-500 mt-1">Portal berita/media eksternal.</div></div></label>
+ <label class="rounded-xl border border-slate-800 p-4 flex gap-3"><input id="schedOwned" type="checkbox" class="w-5 h-5 mt-1"><div><b>Owned Channel</b><div class="text-xs text-slate-500 mt-1">Website resmi Pemko/OPD/Kecamatan.</div></div></label>
+ <label class="rounded-xl border border-slate-800 p-4 flex gap-3 opacity-60"><input id="schedSocial" type="checkbox" disabled class="w-5 h-5 mt-1"><div><b>Media Sosial</b><div class="text-xs text-amber-300 mt-1">Belum tersedia — menunggu collector platform.</div></div></label></div>
+ <div class="flex flex-wrap gap-2"><button type="submit" class="px-4 py-2.5 rounded-lg bg-cyan-400 text-slate-950 font-black">Simpan Pengaturan</button><button id="schedRunNow" type="button" class="px-4 py-2.5 rounded-lg bg-slate-800 border border-slate-700 font-bold">Jalankan Sekarang</button></div></form></div>
+ <div class="glass rounded-2xl p-5"><h3 class="font-black">Riwayat Pengumpulan</h3><p id="schedLast" class="text-xs text-slate-500 mt-1">Belum pernah dijalankan.</p><div id="schedHistory" class="mt-4 space-y-2"></div></div></section>`);
+ $('#schedTime').innerHTML=Array.from({length:24},(_,h)=>`<option value="${String(h).padStart(2,'0')}:00">${String(h).padStart(2,'0')}:00 WIB</option>`).join('');
+ $('#schedForm').addEventListener('submit',save);
+ $('#schedRunNow').addEventListener('click',runNow);
+ return true;
+}
+async function load(){
+ if(!ensureUI())return;
+ try{const d=(await api('/admin/collection-scheduler')).data,c=d.config||{};$('#schedEnabled').checked=!!c.enabled;$('#schedOnline').checked=!!c.online_enabled;$('#schedOwned').checked=!!c.owned_enabled;$('#schedTime').value=String(c.run_time||'08:00').slice(0,5);$('#schedState').textContent=c.enabled?'AKTIF':'NONAKTIF';$('#schedState').className=`px-3 py-1 rounded-full text-xs font-black ${c.enabled?'bg-emerald-500/10 text-emerald-300':'bg-slate-800 text-slate-400'}`;const h=d.history||[];$('#schedLast').textContent=h[0]?`Terakhir: ${fmt(h[0].started_at)} · ${h[0].status}`:'Belum pernah dijalankan.';$('#schedHistory').innerHTML=h.map(x=>`<div class="rounded-lg border border-slate-800 p-3 flex flex-wrap justify-between gap-2"><div><b class="text-sm">${esc(x.trigger_type)}</b><div class="text-xs text-slate-500">${fmt(x.started_at)}</div></div><span class="text-xs font-bold">${esc(x.status)}</span></div>`).join('')||'<div class="text-sm text-slate-500">Belum ada riwayat.</div>'}catch(e){toast(e.message,false)}
+}
+async function save(e){e.preventDefault();try{await api('/admin/collection-scheduler',{method:'PUT',body:JSON.stringify({enabled:$('#schedEnabled').checked,runTime:$('#schedTime').value,onlineEnabled:$('#schedOnline').checked,ownedEnabled:$('#schedOwned').checked,socialEnabled:false})});toast('Pengaturan scheduler disimpan.');await load()}catch(e){toast(e.message,false)}}
+async function runNow(){const sources=[];if($('#schedOnline').checked)sources.push('online');if($('#schedOwned').checked)sources.push('owned');if(!sources.length)return toast('Pilih minimal satu sumber untuk dijalankan.',false);if(!confirm(`Jalankan pengumpulan sekarang untuk: ${sources.join(', ')}?`))return;const b=$('#schedRunNow');b.disabled=true;b.textContent='Sedang menjalankan...';try{await api('/admin/collection-scheduler/run',{method:'POST',body:JSON.stringify({sources})});toast('Pengumpulan selesai.');await load()}catch(e){toast(e.message,false)}finally{b.disabled=false;b.textContent='Jalankan Sekarang'}}
+const start=()=>{ensureUI();load()};if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(start,300));else setTimeout(start,300);
+})();
