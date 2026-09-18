@@ -111,8 +111,13 @@ async function resolveGoogleNewsPublisherUrl(url:string){
     const rpc=await fetch('https://news.google.com/_/DotsSplashUi/data/batchexecute?rpcids=Fbv4je',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded;charset=UTF-8','user-agent':USER_AGENT,referer:'https://news.google.com/'},body:`f.req=${encodeURIComponent(JSON.stringify(req))}`,signal:AbortSignal.timeout(10000)});
     if(!rpc.ok)return null;
     const text=await rpc.text();
-    const match=text.match(/\\[\\\"garturlres\\\",\\\"(https?:\\\/\\\/[^\\\"]+)/);
-    return match?.[1]?.replace(/\\u003d/g,'=').replace(/\\u0026/g,'&').replace(/\\\//g,'/')??null;
+    const marker='"garturlres","';
+    const normalized=text.replace(/\\\\u003d/g,'=').replace(/\\\\u0026/g,'&').replace(/\\\\\//g,'/');
+    const markerIndex=normalized.indexOf(marker);
+    if(markerIndex<0)return null;
+    const valueStart=markerIndex+marker.length;
+    const valueEnd=normalized.indexOf('"',valueStart);
+    return valueEnd>valueStart?normalized.slice(valueStart,valueEnd):null;
   }catch{return null}
 }
 async function resolveGoogleNewsCandidates(items:OnlineArticle[],targetUrl:string){
