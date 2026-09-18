@@ -5,7 +5,7 @@ type MemberType='representative'|'identical'|'similar';
 type WorkingMember={article:Article;score:number;type:MemberType;matchedBy?:string};
 type WorkingCluster={representative:Article;members:WorkingMember[]};
 type Similarity={score:number;titleJ:number;titleC:number;bodyJ:number;bodyC:number;hours:number;eventScore:number;eventMatch:boolean;eventSignals:string[];anchorMatch:boolean;anchorSignals:string[];phraseMatch:boolean;phraseSignals:string[];blocked:boolean};
-const ENGINE='online-story-rule-v1.7';
+const ENGINE='online-story-rule-v1.7.1';
 const WINDOW_MS=48*60*60*1000;
 const STOPWORDS=new Set(['dan','yang','di','ke','dari','untuk','pada','dengan','atau','ini','itu','dalam','atas','sebagai','oleh','kota','berita','batam']);
 const WEAK_ANCHOR_WORDS=new Set(['pemko','pemkot','pemerintah','bp','warga','masyarakat','hari','hari ini','kepulauan','riau','kepri','polisi','media','dinas','kepala','gelar','kegiatan','program']);
@@ -29,7 +29,7 @@ function entityAnchors(a:Article){const text=normalize([a.title,a.summary].filte
 function placeObjectAnchors(a:Article){const title=rawTitleTokens(a.title),out:string[]=[];for(let i=0;i<title.length-1;i++){const pair=title.slice(i,i+2).join(' ');if(/^(kavling|kampung|perum|perumahan|komplek|kompleks|pasar|jembatan|pelabuhan|bandara)\s+[a-z0-9]+$/.test(pair))out.push(pair);}return [...new Set(out)];}
 function forecastDayKey(a:Article){const title=normalize(a.title),m=title.match(/\b(senin|selasa|rabu|kamis|jumat|sabtu|minggu)\s+(\d{1,2})\s+(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\b/);return m?m.slice(1).join('-'):null;}
 function isForecast(a:Article){return /\b(cuaca|prakiraan|bmkg|hujan)\b/.test(fullText(a));}
-function localityAnchors(a:Article){const text=normalize([a.title,a.summary].filter(Boolean).join(' ')),out:string[]=[];for(const re of [/\b(?:pemkot|pemkab)\s+([a-z0-9]+(?:\s+[a-z0-9]+)?)/g,/\b(?:kualitas\s+udara|udara)\s+([a-z0-9]+)/g]){let m:RegExpExecArray|null;while((m=re.exec(text)))out.push(m[1].trim());}return [...new Set(out)];}
+function localityAnchors(a:Article){const text=normalize([a.title,a.summary].filter(Boolean).join(' ')),out:string[]=[];for(const re of [/\b(?:pemkot|pemkab)\s+([a-z0-9]+)/g,/\bpemerintah\s+(?:kota|kabupaten)\s+([a-z0-9]+)/g,/\bwali\s+kota\s+([a-z0-9]+)/g,/\bbupati\s+([a-z0-9]+)/g,/\b(?:kualitas\s+udara|udara)\s+(?:di\s+|wilayah\s+)?([a-z0-9]+)/g]){let m:RegExpExecArray|null;while((m=re.exec(text))){const v=m[1].trim();if(!['yang','ini','itu','telah','kini','nilai','langsung','masuk','tidak','semakin'].includes(v))out.push(v);}}return [...new Set(out)];}
 function incompatibleLocality(a:Article,b:Article){const A=localityAnchors(a),B=localityAnchors(b);return A.length>0&&B.length>0&&intersection(A,B).length===0;}
 function clusterLocalityAnchors(c:WorkingCluster){const counts=new Map<string,number>();for(const x of c.members)for(const a of localityAnchors(x.article))counts.set(a,(counts.get(a)||0)+1);const ranked=[...counts.entries()].sort((a,b)=>b[1]-a[1]);if(!ranked.length)return[];const top=ranked[0][1];return ranked.filter(([,n])=>n===top).map(([a])=>a);}
 function incompatibleClusterLocality(a:Article,c:WorkingCluster){const A=localityAnchors(a),C=clusterLocalityAnchors(c);return A.length>0&&C.length>0&&intersection(A,C).length===0;}
