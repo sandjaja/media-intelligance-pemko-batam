@@ -5,6 +5,9 @@ import { getV16PrimaryEvidenceForInput } from './context-dominance-v16.js';
 function fakePool() {
   return {
     async query(sql: string, params?: unknown[]) {
+      if (sql.includes('FROM organizations WHERE active=true')) return { rows: [{ id: '1', name: 'Pemerintah Kota Contoh', code: 'PKC' }] };
+      if (sql.includes('FROM government_branding WHERE active=true')) return { rows: [{ government_name: 'Pemerintah Kota Contoh', short_name: 'Pemko Contoh', aliases: ['Pemkot Contoh'], city_name: 'Kota Contoh', tagline: null }] };
+      if (sql.includes('FROM districts WHERE organization_id=')) return { rows: [{ name: 'Kecamatan Utara', code: 'UTARA' }] };
       if (sql.includes('FROM taxonomy_categories tc JOIN classification_sectors cs')) {
         return { rows: [{ id: '10', name: 'Infrastruktur Jalan dan Jembatan', sector_name: 'Infrastruktur' }] };
       }
@@ -55,4 +58,13 @@ test('V16.5 preserves manual Master Keyword authority for ambiguous language', a
   assert.ok(result);
   assert.equal(result.opdId, '20');
   assert.equal(result.matchType, 'MANUAL');
+});
+
+test('V16.5 organization context is loaded from database, not a tenant name', async () => {
+  const result = await getV16PrimaryEvidenceForInput(fakePool(), {
+    title: 'Pemko Contoh membahas akses jembatan',
+    summary: 'Perbaikan jembatan dilakukan untuk akses kendaraan.'
+  });
+  assert.ok(result);
+  assert.equal(result.opdId, '20');
 });
