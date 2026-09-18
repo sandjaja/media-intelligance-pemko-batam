@@ -8,12 +8,25 @@ function tokens(value:string){return rawTokens(value).filter(v=>!CONTEXT_STOP.ha
 function tokenCoverage(text:string,keyword:string){const parts=tokens(keyword);if(parts.length<2)return 0;const hit=parts.filter(p=>containsPhrase(text,p)).length;return hit/parts.length;}
 function firstLead(value:string){const text=String(value||'').replace(/\s+/g,' ').trim();const cut=text.search(/\b(?:baca juga|pewarta\s*:|editor\s*:|copyright\b|kategori\s+inovasi)\b/i);return (cut>=0?text.slice(0,cut):text).slice(0,900);}
 function isShortKeyword(keyword:string){const n=normalize(keyword).replace(/\s+/g,'');return n.length<=3;}
-function batamGovernmentContext(text:string){return /\b(?:pemkot batam|pemerintah kota batam|pemko batam)\b/.test(normalize(text));}
-function governmentConceptContext(text:string,keyword:string){const raw=rawTokens(keyword),meaningful=tokens(keyword);if(raw.length<2||meaningful.length!==1)return false;const hasGovernmentQualifier=raw.some(t=>t==='pemerintah'||t==='pemerintahan'||t==='daerah'||t==='kota'||t==='kabupaten');return hasGovernmentQualifier&&containsPhrase(text,meaningful[0])&&batamGovernmentContext(text);}
+type OrganizationContext={identity:string[];areas:string[]};
+async function organizationContext(pool:Pool):Promise<OrganizationContext|null>{
+ const organizations=(await pool.query(`SELECT id,name,code FROM organizations WHERE active=true ORDER BY id LIMIT 2`)).rows;
+ if(organizations.length!==1)return null;
+ const organization=organizations[0];
+ const branding=(await pool.query(`SELECT government_name,short_name,aliases,city_name,tagline FROM government_branding WHERE active=true ORDER BY id LIMIT 1`)).rows[0]??{};
+ const districts=(await pool.query(`SELECT name,code FROM districts WHERE organization_id=$1 AND active=true ORDER BY id`,[organization.id])).rows;
+ const identity=new Set<string>();
+ for(const raw of [organization.name,organization.code,branding.government_name,branding.short_name,...(Array.isArray(branding.aliases)?branding.aliases:[]),branding.city_name,branding.tagline]){
+  const term=normalize(String(raw||''));if(term.length>=3)identity.add(term);
+ }
+ const areas=new Set<string>();
+ for(const row of districts)for(const raw of [row.name,row.code]){const term=normalize(String(raw||''));if(term.length>=3)areas.add(term);}
+ return{identity:[...identity],areas:[...areas]};
+}
+function organizationGovernmentContext(text:string,context:OrganizationContext|null){return !!context&&context.identity.some(term=>containsPhrase(text,term));}
+function governmentConceptContext(text:string,keyword:string,context:OrganizationContext|null){const raw=rawTokens(keyword),meaningful=tokens(keyword);if(raw.length<2||meaningful.length!==1)return false;const hasGovernmentQualifier=raw.some(t=>t==='pemerintah'||t==='pemerintahan'||t==='daerah'||t==='kota'||t==='kabupaten');return hasGovernmentQualifier&&containsPhrase(text,meaningful[0])&&organizationGovernmentContext(text,context);}
 function titleConceptCoverage(title:string,keyword:string){const meaningful=tokens(keyword);if(!meaningful.length)return 0;const hit=meaningful.filter(p=>containsPhrase(title,p)).length;return hit/meaningful.length;}
 function sharedConcept(title:string,label:string){const titleTokens=new Set(tokens(title));const concept=tokens(label);const shared=concept.filter(t=>titleTokens.has(t));return shared.length>=2&&shared.length>=Math.min(2,concept.length);}
-const OTHER_REGION=/\b(?:pekanbaru|riau|tanjungpinang|bintan|karimun|natuna|lingga|anambas|jakarta|medan|padang|jambi|palembang)\b/;
-function titleDominatedByOtherRegion(title:string){const n=normalize(title),batam=n.indexOf('batam'),other=n.search(OTHER_REGION);return other>=0&&(batam<0||other<batam);}
 
 // Polysemous infrastructure terms must be validated from the headline sentence first.
 // Lead/body vocabulary must not rescue a clearly figurative headline use.
