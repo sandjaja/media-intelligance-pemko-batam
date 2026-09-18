@@ -107,7 +107,7 @@ function parseGoogleNewsFeed(xml:string,source:OnlineSource,scope?:OrganizationM
     const publishedAt=parseDate(firstString(item.pubDate));
     if(!title||!url||!publishedAt)continue;
     title=title.replace(outletSuffix,'').trim();
-    const rawDescription=firstString(item.description);
+    const rawDescription=firstString(item.description)||'';
     const excerpt=stripHtml(rawDescription)?.slice(0,100000);
     const domain=publisherDomain(source.url);
     const descriptionHrefs=[...rawDescription.matchAll(/href=["']([^"']+)["']/gi)].map(m=>m[1].replace(/&amp;/gi,'&'));
