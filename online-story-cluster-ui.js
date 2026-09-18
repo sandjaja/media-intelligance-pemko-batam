@@ -19,7 +19,7 @@
   }
   function reset(root){
     root.querySelectorAll('article[data-story-cluster-hidden="1"]').forEach(a=>{a.style.display='';delete a.dataset.storyClusterHidden;});
-    root.querySelectorAll('article[data-story-cluster-representative="1"]').forEach(a=>{delete a.dataset.storyClusterRepresentative;delete a.dataset.storyClusterId;});
+    root.querySelectorAll('article[data-story-cluster-representative="1"]').forEach(a=>{[...a.children].forEach(child=>child.style.display='');delete a.dataset.storyClusterRepresentative;delete a.dataset.storyClusterId;});
   }
   function scheduleRetry(ms=350){clearTimeout(retryTimer);retryTimer=setTimeout(()=>apply(),ms);}
   async function apply(){
@@ -39,6 +39,14 @@
         const representative=present.find(x=>String(x.p.article_id)===representativeId)||present.slice().sort((x,y)=>new Date(y.p.published_at||0)-new Date(x.p.published_at||0))[0];
         decorate(representative.a,cluster);
         representative.a.dataset.storyClusterRepresentative='1';representative.a.dataset.storyClusterId=String(cluster.id||'');
+        // The cluster card is the feed-level object. Keep the representative article only
+        // as an invisible host for the cluster box; every publication is shown inside it.
+        const clusterBox=representative.a.querySelector('.onlineStoryClusterBox');
+        if(clusterBox){
+          [...representative.a.children].forEach(child=>{if(child!==clusterBox)child.style.display='none';});
+          clusterBox.style.display='';
+          clusterBox.classList.remove('mt-3');
+        }
         for(const item of present){if(item.a===representative.a)continue;item.a.dataset.storyClusterHidden='1';item.a.dataset.storyClusterId=String(cluster.id||'');item.a.style.display='none';}
       }
       // Diagnostic bar removed now that database clustering is verified. Remove an old
