@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import type { Pool } from 'pg';
 import { analyzeArticle as analyzeCoreArticle, parseKeywordQuery } from './media-intelligence-core.js';
 import { analyzeSocialRoutingV16 } from './social-v16-adapter.js';
+import { classifyTextOrganizationScope, loadOrganizationMediaScope } from './organization-media-scope.js';
 
 export type SocialPlatform = 'instagram'|'facebook'|'tiktok'|'x'|'youtube'|'website'|'threads'|'other';
 export type SocialContentType = 'post'|'comment'|'reply'|'video'|'short'|'reel'|'story'|'live'|'article'|'other';
@@ -17,6 +18,10 @@ export function socialContentHash(candidate:SocialCandidate){
 }
 
 export async function ingestSocialCandidate(pool:Pool,candidate:SocialCandidate,defaultCollector='social-batch'){
+ const scope=await loadOrganizationMediaScope(pool);
+ if(!scope)throw new Error('ACTIVE_ORGANIZATION_UNRESOLVED');
+ const scopeDecision=classifyTextOrganizationScope({title:candidate.title,content:candidate.content},scope);
+ if(candidate.sourceKind!=='owned'&&scopeDecision.status!=='RELEVANT')return{skipped:true,reason:'ORGANIZATION_SCOPE_'+scopeDecision.status,scopeDecision,platform:candidate.platform,externalId:candidate.externalId??null};
  const routing=await analyzeSocialRoutingV16(pool,{title:candidate.title,content:candidate.content});
  const matchedKeywords=routing.keyword?[routing.keyword]:[];
  const query=parseKeywordQuery(matchedKeywords.join(' | '));
@@ -43,7 +48,7 @@ export async function ingestSocialCandidate(pool:Pool,candidate:SocialCandidate,
  if(routing.keywordId)await pool.query(`INSERT INTO social_mention_keywords(mention_id,keyword_id,matched_text,match_count,confidence) VALUES($1,$2,$3,1,$4) ON CONFLICT(mention_id,keyword_id) DO UPDATE SET matched_text=EXCLUDED.matched_text,match_count=EXCLUDED.match_count,confidence=EXCLUDED.confidence`,[mention.id,routing.keywordId,routing.keyword??'',routing.score>0?Math.min(1,routing.score/100):0]);
  if(routing.taxonomyId)await pool.query(`INSERT INTO social_mention_issues(mention_id,issue_id,relevance_score) SELECT $1,i.id,$3 FROM issues i WHERE i.taxonomy_category_id=$2 AND i.status IN ('active','watch') ORDER BY CASE WHEN i.status='active' THEN 0 ELSE 1 END,i.id LIMIT 1 ON CONFLICT(mention_id,issue_id) DO UPDATE SET relevance_score=EXCLUDED.relevance_score`,[mention.id,routing.taxonomyId,Math.min(100,Math.max(0,routing.score))]).catch(()=>undefined);
  await pool.query(`INSERT INTO evidence_sources(source_type,source_url,source_label,captured_at,content_hash,metadata,social_mention_id) SELECT $1,$2,$3,now(),$4,$5::jsonb,$6 WHERE NOT EXISTS(SELECT 1 FROM evidence_sources WHERE social_mention_id=$6)`,[candidate.sourceKind==='owned'?'owned_social':'social',candidate.canonicalUrl??null,candidate.authorName??candidate.authorHandle??candidate.platform,contentHash,JSON.stringify({collector:candidate.collector??defaultCollector,externalId:candidate.externalId??null,classificationEngine:routing.engine}),mention.id]);
- return{...mention,keywordMatches:routing.keywordId?1:0,matchedKeywordIds:routing.keywordId?[Number(routing.keywordId)]:[],routing};
+ return{...mention,keywordMatches:routing.keywordId?1:0,matchedKeywordIds:routing.keywordId?[Number(routing.keywordId)]:[],scopeDecision,routing};
 }
 
 export async function ingestSocialBatch(pool:Pool,candidates:SocialCandidate[],collector='social-batch'){const results:Record<string,unknown>[]=[];for(const candidate of candidates){try{results.push({ok:true,...await ingestSocialCandidate(pool,candidate,collector)})}catch(error){results.push({ok:false,platform:candidate.platform,externalId:candidate.externalId??null,error:error instanceof Error?error.message:String(error)})}}return{received:candidates.length,succeeded:results.filter(r=>r.ok).length,failed:results.filter(r=>!r.ok).length,results}}
