@@ -114,7 +114,19 @@ async function resolveGoogleNewsPublisherUrl(url:string){
     const marker='"garturlres","';
     const normalized=text.replace(/\\\\u003d/g,'=').replace(/\\\\u0026/g,'&').replace(/\\\\\//g,'/');
     const markerIndex=normalized.indexOf(marker);
-    if(markerIndex<0){console.info({stage:'google_news_resolver',articleId:true,signature:true,timestamp:true,rpcStatus:rpc.status,garturlres:false,reason:'RESULT_MARKER_MISSING'},'online collector resolver diagnostic');return null}
+    if(markerIndex<0){
+      const indicators={
+        length:text.length,
+        contentType:rpc.headers.get('content-type')??null,
+        hasFbv4je:text.includes('Fbv4je'),
+        hasWrbFr:text.includes('wrb.fr'),
+        hasHttp:text.includes('http'),
+        startsWithArray:text.trimStart().startsWith('['),
+        startsWithXssi:text.trimStart().startsWith(")]}'")
+      };
+      console.info({stage:'google_news_resolver',articleId:true,signature:true,timestamp:true,rpcStatus:rpc.status,garturlres:false,indicators,reason:'RESULT_MARKER_MISSING'},'online collector resolver diagnostic');
+      return null
+    }
     const valueStart=markerIndex+marker.length;
     const valueEnd=normalized.indexOf('"',valueStart);
     const resolved=valueEnd>valueStart?normalized.slice(valueStart,valueEnd):null;
