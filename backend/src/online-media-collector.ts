@@ -100,25 +100,27 @@ function parseFeed(xml:string,source:OnlineSource,scope?:OrganizationMediaScope|
 }
 function googleNewsArticleId(url:string){try{const u=new URL(url);if(u.hostname!=='news.google.com')return null;const parts=u.pathname.split('/').filter(Boolean);const i=parts.indexOf('articles');return i>=0&&parts[i+1]?parts[i+1]:null}catch{return null}}
 async function resolveGoogleNewsPublisherUrl(url:string){
-  const id=googleNewsArticleId(url);if(!id)return null;
+  const id=googleNewsArticleId(url);if(!id){console.info({stage:'google_news_resolver',articleId:false,reason:'NO_ARTICLE_ID'},'online collector resolver diagnostic');return null}
   try{
     const {response,body}=await fetchText(`https://news.google.com/rss/articles/${encodeURIComponent(id)}`,10000);
-    if(!response.ok)return null;
+    if(!response.ok){console.info({stage:'google_news_resolver',articleId:true,tokenPageStatus:response.status,reason:'TOKEN_PAGE_HTTP_ERROR'},'online collector resolver diagnostic');return null}
     const signature=body.match(/data-n-a-sg=["']([^"']+)["']/i)?.[1];
     const timestamp=body.match(/data-n-a-ts=["']([^"']+)["']/i)?.[1];
-    if(!signature||!timestamp)return null;
+    if(!signature||!timestamp){console.info({stage:'google_news_resolver',articleId:true,tokenPageStatus:response.status,signature:!!signature,timestamp:!!timestamp,reason:'TOKEN_MISSING'},'online collector resolver diagnostic');return null}
     const req=[[["Fbv4je",JSON.stringify(["garturlreq",[["X","X",["X","X"],null,null,1,1,"ID:id",null,1,null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,null,0],id,Number(timestamp),signature]),null,"generic"]]];
     const rpc=await fetch('https://news.google.com/_/DotsSplashUi/data/batchexecute?rpcids=Fbv4je',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded;charset=UTF-8','user-agent':USER_AGENT,referer:'https://news.google.com/'},body:`f.req=${encodeURIComponent(JSON.stringify(req))}`,signal:AbortSignal.timeout(10000)});
-    if(!rpc.ok)return null;
+    if(!rpc.ok){console.info({stage:'google_news_resolver',articleId:true,signature:true,timestamp:true,rpcStatus:rpc.status,reason:'RPC_HTTP_ERROR'},'online collector resolver diagnostic');return null}
     const text=await rpc.text();
     const marker='"garturlres","';
     const normalized=text.replace(/\\\\u003d/g,'=').replace(/\\\\u0026/g,'&').replace(/\\\\\//g,'/');
     const markerIndex=normalized.indexOf(marker);
-    if(markerIndex<0)return null;
+    if(markerIndex<0){console.info({stage:'google_news_resolver',articleId:true,signature:true,timestamp:true,rpcStatus:rpc.status,garturlres:false,reason:'RESULT_MARKER_MISSING'},'online collector resolver diagnostic');return null}
     const valueStart=markerIndex+marker.length;
     const valueEnd=normalized.indexOf('"',valueStart);
-    return valueEnd>valueStart?normalized.slice(valueStart,valueEnd):null;
-  }catch{return null}
+    const resolved=valueEnd>valueStart?normalized.slice(valueStart,valueEnd):null;
+    console.info({stage:'google_news_resolver',articleId:true,signature:true,timestamp:true,rpcStatus:rpc.status,garturlres:true,resolved:!!resolved},'online collector resolver diagnostic');
+    return resolved;
+  }catch(error){console.info({stage:'google_news_resolver',reason:'EXCEPTION',error:error instanceof Error?error.message:String(error)},'online collector resolver diagnostic');return null}
 }
 async function resolveGoogleNewsCandidates(items:OnlineArticle[],targetUrl:string){
   const out:OnlineArticle[]=[];
