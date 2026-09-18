@@ -111,26 +111,22 @@ async function resolveGoogleNewsPublisherUrl(url:string){
     const rpc=await fetch('https://news.google.com/_/DotsSplashUi/data/batchexecute?rpcids=Fbv4je',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded;charset=UTF-8','user-agent':USER_AGENT,referer:'https://news.google.com/'},body:`f.req=${encodeURIComponent(JSON.stringify(req))}`,signal:AbortSignal.timeout(10000)});
     if(!rpc.ok){console.info({stage:'google_news_resolver',articleId:true,signature:true,timestamp:true,rpcStatus:rpc.status,reason:'RPC_HTTP_ERROR'},'online collector resolver diagnostic');return null}
     const text=await rpc.text();
-    const marker='"garturlres","';
-    const normalized=text.replace(/\\\\u003d/g,'=').replace(/\\\\u0026/g,'&').replace(/\\\\\//g,'/');
-    const markerIndex=normalized.indexOf(marker);
-    if(markerIndex<0){
-      const indicators={
-        length:text.length,
-        contentType:rpc.headers.get('content-type')??null,
-        hasFbv4je:text.includes('Fbv4je'),
-        hasWrbFr:text.includes('wrb.fr'),
-        hasHttp:text.includes('http'),
-        startsWithArray:text.trimStart().startsWith('['),
-        startsWithXssi:text.trimStart().startsWith(")]}'")
-      };
-      console.info({stage:'google_news_resolver',articleId:true,signature:true,timestamp:true,rpcStatus:rpc.status,garturlres:false,indicators,reason:'RESULT_MARKER_MISSING'},'online collector resolver diagnostic');
-      return null
-    }
-    const valueStart=markerIndex+marker.length;
-    const valueEnd=normalized.indexOf('"',valueStart);
-    const resolved=valueEnd>valueStart?normalized.slice(valueStart,valueEnd):null;
-    console.info({stage:'google_news_resolver',articleId:true,signature:true,timestamp:true,rpcStatus:rpc.status,garturlres:true,resolved:!!resolved},'online collector resolver diagnostic');
+    const cleaned=text.trimStart().startsWith(")]}'")?text.trimStart().slice(4).trimStart():text.trim();
+    let resolved:string|null=null;
+    try{
+      const envelope=JSON.parse(cleaned);
+      const rows=Array.isArray(envelope)?envelope:[];
+      for(const row of rows){
+        if(!Array.isArray(row)||row[0]!=='wrb.fr'||row[1]!=='Fbv4je')continue;
+        const payload=typeof row[2]==='string'?row[2]:JSON.stringify(row[2]??'');
+        let decoded=payload;
+        try{const nested=JSON.parse(payload);decoded=typeof nested==='string'?nested:JSON.stringify(nested)}catch{}
+        const urls=decoded.match(/https?:\\/\\/[^"\\\\\s]+/g)??[];
+        const candidate=urls.map(value=>value.replace(/\\\\u003d/g,'=').replace(/\\\\u0026/g,'&').replace(/\\\\\//g,'/')).find(value=>{try{new URL(value);return true}catch{return false}});
+        if(candidate){resolved=candidate;break}
+      }
+    }catch{}
+    console.info({stage:'google_news_resolver',articleId:true,signature:true,timestamp:true,rpcStatus:rpc.status,wrbFr:true,resolved:!!resolved},'online collector resolver diagnostic');
     return resolved;
   }catch(error){console.info({stage:'google_news_resolver',reason:'EXCEPTION',error:error instanceof Error?error.message:String(error)},'online collector resolver diagnostic');return null}
 }
