@@ -98,6 +98,32 @@ function parseFeed(xml:string,source:OnlineSource,scope?:OrganizationMediaScope|
   }
   return scopeOnly(freshOnly(out),scope).slice(0,80);
 }
+function googleNewsArticleId(url:string){try{const u=new URL(url);if(u.hostname!=='news.google.com')return null;const parts=u.pathname.split('/').filter(Boolean);const i=parts.indexOf('articles');return i>=0&&parts[i+1]?parts[i+1]:null}catch{return null}}
+async function resolveGoogleNewsPublisherUrl(url:string){
+  const id=googleNewsArticleId(url);if(!id)return null;
+  try{
+    const {response,body}=await fetchText(`https://news.google.com/rss/articles/${encodeURIComponent(id)}`,10000);
+    if(!response.ok)return null;
+    const signature=body.match(/data-n-a-sg=["']([^"']+)["']/i)?.[1];
+    const timestamp=body.match(/data-n-a-ts=["']([^"']+)["']/i)?.[1];
+    if(!signature||!timestamp)return null;
+    const req=[[["Fbv4je",JSON.stringify(["garturlreq",[["X","X",["X","X"],null,null,1,1,"ID:id",null,1,null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,null,0],id,Number(timestamp),signature]),null,"generic"]]];
+    const rpc=await fetch('https://news.google.com/_/DotsSplashUi/data/batchexecute?rpcids=Fbv4je',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded;charset=UTF-8','user-agent':USER_AGENT,referer:'https://news.google.com/'},body:`f.req=${encodeURIComponent(JSON.stringify(req))}`,signal:AbortSignal.timeout(10000)});
+    if(!rpc.ok)return null;
+    const text=await rpc.text();
+    const match=text.match(/\\[\\\"garturlres\\\",\\\"(https?:\\\/\\\/[^\\\"]+)/);
+    return match?.[1]?.replace(/\\u003d/g,'=').replace(/\\u0026/g,'&').replace(/\\\//g,'/')??null;
+  }catch{return null}
+}
+async function resolveGoogleNewsCandidates(items:OnlineArticle[],targetUrl:string){
+  const out:OnlineArticle[]=[];
+  for(const item of items){
+    if(samePublisherDomain(item.url,targetUrl)){out.push(item);continue}
+    const resolved=await resolveGoogleNewsPublisherUrl(item.url);
+    if(resolved&&samePublisherDomain(resolved,targetUrl))out.push({...item,url:resolved});else out.push(item);
+  }
+  return out;
+}
 function parseGoogleNewsFeed(xml:string,source:OnlineSource,scope?:OrganizationMediaScope|null):OnlineArticle[]{
   const root=parser.parse(xml),items=asArray<any>(root?.rss?.channel?.item),out:OnlineArticle[]=[];
   const outletSuffix=new RegExp(`\\s+-\\s+${escapeRegExp(source.name)}\\s*$`,'i');
@@ -140,7 +166,8 @@ async function tryExternalNewsFallback(source:OnlineSource,targetUrl:string,scop
   try{
     const {response,body}=await fetchText(url,10000);
     if(!response.ok){console.info({...diag,stage:'google_news',httpStatus:response.status,reason:'RSS_HTTP_ERROR'},'online collector fallback diagnostic');return[]}
-    const candidates=parseGoogleNewsFeed(body,source,scope);
+    const parsed=parseGoogleNewsFeed(body,source,scope);
+    const candidates=await resolveGoogleNewsCandidates(parsed,targetUrl);
     const publisherResolved=candidates.filter(item=>samePublisherDomain(item.url,targetUrl)).length;
     console.info({...diag,stage:'google_news_candidates',candidates:candidates.length,publisherResolved},'online collector fallback diagnostic');
     if(!candidates.length)return[];
