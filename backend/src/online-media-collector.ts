@@ -134,7 +134,19 @@ async function tryExternalNewsFallback(source:OnlineSource,targetUrl:string,scop
     const {response,body}=await fetchText(url,10000);
     if(!response.ok)return[];
     const candidates=parseGoogleNewsFeed(body,source,scope);
-    return await verifyCandidates(candidates,scope);
+    if(!candidates.length)return[];
+
+    // Google News RSS links can resolve through an interstitial instead of the
+    // publisher. Prefer the publisher URL embedded in the RSS description
+    // before the normal verification gate. This is generic for every source.
+    const domain=sourceDomain(targetUrl)||sourceDomain(source.url);
+    const resolved=candidates.map(candidate=>{
+      const description=candidate.excerpt||'';
+      const hrefs=[...description.matchAll(/https?:\/\/[^\s"'<>]+/gi)].map(m=>m[0].replace(/&amp;/gi,'&'));
+      const publisher=hrefs.find(href=>sourceDomain(href)===domain||sourceDomain(href).endsWith(\`.\${domain}\`));
+      return publisher?{...candidate,url:publisher}:candidate;
+    });
+    return await verifyCandidates(resolved,scope);
   }catch{return[]}
 }
 function meta(html:string,key:string){const patterns=[new RegExp(`<meta[^>]+(?:property|name)=["']${key}["'][^>]+content=["']([^"']+)["']`,'i'),new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+(?:property|name)=["']${key}["'][^>]*>`,'i')];for(const p of patterns){const v=html.match(p)?.[1];if(v)return stripHtml(v)}return undefined}
