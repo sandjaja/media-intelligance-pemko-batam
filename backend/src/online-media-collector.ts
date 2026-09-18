@@ -186,7 +186,8 @@ async function tryExternalNewsFallback(source:OnlineSource,targetUrl:string,scop
     const publisherResolved=candidates.filter(item=>samePublisherDomain(item.url,targetUrl)).length;
     console.info({...diag,stage:'google_news_candidates',candidates:candidates.length,publisherResolved},'online collector fallback diagnostic');
     if(!candidates.length)return[];
-    const verified=await verifyCandidates(candidates,scope);
+    const fallbackCandidates=candidates.map(item=>samePublisherDomain(item.url,targetUrl)?{...item,fallbackEvidence:'GOOGLE_NEWS_RSS' as const,expectedPublisherUrl:targetUrl}:item);
+    const verified=await verifyCandidates(fallbackCandidates,scope);
     console.info({...diag,stage:'google_news_verified',candidates:candidates.length,publisherResolved,verified:verified.length},'online collector fallback diagnostic');
     return verified;
   }catch(error){console.info({...diag,stage:'google_news',reason:'EXCEPTION',error:error instanceof Error?error.message:String(error)},'online collector fallback diagnostic');return[]}
