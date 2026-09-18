@@ -3,7 +3,7 @@ import type { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
-import { rebuildOnlineStoryClusters } from './online-story-clustering.js';
+import { rebuildOnlineStoryClusters, clusterNewOnlineArticles } from './online-story-clustering.js';
 
 declare module 'fastify' { interface FastifyRequest { onlineStoryAuth?: AuthorizationContext } }
 const canRebuild=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
@@ -36,6 +36,12 @@ export async function registerOnlineStoryClusterRoutes(app:FastifyInstance,pool:
     const row=(await pool.query(`SELECT c.id cluster_id,c.canonical_title,c.member_count,c.source_count,c.engine_version,json_agg(json_build_object('article_id',a.id,'title',a.title,'source_name',ms.name,'published_at',a.published_at,'similarity_score',m.similarity_score,'similarity_type',m.similarity_type) ORDER BY a.published_at,a.id) members FROM online_story_cluster_members x JOIN online_story_clusters c ON c.id=x.cluster_id JOIN online_story_cluster_members m ON m.cluster_id=c.id JOIN articles a ON a.id=m.article_id LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE x.article_id=$1 GROUP BY c.id`,[id.data])).rows[0];
     if(!row)return reply.code(404).send({error:'ARTICLE_NOT_CLUSTERED'});
     return{data:row};
+  });
+
+  app.post('/api/online/story-clusters/incremental',{preHandler:auth},async(request,reply)=>{
+    const ctx=request.onlineStoryAuth!;if(!canRebuild(ctx))return reply.code(403).send({error:'STORY_CLUSTER_UPDATE_REQUIRES_HUMAS_OR_SUPER_ADMIN'});
+    const body=z.object({days:z.coerce.number().int().min(1).max(30).default(7),limit:z.coerce.number().int().min(1).max(500).default(200)}).safeParse(request.body??{});if(!body.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+    const result=await clusterNewOnlineArticles(pool,body.data.days,body.data.limit);return{ok:true,result};
   });
 
   app.post('/api/online/story-clusters/rebuild',{preHandler:auth},async(request,reply)=>{
