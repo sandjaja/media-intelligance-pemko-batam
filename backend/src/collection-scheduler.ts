@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
-import { ingestSource } from './ingestion.js';
+import { runOnlineSourceCollection } from './online-article-moderation-routes.js';
+import { rebuildOnlineStoryClusters } from './online-story-clustering.js';
 import { collectOwnedWebsiteAccount } from './website-collector.js';
 import { rebuildOwnedContentClusters } from './owned-content-clustering.js';
 
@@ -12,14 +13,20 @@ export async function getCollectionConfig(pool:Pool){
 }
 
 async function collectOnline(pool:Pool){
-  // Use the same per-source runner as the Media Online "Ambil Berita Terbaru" action.
+  // Scheduler and the Media Online action share one per-source collection runner.
+  const organizations=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 2`)).rows;
+  if(organizations.length!==1)throw new Error('ACTIVE_ORGANIZATION_UNRESOLVED');
+  const orgId=Number(organizations[0].id);
   const {rows}=await pool.query(`SELECT id,name,url,tier,active,category FROM media_sources WHERE active=true AND url IS NOT NULL AND lower(category)='online' ORDER BY tier ASC,name ASC`);
   const results:Record<string,unknown>[]=[];
+  let inserted=0;
   for(const source of rows){
-    try{results.push({source:source.name,sourceId:String(source.id),collector:'online-hybrid-v5-dynamic-scope',...(await ingestSource(pool,source))})}
-    catch(error){results.push({source:source.name,sourceId:String(source.id),collector:'online-hybrid-v5-dynamic-scope',error:error instanceof Error?error.message:String(error)})}
+    try{const result=await runOnlineSourceCollection(pool,source,orgId);inserted+=Number(result.inserted||0);results.push(result)}
+    catch(error){results.push({source:source.name,sourceId:String(source.id),collector:'online-interactive-v13-shared-runner',error:error instanceof Error?error.message:String(error)})}
   }
-  return results;
+  let clustering:any=null;
+  if(inserted>0){try{clustering=await rebuildOnlineStoryClusters(pool)}catch(error){clustering={error:error instanceof Error?error.message:String(error)}}}
+  return {results,clustering};
 }
 
 async function collectOwned(pool:Pool){
@@ -35,7 +42,8 @@ async function collectOwned(pool:Pool){
   return {accounts:rows.length,succeeded,failed,results,clustering};
 }
 
-function summarizeOnline(results:Record<string,unknown>[]){
+function summarizeOnline(batch:{results:Record<string,unknown>[],clustering:any}){
+  const results=batch.results;
   return {
     sources:results.length,
     succeeded:results.filter(x=>!x.error&&!x.skipped).length,
@@ -43,7 +51,8 @@ function summarizeOnline(results:Record<string,unknown>[]){
     fetched:results.reduce((n,x)=>n+(typeof x.fetched==='number'?x.fetched:0),0),
     inserted:results.reduce((n,x)=>n+(typeof x.inserted==='number'?x.inserted:0),0),
     duplicateSkipped:results.reduce((n,x)=>n+(typeof x.duplicateSkipped==='number'?x.duplicateSkipped:0),0),
-    results
+    results,
+    clustering:batch.clustering
   };
 }
 
