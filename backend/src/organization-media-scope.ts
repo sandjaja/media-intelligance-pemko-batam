@@ -68,5 +68,16 @@ export function classifyArticleOrganizationScope(article:OnlineArticle,scope:Org
   return{status:'OUT_OF_SCOPE',reason:'headline has no organization/city/district/internal-actor scope term',matchedTerms:[]};
 }
 
+export type OrganizationScopeTextInput={title?:string|null;content?:string|null};
+
+/**
+ * Shared scope decision for non-article sources such as public social conversation.
+ * Uses the same database-backed organization scope and evidence policy as Media Online.
+ */
+export function classifyTextOrganizationScope(input:OrganizationScopeTextInput,scope:OrganizationMediaScope):OrganizationScopeDecision{
+ const title=String(input.title||input.content||'').trim();
+ return classifyArticleOrganizationScope({title} as OnlineArticle,scope);
+}
+
 export function isArticleInOrganizationScope(article:OnlineArticle,scope:OrganizationMediaScope):boolean{return classifyArticleOrganizationScope(article,scope).status!=='OUT_OF_SCOPE';}
 export function filterArticlesByOrganizationScope(articles:OnlineArticle[],scope:OrganizationMediaScope|null):OnlineArticle[]{if(!scope)return[];return articles.filter(article=>classifyArticleOrganizationScope(article,scope).status==='RELEVANT');}
