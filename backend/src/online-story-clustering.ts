@@ -61,7 +61,7 @@ export async function clusterNewOnlineArticles(pool:Pool,days=7,limit=200){
   try{
     await client.query('BEGIN');
     for(const a of rows){
-      const candidates=(await client.query<Article & {cluster_id:string}>(`SELECT c.id cluster_id,a.id,a.source_id,ms.name source_name,a.title,a.summary,a.content,a.published_at,a.created_at FROM online_story_clusters c JOIN online_story_cluster_members m ON m.cluster_id=c.id JOIN articles a ON a.id=m.article_id JOIN media_sources ms ON ms.id=a.source_id WHERE COALESCE(c.last_published_at,c.created_at)>=NOW()-INTERVAL '5 days' ORDER BY c.last_published_at DESC,m.similarity_score DESC LIMIT 500`)).rows;
+      const candidates=(await client.query<Article & {cluster_id:string}>(`SELECT c.id cluster_id,a.id,a.source_id,ms.name source_name,a.title,a.summary,a.content,a.published_at,a.created_at FROM online_story_clusters c JOIN online_story_cluster_members m ON m.cluster_id=c.id JOIN articles a ON a.id=m.article_id JOIN media_sources ms ON ms.id=a.source_id WHERE c.status='ACTIVE' AND COALESCE(c.last_published_at,c.created_at)>=NOW()-INTERVAL '5 days' ORDER BY c.last_published_at DESC,m.similarity_score DESC LIMIT 500`)).rows;
       let bestRow:(Article & {cluster_id:string})|null=null,bestSignal:Similarity|null=null;
       for(const candidate of candidates){const s=storySimilarity(a,candidate);if(classify(s)&&s.score>0&&(!bestSignal||s.score>bestSignal.score)){bestRow=candidate;bestSignal=s;}}
       if(bestRow&&bestSignal){
