@@ -2,13 +2,15 @@ import crypto from 'node:crypto';
 import type { Pool } from 'pg';
 import { analyzeArticle as analyzeCoreArticle, parseKeywordQuery } from './media-intelligence-core.js';
 import { analyzeSocialRoutingV16 } from './social-v16-adapter.js';
-import { classifyTextOrganizationScope, loadOrganizationMediaScope } from './organization-media-scope.js';
+import { loadOrganizationMediaScope } from './organization-media-scope.js';
+import { classifySocialOrganizationScope } from './social-organization-scope.js';
+import type { SocialConversationContext } from './social-context-adapter.js';
 
 export type SocialPlatform = 'instagram'|'facebook'|'tiktok'|'x'|'youtube'|'website'|'threads'|'other';
 export type SocialContentType = 'post'|'comment'|'reply'|'video'|'short'|'reel'|'story'|'live'|'article'|'other';
 
 export type SocialCandidate = {
-  platform: SocialPlatform; externalId?: string|null; contentType?: SocialContentType; sourceKind?: 'owned'|'external'|'manual'; ownedAccountId?: number|null; opdId?: number|null; authorName?: string|null; authorHandle?: string|null; authorProfileUrl?: string|null; canonicalUrl?: string|null; title?: string|null; content?: string|null; language?: string|null; publishedAt?: string|Date|null; collector?: string|null; rawPayload?: unknown; metadata?: unknown;
+  platform: SocialPlatform; externalId?: string|null; contentType?: SocialContentType; sourceKind?: 'owned'|'external'|'manual'; ownedAccountId?: number|null; opdId?: number|null; authorName?: string|null; authorHandle?: string|null; authorProfileUrl?: string|null; canonicalUrl?: string|null; title?: string|null; content?: string|null; language?: string|null; publishedAt?: string|Date|null; collector?: string|null; rawPayload?: unknown; metadata?: unknown; context?: SocialConversationContext|null;
 };
 const normalized=(value:string)=>value.toLowerCase().replace(/\s+/g,' ').trim();
 
@@ -20,9 +22,10 @@ export function socialContentHash(candidate:SocialCandidate){
 export async function ingestSocialCandidate(pool:Pool,candidate:SocialCandidate,defaultCollector='social-batch'){
  const scope=await loadOrganizationMediaScope(pool);
  if(!scope)throw new Error('ACTIVE_ORGANIZATION_UNRESOLVED');
- const scopeDecision=classifyTextOrganizationScope({title:candidate.title,content:candidate.content},scope);
+ const scopeDecision=classifySocialOrganizationScope({title:candidate.title,content:candidate.content,context:candidate.context},scope);
  if(candidate.sourceKind!=='owned'&&scopeDecision.status!=='RELEVANT')return{skipped:true,reason:'ORGANIZATION_SCOPE_'+scopeDecision.status,scopeDecision,platform:candidate.platform,externalId:candidate.externalId??null};
- const routing=await analyzeSocialRoutingV16(pool,{title:candidate.title,content:candidate.content});
+ const routingContent=[candidate.context?.parentContent?.title,candidate.context?.parentContent?.content,candidate.context?.parentComment?.content,candidate.content].filter(Boolean).join(' ');
+ const routing=await analyzeSocialRoutingV16(pool,{title:candidate.title,content:routingContent});
  const matchedKeywords=routing.keyword?[routing.keyword]:[];
  const query=parseKeywordQuery(matchedKeywords.join(' | '));
  const analysis=analyzeCoreArticle({
@@ -38,7 +41,7 @@ export async function ingestSocialCandidate(pool:Pool,candidate:SocialCandidate,
  },query,1);
  const contentHash=socialContentHash(candidate),publishedAt=candidate.publishedAt?new Date(candidate.publishedAt):null;
  const curationStatus=candidate.sourceKind==='owned'&&candidate.platform==='website'?'candidate':null;
- const metadata={...(candidate.metadata&&typeof candidate.metadata==='object'&&!Array.isArray(candidate.metadata)?candidate.metadata as Record<string,unknown>:{}),v16Routing:routing};
+ const metadata={...(candidate.metadata&&typeof candidate.metadata==='object'&&!Array.isArray(candidate.metadata)?candidate.metadata as Record<string,unknown>:{}),socialContext:candidate.context??null,v16Routing:routing};
  const values=[candidate.platform,candidate.externalId??null,candidate.contentType??'post',candidate.sourceKind??'external',candidate.ownedAccountId??null,routing.primaryOpdId,candidate.authorName??null,candidate.authorHandle??null,candidate.authorProfileUrl??null,candidate.canonicalUrl??null,candidate.title??null,candidate.content??null,candidate.language??null,publishedAt,analysis.sentiment,analysis.sentimentScore,analysis.importanceScore,analysis.impactScore,analysis.riskScore,analysis.riskLevel,contentHash,candidate.collector??defaultCollector,JSON.stringify(candidate.rawPayload??{}),JSON.stringify(metadata),routing.routingStatus==='ROUTED'?'classified':'captured',curationStatus];
  const columns=`platform,external_id,content_type,source_kind,owned_account_id,opd_id,author_name,author_handle,author_profile_url,canonical_url,title,content,language,published_at,sentiment,sentiment_score,importance_score,influence_score,risk_score,risk_level,content_hash,collector,raw_payload,metadata,processing_status,curation_status`,placeholders=values.map((_,i)=>`$${i+1}`).join(',');
  const update=`content_type=EXCLUDED.content_type,source_kind=EXCLUDED.source_kind,owned_account_id=EXCLUDED.owned_account_id,opd_id=EXCLUDED.opd_id,author_name=EXCLUDED.author_name,author_handle=EXCLUDED.author_handle,author_profile_url=EXCLUDED.author_profile_url,canonical_url=EXCLUDED.canonical_url,title=EXCLUDED.title,content=EXCLUDED.content,language=EXCLUDED.language,published_at=EXCLUDED.published_at,sentiment=EXCLUDED.sentiment,sentiment_score=EXCLUDED.sentiment_score,importance_score=EXCLUDED.importance_score,influence_score=EXCLUDED.influence_score,risk_score=EXCLUDED.risk_score,risk_level=EXCLUDED.risk_level,collector=EXCLUDED.collector,raw_payload=EXCLUDED.raw_payload,metadata=EXCLUDED.metadata,processing_status=EXCLUDED.processing_status,updated_at=now()`;
