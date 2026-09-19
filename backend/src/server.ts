@@ -109,8 +109,15 @@ app.post('/api/social/youtube-shorts/run',{preHandler:[requireAuth,requireRole('
   publishedAfter:z.string().datetime().optional()
  }).safeParse(request.body);
  if(!parsed.success)return reply.code(400).send({error:'INVALID_YOUTUBE_SHORTS_REQUEST'});
- if(!process.env.YOUTUBE_API_KEY)return reply.code(503).send({error:'YOUTUBE_API_KEY_NOT_CONFIGURED'});
+ const org=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 1`)).rows[0];
+ if(!org)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ const credential=(await pool.query(`SELECT c.credential_ciphertext,c.enabled FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id WHERE c.organization_id=$1 AND p.code='youtube' LIMIT 1`,[org.id])).rows[0];
+ if(!credential)return reply.code(503).send({error:'YOUTUBE_CREDENTIAL_NOT_CONFIGURED'});
+ if(!credential.enabled)return reply.code(409).send({error:'YOUTUBE_INTEGRATION_DISABLED'});
+ let apiKey:string;
+ try{apiKey=decryptIntegrationCredential(credential.credential_ciphertext);}catch{return reply.code(503).send({error:'YOUTUBE_CREDENTIAL_DECRYPT_FAILED'});}
  const result=await runYouTubeShortsCollection(pool,{
+  apiKey,
   query:parsed.data.query,
   maxResults:parsed.data.maxResults,
   publishedAfter:parsed.data.publishedAfter
