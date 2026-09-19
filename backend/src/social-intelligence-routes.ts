@@ -32,6 +32,8 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     }
   };
 
+  const manager = [auth, requireWrite];
+
   const scopedOpd = (ctx: AuthorizationContext, requested?: string) =>
     hasPermission(ctx, 'platform.admin') || hasPermission(ctx, 'intelligence.read.all')
       ? (requested ?? null)
