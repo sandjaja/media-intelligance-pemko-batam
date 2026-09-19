@@ -55,7 +55,7 @@ app.get('/api/admin/integrations',{preHandler:[requireAuth,requireRole('admin')]
 });
 app.put('/api/admin/integrations/:code/settings',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
  const code=z.string().regex(/^[a-z0-9_-]+$/).safeParse((request.params as any).code);
- const body=z.object({query:z.string().trim().min(2).max(120),maxResults:z.coerce.number().int().min(1).max(25)}).safeParse(request.body);
+ const body=z.object({query:z.string().trim().min(2).max(120).refine(v=>!/^\d+$/.test(v),{message:'Query must contain text'}),maxResults:z.coerce.number().int().min(1).max(25)}).safeParse(request.body);
  if(!code.success||!body.success)return reply.code(400).send({error:'INVALID_INTEGRATION_SETTINGS'});
  const orgs=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 2`)).rows;
  if(orgs.length!==1)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
