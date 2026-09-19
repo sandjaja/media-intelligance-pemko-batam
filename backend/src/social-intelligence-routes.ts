@@ -201,13 +201,14 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     const parsed=z.object({opdId:z.string().regex(/^\d+$/).optional(),platform:platformSchema.optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),from:z.string().optional(),to:z.string().optional(),days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7)}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
     const params:unknown[]=[],where:string[]=[`source_kind='external'`];const opdId=scopedOpd(request.socialAuth!,parsed.data.opdId);
-    if(opdId){params.push(opdId);where.push('opd_id=}
-    if(parsed.data.platform){params.push(parsed.data.platform);where.push('platform=}
-    if(parsed.data.sentiment){params.push(parsed.data.sentiment);where.push('sentiment=}
-    if(parsed.data.riskLevel){params.push(parsed.data.riskLevel);where.push('risk_level=}
-    if(parsed.data.from){params.push(parsed.data.from);where.push('published_at >= }
-    else {params.push(parsed.data.days);where.push('COALESCE(published_at,captured_at) >= NOW() - (}
-    if(parsed.data.to){params.push(parsed.data.to);where.push('published_at < }
+    const bind=(value:unknown)=>{params.push(value);return '$'+params.length;};
+    if(opdId)where.push(`opd_id=${bind(opdId)}`);
+    if(parsed.data.platform)where.push(`platform=${bind(parsed.data.platform)}`);
+    if(parsed.data.sentiment)where.push(`sentiment=${bind(parsed.data.sentiment)}`);
+    if(parsed.data.riskLevel)where.push(`risk_level=${bind(parsed.data.riskLevel)}`);
+    if(parsed.data.from)where.push(`published_at >= ${bind(parsed.data.from)}`);
+    else where.push(`COALESCE(published_at,captured_at) >= NOW() - (${bind(parsed.data.days)}::int * INTERVAL '1 day')`);
+    if(parsed.data.to)where.push(`published_at < ${bind(parsed.data.to)}`);
     const filter=where.length?'WHERE '+where.join(' AND '):'';
     const metrics=await pool.query(`SELECT COUNT(*)::int total_mentions,COUNT(*) FILTER(WHERE sentiment='positive')::int positive,COUNT(*) FILTER(WHERE sentiment='neutral')::int neutral,COUNT(*) FILTER(WHERE sentiment='negative')::int negative,COUNT(*) FILTER(WHERE risk_level IN ('high','critical'))::int high_risk,COALESCE(ROUND(AVG(risk_score),2),0) avg_risk,COALESCE(ROUND(AVG(influence_score),2),0) avg_influence FROM social_mentions ${filter}`,params);
     const byPlatform=await pool.query(`SELECT platform,COUNT(*)::int mentions,COUNT(*) FILTER(WHERE sentiment='negative')::int negative FROM social_mentions ${filter} GROUP BY platform ORDER BY mentions DESC`,params);
