@@ -19,7 +19,7 @@ document.addEventListener('click',async e=>{
  const save=e.target.closest?.('[data-save]'),test=e.target.closest?.('[data-test]'),toggle=e.target.closest?.('[data-toggle]');
  try{
   if(save){const credential=prompt('Masukkan credential/API key. Nilai ini akan dikirim ke backend untuk dienkripsi dan tidak ditampilkan kembali.');if(!credential)return;await api('/api/admin/integrations/'+encodeURIComponent(save.dataset.save)+'/credential',{method:'PUT',body:JSON.stringify({credential,enabled:false})});await load();}
-  if(test){test.disabled=true;await api('/api/admin/integrations/'+encodeURIComponent(test.dataset.test)+'/test',{method:'POST',body:JSON.stringify({})});await load();}
+  if(test){test.disabled=true;await api('/api/admin/integrations/'+encodeURIComponent(test.dataset.test)+'/test',{method:'POST',body:JSON.stringify({})});alert('Koneksi berhasil. Credential provider valid dan dapat digunakan.');await load();}
   if(toggle){toggle.disabled=true;await api('/api/admin/integrations/'+encodeURIComponent(toggle.dataset.toggle),{method:'PATCH',body:JSON.stringify({enabled:toggle.dataset.enabled!=='1'})});await load();}
  }catch(err){alert(err.message);await load();}
 });
