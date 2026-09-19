@@ -61,7 +61,9 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
       riskLevel: z.enum(['low','medium','high','critical']).optional(),
       from: z.string().optional(),
       to: z.string().optional(),
-      limit: z.coerce.number().int().min(1).max(200).default(50),
+      days: z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7),
+      page: z.coerce.number().int().min(1).default(1),
+      limit: z.coerce.number().int().min(1).max(50).default(10),
     }).safeParse(request.query);
     if (!parsed.success) return reply.code(400).send({ error: 'INVALID_QUERY' });
 
@@ -72,13 +74,16 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     if (parsed.data.platform) { params.push(parsed.data.platform); where.push(`sm.platform=$${params.length}`); }
     if (parsed.data.sentiment) { params.push(parsed.data.sentiment); where.push(`sm.sentiment=$${params.length}`); }
     if (parsed.data.riskLevel) { params.push(parsed.data.riskLevel); where.push(`sm.risk_level=$${params.length}`); }
-    if (parsed.data.from) { params.push(parsed.data.from); where.push(`sm.published_at >= $${params.length}`); }
+    if (parsed.data.from) { params.push(parsed.data.from); where.push(`sm.published_at >= ${params.length}`); }
+    else { params.push(parsed.data.days); where.push(`COALESCE(sm.published_at,sm.captured_at) >= NOW() - (${params.length}::int * INTERVAL '1 day')`); }
     if (parsed.data.to) { params.push(parsed.data.to); where.push(`sm.published_at < $${params.length}`); }
     if (parsed.data.keywordId) {
       params.push(parsed.data.keywordId);
       where.push(`EXISTS (SELECT 1 FROM social_mention_keywords smk WHERE smk.mention_id=sm.id AND smk.keyword_id=$${params.length})`);
     }
-    params.push(parsed.data.limit);
+    const countParams=[...params];
+    const total=Number((await pool.query(`SELECT COUNT(*)::int total FROM social_mentions sm ${where.length ? 'WHERE ' + where.join(' AND ') : ''}`,countParams)).rows[0]?.total||0);
+    params.push(parsed.data.limit); const limitParam=params.length; params.push((parsed.data.page-1)*parsed.data.limit); const offsetParam=params.length;
     const { rows } = await pool.query(
       `SELECT sm.*,o.name opd_name,osa.account_name owned_account_name,osa.handle owned_account_handle
          FROM social_mentions sm
@@ -86,10 +91,10 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
          LEFT JOIN owned_social_accounts osa ON osa.id=sm.owned_account_id
          ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
          ORDER BY sm.risk_score DESC, sm.published_at DESC NULLS LAST, sm.captured_at DESC
-         LIMIT $${params.length}`,
+         LIMIT ${limitParam} OFFSET ${offsetParam}`,
       params,
     );
-    return { data: rows };
+    return { data: rows, pagination:{page:parsed.data.page,limit:parsed.data.limit,total,totalPages:Math.max(1,Math.ceil(total/parsed.data.limit))} };
   });
 
   app.post('/api/social/mentions', { preHandler: [auth, requireWrite] }, async (request, reply) => {
