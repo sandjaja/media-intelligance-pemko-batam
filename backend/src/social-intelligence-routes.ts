@@ -206,6 +206,12 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   };
   const auditConversation=async(client:any,userId:string,action:string,metadata:any)=>client.query('INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,$2,$3::jsonb)',[userId,action,JSON.stringify(metadata)]);
 
+  app.get('/api/social/conversation-clusters',{preHandler:auth},async(request,reply)=>{
+    const parsed=z.object({days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7)}).safeParse(request.query);if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
+    const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
+    const {rows}=await pool.query(`SELECT c.id,c.canonical_title,c.taxonomy_id,c.keyword_id,c.member_count,c.platform_count,c.origin_mode,c.status,c.first_published_at,c.last_published_at,COALESCE(jsonb_agg(jsonb_build_object('id',sm.id,'platform',sm.platform,'title',sm.title,'content',sm.content,'authorName',sm.author_name,'authorHandle',sm.author_handle,'publishedAt',sm.published_at,'capturedAt',sm.captured_at,'sentiment',sm.sentiment,'riskLevel',sm.risk_level,'riskScore',sm.risk_score,'assignmentMode',cm.assignment_mode) ORDER BY COALESCE(sm.published_at,sm.captured_at) DESC) FILTER(WHERE sm.id IS NOT NULL),'[]'::jsonb) members FROM social_conversation_clusters c LEFT JOIN social_conversation_cluster_members cm ON cm.cluster_id=c.id LEFT JOIN social_mentions sm ON sm.id=cm.mention_id WHERE c.organization_id=$1 AND c.status='ACTIVE' AND COALESCE(c.last_published_at,c.updated_at)>=NOW()-($2::int*INTERVAL '1 day') GROUP BY c.id ORDER BY c.member_count DESC,c.last_published_at DESC`,[organizationId,parsed.data.days]);return{data:rows};
+  });
+
   app.post('/api/social/conversation-clusters/incremental',{preHandler:manager},async(request,reply)=>{
     const body=z.object({days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7)}).safeParse(request.body??{});
     if(!body.success)return reply.code(400).send({error:'INVALID_REQUEST'});
