@@ -207,9 +207,21 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   const auditConversation=async(client:any,userId:string,action:string,metadata:any)=>client.query('INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,$2,$3::jsonb)',[userId,action,JSON.stringify(metadata)]);
 
   app.get('/api/social/conversation-clusters',{preHandler:auth},async(request,reply)=>{
-    const parsed=z.object({days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7),platform:platformSchema.optional(),opdId:z.string().regex(/^\\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),routingStatus:z.enum(['ROUTED','UNROUTED']).optional()}).safeParse(request.query);if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
+    const parsed=z.object({days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7),platform:platformSchema.optional(),opdId:z.string().regex(/^\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),routingStatus:z.enum(['ROUTED','UNROUTED']).optional()}).safeParse(request.query);
+    if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
     const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
-    const params:unknown[]=[organizationId,parsed.data.days],memberWhere:string[]=[`COALESCE(sm.published_at,sm.captured_at)>=NOW()-($2::int*INTERVAL '1 day')`];const bind=(v:unknown)=>{params.push(v);return '
+    const params:unknown[]=[organizationId,parsed.data.days],memberWhere:string[]=["COALESCE(sm.published_at,sm.captured_at)>=NOW()-($2::int*INTERVAL '1 day')"];
+    const bind=(v:unknown)=>{params.push(v);return '$'+params.length;};
+    const opdId=scopedOpd(request.socialAuth!,parsed.data.opdId);
+    if(opdId)memberWhere.push(`sm.opd_id=${bind(opdId)}`);
+    if(parsed.data.platform)memberWhere.push(`sm.platform=${bind(parsed.data.platform)}`);
+    if(parsed.data.sentiment)memberWhere.push(`sm.sentiment=${bind(parsed.data.sentiment)}`);
+    if(parsed.data.riskLevel)memberWhere.push(`sm.risk_level=${bind(parsed.data.riskLevel)}`);
+    if(parsed.data.routingStatus)memberWhere.push(`COALESCE(sm.metadata->'v16Routing'->>'routingStatus','UNROUTED')=${bind(parsed.data.routingStatus)}`);
+    const memberFilter=memberWhere.join(' AND ');
+    const {rows}=await pool.query(`SELECT c.id,c.canonical_title,c.taxonomy_id,c.keyword_id,c.origin_mode,c.status,MIN(COALESCE(sm.published_at,sm.captured_at)) first_published_at,MAX(COALESCE(sm.published_at,sm.captured_at)) last_published_at,COUNT(sm.id)::int member_count,COUNT(DISTINCT sm.platform)::int platform_count,COALESCE(jsonb_agg(jsonb_build_object('id',sm.id,'platform',sm.platform,'title',sm.title,'content',sm.content,'authorName',sm.author_name,'authorHandle',sm.author_handle,'publishedAt',sm.published_at,'capturedAt',sm.captured_at,'sentiment',sm.sentiment,'riskLevel',sm.risk_level,'riskScore',sm.risk_score,'assignmentMode',cm.assignment_mode) ORDER BY COALESCE(sm.published_at,sm.captured_at) DESC) FILTER(WHERE sm.id IS NOT NULL),'[]'::jsonb) members FROM social_conversation_clusters c JOIN social_conversation_cluster_members cm ON cm.cluster_id=c.id JOIN social_mentions sm ON sm.id=cm.mention_id AND ${memberFilter} WHERE c.organization_id=$1 AND c.status='ACTIVE' GROUP BY c.id HAVING COUNT(sm.id)>0 ORDER BY COUNT(sm.id) DESC,MAX(COALESCE(sm.published_at,sm.captured_at)) DESC`,params);
+    return{data:rows};
+  });
 
   app.post('/api/social/conversation-clusters/incremental',{preHandler:manager},async(request,reply)=>{
     const body=z.object({days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7)}).safeParse(request.body??{});
