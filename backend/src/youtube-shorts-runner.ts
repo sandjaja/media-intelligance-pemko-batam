@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { collectYouTubeShortCandidates, type YouTubeShortsCollectorOptions } from './youtube-shorts-collector.js';
+import { collectYouTubeShortCandidatesWithDiagnostics, type YouTubeShortsCollectorOptions, type YouTubeShortsDiagnostics } from './youtube-shorts-collector.js';
 import { ingestSocialBatch } from './social-collector.js';
 
 export type YouTubeShortsRunResult={
@@ -8,6 +8,7 @@ export type YouTubeShortsRunResult={
  failed:number;
  skipped:number;
  results:Record<string,unknown>[];
+ diagnostics:YouTubeShortsDiagnostics;
 };
 
 /**
@@ -16,8 +17,8 @@ export type YouTubeShortsRunResult={
  * provider run has been validated with authorized credentials.
  */
 export async function runYouTubeShortsCollection(pool:Pool,options:YouTubeShortsCollectorOptions):Promise<YouTubeShortsRunResult>{
- const candidates=await collectYouTubeShortCandidates(options);
- if(!candidates.length)return{received:0,succeeded:0,failed:0,skipped:0,results:[]};
+ const {candidates,diagnostics}=await collectYouTubeShortCandidatesWithDiagnostics(options);
+ if(!candidates.length)return{received:0,succeeded:0,failed:0,skipped:0,results:[],diagnostics};
  const ingested=await ingestSocialBatch(pool,candidates,'youtube-shorts');
  const results=ingested.results as Record<string,unknown>[];
  return{
@@ -25,6 +26,7 @@ export async function runYouTubeShortsCollection(pool:Pool,options:YouTubeShorts
   succeeded:ingested.succeeded,
   failed:ingested.failed,
   skipped:results.filter(r=>r.skipped===true).length,
-  results
+  results,
+  diagnostics
  };
 }
