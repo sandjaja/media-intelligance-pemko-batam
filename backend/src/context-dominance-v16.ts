@@ -13,7 +13,7 @@ async function organizationContext(pool:Pool):Promise<OrganizationContext|null>{
  const organizations=(await pool.query(`SELECT id,name,code FROM organizations WHERE active=true ORDER BY id LIMIT 2`)).rows;
  if(organizations.length!==1)return null;
  const organization=organizations[0];
- const branding=(await pool.query(`SELECT government_name,short_name,aliases,city_name,tagline FROM government_branding WHERE active=true ORDER BY id LIMIT 1`)).rows[0]??{};
+ const branding=(await pool.query(`SELECT government_name,short_name,aliases,city_name,tagline FROM government_branding WHERE is_active=true ORDER BY id LIMIT 1`)).rows[0]??{};
  const districts=(await pool.query(`SELECT name,code FROM districts WHERE organization_id=$1 AND active=true ORDER BY id`,[organization.id])).rows;
  const identity=new Set<string>();
  for(const raw of [organization.name,organization.code,branding.government_name,branding.short_name,...(Array.isArray(branding.aliases)?branding.aliases:[]),branding.city_name,branding.tagline]){
