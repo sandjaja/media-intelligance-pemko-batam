@@ -38,8 +38,8 @@ test('YouTube runner sends relevant contextual comment through ingestion while r
  t.after(()=>{globalThis.fetch=original;});
  const {pool,inserted}=dbFixture();
  const result=await runYouTubeShortsCollection(pool,{apiKey:'fixture-key',query:'parkir Kota Contoh'});
- assert.equal(result.received,2);
- assert.equal(result.skipped,1);
+ assert.equal(result.received,3);
+ assert.equal(result.skipped,2);
  const relevant=result.results.find((r:any)=>r.externalId==='relevant'||r.external_id==='relevant') as any;
  assert.ok(relevant,JSON.stringify(result.results));
  assert.equal(relevant.ok,true,JSON.stringify(relevant));
@@ -52,5 +52,5 @@ test('YouTube runner returns empty summary when provider finds no candidates',as
  t.after(()=>{globalThis.fetch=original;});
  const {pool}=dbFixture();
  const result=await runYouTubeShortsCollection(pool,{apiKey:'fixture-key',query:'contoh'});
- assert.deepEqual(result,{received:0,succeeded:0,failed:0,skipped:0,results:[]});
+ assert.deepEqual(result,{received:0,succeeded:0,failed:0,skipped:0,results:[],diagnostics:{searchedVideos:0,shortCandidates:0,videosWithComments:0,commentsCollected:0}});
 });
