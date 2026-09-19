@@ -23,7 +23,7 @@ export async function runYouTubeShortsCollection(pool:Pool,options:YouTubeShorts
  const results=ingested.results as Record<string,unknown>[];
  return{
   received:ingested.received,
-  succeeded:ingested.succeeded,
+  succeeded:results.filter(r=>r.ok===true&&r.skipped!==true).length,
   failed:ingested.failed,
   skipped:results.filter(r=>r.skipped===true).length,
   results,
