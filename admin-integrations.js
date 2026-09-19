@@ -12,17 +12,17 @@ async function load(){
   <div class="flex flex-wrap gap-2"><button data-save="${esc(p.code)}" class="px-3 py-2 rounded-lg bg-cyan-500 text-slate-950 font-black text-xs">Simpan Credential</button>
   <button data-test="${esc(p.code)}" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 font-bold text-xs" ${p.credential_hint?'':'disabled'}>Test Connection</button>
   <button data-toggle="${esc(p.code)}" data-enabled="${p.enabled?'1':'0'}" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 font-bold text-xs" ${p.credential_hint?'':'disabled'}>${p.enabled?'Nonaktifkan':'Aktifkan'}</button>
-  ${p.code==='youtube'?'<button data-collect-youtube class="px-3 py-2 rounded-lg bg-emerald-500 text-slate-950 font-black text-xs" '+(p.enabled?'':'disabled')+'>Uji Koleksi</button>':''}</div>
+  ${p.code==='youtube'?'<button data-social-settings="'+esc(p.code)+'" data-query="'+esc(p.settings?.query||'')+'" data-max="'+esc(p.settings?.maxResults||25)+'" class="px-3 py-2 rounded-lg bg-emerald-500 text-slate-950 font-black text-xs">Pengaturan Penarikan</button>':''}</div>
   ${p.last_error?'<p class="text-xs text-rose-400">'+esc(p.last_error)+'</p>':''}
  </article>`).join('')||'<div class="text-sm text-slate-500">Belum ada provider.</div>'}catch(e){box.innerHTML='<div class="text-sm text-rose-400">'+esc(e.message)+'</div>'}
 }
 document.addEventListener('click',async e=>{
- const save=e.target.closest?.('[data-save]'),test=e.target.closest?.('[data-test]'),toggle=e.target.closest?.('[data-toggle]'),collect=e.target.closest?.('[data-collect-youtube]');
+ const save=e.target.closest?.('[data-save]'),test=e.target.closest?.('[data-test]'),toggle=e.target.closest?.('[data-toggle]'),settings=e.target.closest?.('[data-social-settings]');
  try{
   if(save){const credential=prompt('Masukkan credential/API key. Nilai ini akan dikirim ke backend untuk dienkripsi dan tidak ditampilkan kembali.');if(!credential)return;await api('/api/admin/integrations/'+encodeURIComponent(save.dataset.save)+'/credential',{method:'PUT',body:JSON.stringify({credential,enabled:false})});await load();}
   if(test){test.disabled=true;await api('/api/admin/integrations/'+encodeURIComponent(test.dataset.test)+'/test',{method:'POST',body:JSON.stringify({})});alert('Koneksi berhasil. Credential provider valid dan dapat digunakan.');await load();}
   if(toggle){toggle.disabled=true;await api('/api/admin/integrations/'+encodeURIComponent(toggle.dataset.toggle),{method:'PATCH',body:JSON.stringify({enabled:toggle.dataset.enabled!=='1'})});await load();}
-  if(collect){collect.disabled=true;const query=prompt('Query uji koleksi YouTube Shorts:','Pemko Batam');if(!query){collect.disabled=false;return;}const {data}=await api('/api/social/youtube-shorts/run',{method:'POST',body:JSON.stringify({query,maxResults:3})});const d=data?.diagnostics||{};const failures=(data?.results||[]).filter(r=>r?.ok===false).slice(0,5).map(r=>'• '+(r.externalId||'tanpa-id')+': '+String(r.error||'UNKNOWN_ERROR').slice(0,180)).join('\n');alert('Uji koleksi selesai.\nVideo ditemukan: '+(d.searchedVideos??0)+'\nKandidat Shorts: '+(d.shortCandidates??0)+'\nVideo dengan komentar: '+(d.videosWithComments??0)+'\nKomentar dikoleksi: '+(d.commentsCollected??0)+'\nLolos ingestion: '+(data?.succeeded??0)+'\nSkipped: '+(data?.skipped??0)+' | Failed: '+(data?.failed??0)+(failures?'\n\nDetail gagal:\n'+failures:''));await load();}
+  if(settings){const query=prompt('Query penarikan Media Sosial:',settings.dataset.query||'');if(!query)return;const raw=prompt('Jumlah kandidat per penarikan (1-25):',settings.dataset.max||'25');if(raw===null)return;const maxResults=Number(raw);if(!Number.isInteger(maxResults)||maxResults<1||maxResults>25)throw new Error('Jumlah kandidat harus 1 sampai 25.');await api('/api/admin/integrations/'+encodeURIComponent(settings.dataset.socialSettings)+'/settings',{method:'PUT',body:JSON.stringify({query,maxResults})});alert('Pengaturan penarikan tersimpan. Manual dan otomatis akan memakai konfigurasi yang sama.');await load();}
  }catch(err){alert(err.message);await load();}
 });
 window.loadAdminIntegrations=load;
