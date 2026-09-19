@@ -1,4 +1,4 @@
-import { youtubeShortCommentToSocialCandidate, type YouTubeCommentInput, type YouTubeShortParent } from './youtube-shorts-adapter.js';
+import { youtubeShortCommentToSocialCandidate, youtubeShortToSocialCandidate, type YouTubeCommentInput, type YouTubeShortParent } from './youtube-shorts-adapter.js';
 import type { SocialCandidate } from './social-collector.js';
 import type { SocialDiscoveryContext } from './social-context-adapter.js';
 
@@ -50,6 +50,7 @@ export async function collectYouTubeShortCandidatesWithDiagnostics(options:YouTu
  const shortVideos=(details.items??[]).filter(looksLikeShort); let videosWithComments=0;
  for(const video of shortVideos){
   const parent=videoParent(video);
+  candidates.push(youtubeShortToSocialCandidate({video:parent,discovery,rawPayload:video}));
   const threads=await getJson('/commentThreads',{part:'snippet,replies',videoId:parent.videoId,maxResults:100,textFormat:'plainText'},apiKey);
   if((threads.items??[]).length)videosWithComments++;
   for(const thread of threads.items??[]){
@@ -69,7 +70,7 @@ export async function collectYouTubeShortCandidatesWithDiagnostics(options:YouTu
    }
   }
  }
- return{candidates,diagnostics:{searchedVideos:ids.length,shortCandidates:shortVideos.length,videosWithComments,commentsCollected:candidates.length}};
+ return{candidates,diagnostics:{searchedVideos:ids.length,shortCandidates:shortVideos.length,videosWithComments,commentsCollected:candidates.filter(c=>c.contentType==='comment'||c.contentType==='reply').length}};
 }
 
 export async function collectYouTubeShortCandidates(options:YouTubeShortsCollectorOptions):Promise<SocialCandidate[]>{
