@@ -3,6 +3,8 @@ import { runOnlineSourceCollection } from './online-article-moderation-routes.js
 import { clusterNewOnlineArticles } from './online-story-clustering.js';
 import { collectOwnedWebsiteAccount } from './website-collector.js';
 import { rebuildOwnedContentClusters } from './owned-content-clustering.js';
+import { runYouTubeShortsCollection } from './youtube-shorts-runner.js';
+import { decryptIntegrationCredential } from './integration-credentials.js';
 
 export type CollectionSource='online'|'owned'|'social';
 export type CollectionTrigger='SCHEDULED'|'MANUAL';
@@ -42,6 +44,19 @@ async function collectOwned(pool:Pool){
   return {accounts:rows.length,succeeded,failed,results,clustering};
 }
 
+async function collectSocial(pool:Pool){
+  const organizations=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 2`)).rows;
+  if(organizations.length!==1)throw new Error('ACTIVE_ORGANIZATION_UNRESOLVED');
+  const orgId=Number(organizations[0].id);
+  const row=(await pool.query(`SELECT c.credential_ciphertext,c.enabled,COALESCE(s.settings,'{}'::jsonb) settings FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id LEFT JOIN integration_settings s ON s.provider_id=p.id AND s.organization_id=c.organization_id WHERE c.organization_id=$1 AND p.code='youtube' LIMIT 1`,[orgId])).rows[0];
+  if(!row?.enabled)return {providers:1,succeeded:0,failed:0,results:[{provider:'youtube',skipped:true,reason:'YOUTUBE_INTEGRATION_DISABLED'}]};
+  const settings=row.settings||{}; const query=String(settings.query||settings.collectionQuery||'').trim();
+  if(query.length<2)return {providers:1,succeeded:0,failed:0,results:[{provider:'youtube',skipped:true,reason:'SOCIAL_COLLECTION_QUERY_NOT_CONFIGURED'}]};
+  const maxResults=Math.max(1,Math.min(25,Number(settings.maxResults||25)));
+  try{const result=await runYouTubeShortsCollection(pool,{apiKey:decryptIntegrationCredential(row.credential_ciphertext),query,maxResults});return {providers:1,succeeded:1,failed:0,results:[{provider:'youtube',query,maxResults,...result}]};}
+  catch(error){return {providers:1,succeeded:0,failed:1,results:[{provider:'youtube',query,error:error instanceof Error?error.message:String(error)}]};}
+}
+
 function summarizeOnline(batch:{results:Record<string,unknown>[],clustering:any}){
   const results=batch.results;
   return {
@@ -66,9 +81,9 @@ export async function runCollection(pool:Pool,trigger:CollectionTrigger,requeste
     const result:any={};
     if(sources.includes('online'))result.online=summarizeOnline(await collectOnline(pool));
     if(sources.includes('owned'))result.owned=await collectOwned(pool);
-    if(sources.includes('social'))result.social={skipped:true,reason:'SOCIAL_AUTOMATIC_COLLECTOR_NOT_READY'};
-    const failed=Number(result.online?.failed||0)+Number(result.owned?.failed||0);
-    const successful=(result.online?.succeeded||0)+(result.owned?.succeeded||0);
+    if(sources.includes('social'))result.social=await collectSocial(pool);
+    const failed=Number(result.online?.failed||0)+Number(result.owned?.failed||0)+Number(result.social?.failed||0);
+    const successful=(result.online?.succeeded||0)+(result.owned?.succeeded||0)+(result.social?.succeeded||0);
     const status=failed>0?(successful>0?'PARTIAL':'FAILED'):'SUCCESS';
     await pool.query(`UPDATE collection_scheduler_runs SET status=$2,finished_at=now(),result=$3::jsonb WHERE id=$1`,[runId,status,JSON.stringify(result)]);
     await pool.query(`UPDATE collection_scheduler_config SET last_run_at=now(),updated_at=updated_at WHERE id=1`);
