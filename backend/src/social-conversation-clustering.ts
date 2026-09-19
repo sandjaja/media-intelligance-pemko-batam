@@ -39,13 +39,25 @@ export async function persistSocialConversationClusters(pool:Pool,organizationId
   const client=await pool.connect();
   try{
     await client.query('BEGIN');
+    const system=(await client.query(`SELECT c.id,c.keyword_id,ARRAY_REMOVE(ARRAY_AGG(cm.mention_id::text),NULL) member_ids FROM social_conversation_clusters c LEFT JOIN social_conversation_cluster_members cm ON cm.cluster_id=c.id AND cm.assignment_mode='SYSTEM' WHERE c.organization_id=$1 AND c.status='ACTIVE' AND c.origin_mode='SYSTEM' GROUP BY c.id,c.keyword_id`,[organizationId])).rows;
+    const claimed=new Set<string>();
     for(const group of groups){
-      const existing=(await client.query(`SELECT id FROM social_conversation_clusters WHERE organization_id=$1 AND status='ACTIVE' AND origin_mode='SYSTEM' AND keyword_id IS NOT DISTINCT FROM $3 ORDER BY updated_at DESC LIMIT 1`,[organizationId,group.taxonomyId,group.keywordId])).rows[0];
+      // Same Master Keyword is the hard semantic gate. Existing SYSTEM cluster is
+      // reconciled by member overlap, allowing several conversations per keyword.
+      const memberIds=new Set(group.mentions.map(m=>String(m.id)));
+      const candidates=system.filter((x:any)=>String(x.keyword_id??'')===String(group.keywordId??'')&&!claimed.has(String(x.id)));
+      let existing:any=null,bestOverlap=0;
+      for(const candidate of candidates){
+        const overlap=(candidate.member_ids||[]).reduce((n:number,id:string)=>n+(memberIds.has(String(id))?1:0),0);
+        if(overlap>bestOverlap){existing=candidate;bestOverlap=overlap;}
+      }
+      // No overlap means this is a distinct conversation even with the same keyword.
       let clusterId=existing?.id;
       if(!clusterId){
         const ins=await client.query(`INSERT INTO social_conversation_clusters(organization_id,canonical_title,taxonomy_id,keyword_id,representative_mention_id,engine_version,origin_mode) VALUES($1,$2,$3,$4,$5,$6,'SYSTEM') RETURNING id`,[organizationId,group.keyword||group.taxonomyName,group.taxonomyId,group.keywordId,group.mentions[0]?.id??null,ENGINE]);
         clusterId=ins.rows[0].id;created++;
       }
+      claimed.add(String(clusterId));
       for(const mention of group.mentions){
         const current=(await client.query(`SELECT cm.cluster_id,cm.assignment_mode,c.organization_id FROM social_conversation_cluster_members cm JOIN social_conversation_clusters c ON c.id=cm.cluster_id WHERE cm.mention_id=$1`,[mention.id])).rows[0];
         if(current?.assignment_mode==='MANUAL')continue;
@@ -54,9 +66,8 @@ export async function persistSocialConversationClusters(pool:Pool,organizationId
         const result=await client.query(`INSERT INTO social_conversation_cluster_members(cluster_id,mention_id,similarity_score,similarity_type,matched_by,assignment_mode) VALUES($1,$2,1,'semantic',$3,'SYSTEM') ON CONFLICT(mention_id) DO NOTHING RETURNING mention_id`,[clusterId,mention.id,ENGINE+':v16.5']);
         attached+=result.rowCount??0;
       }
-      await client.query(`UPDATE social_conversation_clusters c SET member_count=x.member_count,platform_count=x.platform_count,representative_mention_id=COALESCE(c.representative_mention_id,x.representative_mention_id),first_published_at=x.first_published_at,last_published_at=x.last_published_at,engine_version=$2,updated_at=NOW() FROM (SELECT cm.cluster_id,COUNT(*)::int member_count,COUNT(DISTINCT sm.platform)::int platform_count,(ARRAY_AGG(sm.id ORDER BY COALESCE(sm.published_at,sm.captured_at),sm.id))[1] representative_mention_id,MIN(COALESCE(sm.published_at,sm.captured_at)) first_published_at,MAX(COALESCE(sm.published_at,sm.captured_at)) last_published_at FROM social_conversation_cluster_members cm JOIN social_mentions sm ON sm.id=cm.mention_id WHERE cm.cluster_id=$1 GROUP BY cm.cluster_id)x WHERE c.id=x.cluster_id`,[clusterId,ENGINE]);
     }
-    await client.query(`UPDATE social_conversation_clusters c SET member_count=x.member_count,platform_count=x.platform_count,representative_mention_id=x.representative_mention_id,first_published_at=x.first_published_at,last_published_at=x.last_published_at,updated_at=NOW() FROM (SELECT cm.cluster_id,COUNT(*)::int member_count,COUNT(DISTINCT sm.platform)::int platform_count,(ARRAY_AGG(sm.id ORDER BY COALESCE(sm.published_at,sm.captured_at),sm.id))[1] representative_mention_id,MIN(COALESCE(sm.published_at,sm.captured_at)) first_published_at,MAX(COALESCE(sm.published_at,sm.captured_at)) last_published_at FROM social_conversation_cluster_members cm JOIN social_mentions sm ON sm.id=cm.mention_id GROUP BY cm.cluster_id)x WHERE c.id=x.cluster_id AND c.organization_id=$1 AND c.origin_mode='SYSTEM'`,[organizationId]);
+    await client.query(`UPDATE social_conversation_clusters c SET member_count=x.member_count,platform_count=x.platform_count,representative_mention_id=x.representative_mention_id,first_published_at=x.first_published_at,last_published_at=x.last_published_at,engine_version=$2,status='ACTIVE',updated_at=NOW() FROM (SELECT cm.cluster_id,COUNT(*)::int member_count,COUNT(DISTINCT sm.platform)::int platform_count,(ARRAY_AGG(sm.id ORDER BY COALESCE(sm.published_at,sm.captured_at),sm.id))[1] representative_mention_id,MIN(COALESCE(sm.published_at,sm.captured_at)) first_published_at,MAX(COALESCE(sm.published_at,sm.captured_at)) last_published_at FROM social_conversation_cluster_members cm JOIN social_mentions sm ON sm.id=cm.mention_id GROUP BY cm.cluster_id)x WHERE c.id=x.cluster_id AND c.organization_id=$1 AND c.origin_mode='SYSTEM'`,[organizationId,ENGINE]);
     await client.query(`UPDATE social_conversation_clusters c SET member_count=0,platform_count=0,representative_mention_id=NULL,first_published_at=NULL,last_published_at=NULL,status='ARCHIVED',updated_at=NOW() WHERE c.organization_id=$1 AND c.origin_mode='SYSTEM' AND c.status='ACTIVE' AND NOT EXISTS(SELECT 1 FROM social_conversation_cluster_members cm WHERE cm.cluster_id=c.id)`,[organizationId]);
     await client.query('COMMIT');
   }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
