@@ -64,9 +64,10 @@ async function collectSocial(pool:Pool){
     catch(error){ingestionFailed++;allResults.push({ok:false,query,error:error instanceof Error?error.message:String(error)});}
   }
   const manualLocked=allResults.filter(x=>x.reason==='MANUAL_CLASSIFICATION_LOCKED').length;
-  const outOfScope=allResults.filter(x=>String(x.reason||'').startsWith('ORGANIZATION_SCOPE_')).length;
   const scopeReview=allResults.filter(x=>x.reason==='ORGANIZATION_SCOPE_REVIEW').length;
-  return {providers:1,succeeded:ingestionFailed<queries.length?1:0,failed:ingestionFailed>=queries.length?1:0,diagnostics:{discovery:'AUTOMATIC_ORGANIZATION_SCOPE',queries,maxResults,searchedVideos,shortCandidates,videosWithComments,commentsCollected,received,savedOrUpdated,skipped,ingestionFailed,manualLocked,outOfScope,scopeReview},results:[{provider:'youtube',queries,maxResults,results:allResults}]};
+  const outOfScope=allResults.filter(x=>x.reason==='ORGANIZATION_SCOPE_OUT_OF_SCOPE').length;
+  const ingestionErrors=allResults.filter(x=>x.ok===false).slice(0,5).map(x=>({platform:x.platform??'youtube',externalId:x.externalId??null,query:x.query??null,error:String(x.error||'UNKNOWN_ERROR').slice(0,240)}));
+  return {providers:1,succeeded:ingestionFailed<queries.length?1:0,failed:ingestionFailed>=queries.length?1:0,diagnostics:{discovery:'AUTOMATIC_ORGANIZATION_SCOPE',queries,maxResults,searchedVideos,shortCandidates,videosWithComments,commentsCollected,received,savedOrUpdated,skipped,ingestionFailed,manualLocked,outOfScope,scopeReview,ingestionErrors},results:[{provider:'youtube',queries,maxResults,results:allResults}]};
 }
 
 function summarizeOnline(batch:{results:Record<string,unknown>[],clustering:any}){
