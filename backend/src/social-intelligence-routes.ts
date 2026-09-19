@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { analyzeSocialRoutingV16 } from './social-v16-adapter.js';
+import { clusterSocialConversations } from './social-conversation-clustering.js';
 import { hasPermission, loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 
 declare module 'fastify' { interface FastifyRequest { socialAuth?: AuthorizationContext } }
@@ -202,11 +203,16 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     const parsed=z.object({days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7),platform:platformSchema.optional()}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
     const params:unknown[]=[parsed.data.days],where:string[]=["source_kind='external'","COALESCE(published_at,captured_at) >= NOW() - ($1::int * INTERVAL '1 day')"];
-    if(parsed.data.platform){params.push(parsed.data.platform);where.push(`platform=${params.length}`);}
+    if(parsed.data.platform){params.push(parsed.data.platform);where.push(`platform=$${params.length}`);}
     const filter='WHERE '+where.join(' AND ');
+    const mentions=await pool.query(`SELECT id::text,platform,title,content,published_at,captured_at,sentiment,risk_level,risk_score,metadata FROM social_mentions ${filter} ORDER BY COALESCE(published_at,captured_at) ASC,id ASC`,params);
     const trends=await pool.query(`SELECT date_trunc('day',COALESCE(published_at,captured_at))::date day,COUNT(*)::int mentions,COUNT(*) FILTER(WHERE sentiment='positive')::int positive,COUNT(*) FILTER(WHERE sentiment='neutral')::int neutral,COUNT(*) FILTER(WHERE sentiment='negative')::int negative,COUNT(*) FILTER(WHERE risk_level IN ('high','critical'))::int high_risk FROM social_mentions ${filter} GROUP BY 1 ORDER BY 1`,params);
-    const topics=await pool.query(`SELECT metadata->'v16Routing'->>'taxonomyId' taxonomy_id,metadata->'v16Routing'->>'taxonomyName' taxonomy_name,COUNT(*)::int mentions,COUNT(*) FILTER(WHERE sentiment='negative')::int negative,COUNT(*) FILTER(WHERE risk_level IN ('high','critical'))::int high_risk,COALESCE(ROUND(AVG(risk_score),2),0) avg_risk FROM social_mentions ${filter} AND metadata->'v16Routing'->>'routingStatus'='ROUTED' AND COALESCE(metadata->'v16Routing'->>'taxonomyName','')<>'' GROUP BY 1,2 ORDER BY mentions DESC,high_risk DESC,negative DESC LIMIT 10`,params);
-    return{trends:trends.rows,topics:topics.rows};
+    const clusters=clusterSocialConversations(mentions.rows).slice(0,10).map(c=>({
+      key:c.key,taxonomyId:c.taxonomyId,taxonomyName:c.taxonomyName,keywordId:c.keywordId,keyword:c.keyword,
+      mentions:c.mentions.length,platforms:c.platforms,platformCount:c.platforms.length,negative:c.negative,highRisk:c.highRisk,
+      representative:c.mentions[0]??null
+    }));
+    return{trends:trends.rows,clusters};
   });
 
   app.get('/api/social/summary', { preHandler: auth }, async (request, reply) => {
