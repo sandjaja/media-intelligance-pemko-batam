@@ -53,7 +53,7 @@ async function collectSocial(pool:Pool){
   const settings=row.settings||{}; const query=String(settings.query||settings.collectionQuery||'').trim();
   if(query.length<2)return {providers:1,succeeded:0,failed:0,results:[{provider:'youtube',skipped:true,reason:'SOCIAL_COLLECTION_QUERY_NOT_CONFIGURED'}]};
   const maxResults=Math.max(1,Math.min(25,Number(settings.maxResults||25)));
-  try{const result=await runYouTubeShortsCollection(pool,{apiKey:decryptIntegrationCredential(row.credential_ciphertext),query,maxResults});return {providers:1,succeeded:1,failed:0,results:[{provider:'youtube',query,maxResults,...result}]};}
+  try{const result=await runYouTubeShortsCollection(pool,{apiKey:decryptIntegrationCredential(row.credential_ciphertext),query,maxResults});const itemResults=result.results||[];return {providers:1,succeeded:1,failed:0,diagnostics:{query,maxResults,searchedVideos:result.diagnostics?.searchedVideos??0,shortCandidates:result.diagnostics?.shortCandidates??0,videosWithComments:result.diagnostics?.videosWithComments??0,commentsCollected:result.diagnostics?.commentsCollected??0,received:result.received,savedOrUpdated:result.succeeded,skipped:result.skipped,ingestionFailed:result.failed,manualLocked:itemResults.filter((x:any)=>x.reason==='MANUAL_CLASSIFICATION_LOCKED').length},results:[{provider:'youtube',query,maxResults,...result}]};}
   catch(error){return {providers:1,succeeded:0,failed:1,results:[{provider:'youtube',query,error:error instanceof Error?error.message:String(error)}]};}
 }
 
