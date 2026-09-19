@@ -40,6 +40,8 @@ test('YouTube runner sends relevant contextual comment through ingestion while r
  const result=await runYouTubeShortsCollection(pool,{apiKey:'fixture-key',query:'parkir Kota Contoh'});
  assert.equal(result.received,2);
  assert.equal(result.skipped,1);
+ const relevant=result.results.find((r:any)=>r.externalId==='relevant') as any;
+ assert.equal(relevant?.ok,true,JSON.stringify(relevant));
  assert.deepEqual(inserted,['relevant']);
 });
 
