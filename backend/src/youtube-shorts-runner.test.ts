@@ -14,6 +14,8 @@ function dbFixture(){
   if(sql.includes('FROM uptd WHERE organization_id='))return{rows:[]};
   if(sql.includes('FROM taxonomy_categories tc JOIN classification_sectors cs'))return{rows:[]};
   if(sql.includes('FROM keywords k JOIN keyword_taxonomy kt'))return{rows:[]};
+  if(sql.includes('FROM keyword_opd ko'))return{rows:[]};
+  if(sql.includes('FROM keywords k')||sql.includes('FROM keyword_taxonomy'))return{rows:[]};
   if(sql.includes('INSERT INTO social_mentions')){inserted.push(String(params?.[1]));return{rows:[{id:inserted.length,platform:'youtube',external_id:params?.[1],opd_id:null,sentiment:'neutral',risk_score:0,risk_level:'LOW',processing_status:'captured',curation_status:null}]};}
   if(sql.includes('INSERT INTO evidence_sources'))return{rows:[]};
   throw new Error('Unexpected DB query: '+sql);
