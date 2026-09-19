@@ -55,8 +55,8 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   app.get('/api/social/mentions', { preHandler: auth }, async (request, reply) => {
     const parsed = z.object({
       platform: platformSchema.optional(),
-      opdId: z.string().regex(/^\\d+$/).optional(),
-      keywordId: z.string().regex(/^\\d+$/).optional(),
+      opdId: z.string().regex(/^\d+$/).optional(),
+      keywordId: z.string().regex(/^\d+$/).optional(),
       sentiment: sentimentSchema.optional(),
       riskLevel: z.enum(['low','medium','high','critical']).optional(),
       from: z.string().optional(),
