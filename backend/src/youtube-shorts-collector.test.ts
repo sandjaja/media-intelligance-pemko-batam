@@ -17,10 +17,11 @@ test('YouTube provider normalizes comments and paginated replies without live AP
  };
  t.after(()=>{globalThis.fetch=original;});
  const out=await collectYouTubeShortCandidates({apiKey:'fixture-key',query:'parkir Kota Contoh'});
- assert.equal(out.length,3);
- assert.deepEqual(out.map(x=>x.externalId),['c1','r1','r2']);
- assert.equal(out[0].context?.parentContent?.externalId,'vid1');
- assert.equal(out[2].context?.parentComment?.externalId,'c1');
+ assert.equal(out.length,4);
+ assert.deepEqual(out.map(x=>x.externalId),['vid1','c1','r1','r2']);
+ assert.equal(out[0].contentType,'short');
+ assert.equal(out[1].context?.parentContent?.externalId,'vid1');
+ assert.equal(out[3].context?.parentComment?.externalId,'c1');
  assert.equal(out[0].context?.discovery?.query,'parkir Kota Contoh');
  assert.ok(calls.some(x=>x.startsWith('/youtube/v3/comments?')));
 });
