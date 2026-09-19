@@ -13,7 +13,7 @@ import { ingestEnabledSources } from './ingestion.js';
 import { registerAskIntelligence } from './ask-intelligence.js';
 import { registerCollectionSchedulerRoutes } from './collection-scheduler-routes.js';
 import { runYouTubeShortsCollection } from './youtube-shorts-runner.js';
-import { encryptIntegrationCredential, integrationCredentialHint } from './integration-credentials.js';
+import { decryptIntegrationCredential, encryptIntegrationCredential, integrationCredentialHint } from './integration-credentials.js';
 
 const env = { port: Number(process.env.PORT ?? 8080), databaseUrl: process.env.DATABASE_URL ?? '', jwtSecret: process.env.JWT_SECRET ?? '', accessTtl: process.env.ACCESS_TOKEN_TTL ?? '15m', refreshDays: Number(process.env.REFRESH_TOKEN_DAYS ?? 7), corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:3000', cookieSecure: process.env.COOKIE_SECURE === 'true' };
 if (!env.databaseUrl || !env.jwtSecret) throw new Error('DATABASE_URL and JWT_SECRET are required');
@@ -69,6 +69,28 @@ app.put('/api/admin/integrations/:code/credential',{preHandler:[requireAuth,requ
  RETURNING id,organization_id,provider_id,credential_hint,enabled,expires_at,last_status,updated_at`,[org.id,provider.id,encrypted,hint,body.data.enabled,body.data.expiresAt??null,request.user?.id]);
  await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'INTEGRATION_CREDENTIAL_UPDATED',$2)`,[request.user?.id,{provider:provider.code,organizationId:org.id,enabled:body.data.enabled}]);
  return{data:rows[0]};
+});
+app.post('/api/admin/integrations/:code/test',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
+ const code=z.string().regex(/^[a-z0-9_-]+$/).safeParse((request.params as any).code);
+ if(!code.success)return reply.code(400).send({error:'INVALID_INTEGRATION_PROVIDER'});
+ const org=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 1`)).rows[0];
+ if(!org)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ const row=(await pool.query(`SELECT c.id,c.credential_ciphertext,p.code FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id WHERE c.organization_id=$1 AND p.code=$2 LIMIT 1`,[org.id,code.data])).rows[0];
+ if(!row)return reply.code(404).send({error:'INTEGRATION_CREDENTIAL_NOT_FOUND'});
+ if(row.code!=='youtube')return reply.code(501).send({error:'INTEGRATION_TEST_NOT_IMPLEMENTED',provider:row.code});
+ let status:'healthy'|'error'='error'; let lastError:string|null=null;
+ try{
+  const key=decryptIntegrationCredential(row.credential_ciphertext);
+  const url=new URL('https://www.googleapis.com/youtube/v3/videos');
+  url.searchParams.set('part','id'); url.searchParams.set('id','dQw4w9WgXcQ'); url.searchParams.set('key',key);
+  const response=await fetch(url,{headers:{accept:'application/json'}});
+  if(!response.ok)throw new Error('YOUTUBE_API_HTTP_'+response.status);
+  status='healthy';
+ }catch(error){lastError=error instanceof Error?error.message:'YOUTUBE_API_TEST_FAILED';}
+ await pool.query(`UPDATE integration_credentials SET last_test_at=NOW(),last_status=$1,last_error=$2,updated_at=NOW() WHERE id=$3`,[status,lastError,row.id]);
+ await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'INTEGRATION_CONNECTION_TESTED',$2)`,[request.user?.id,{provider:row.code,organizationId:org.id,status}]);
+ if(status==='error')return reply.code(422).send({data:{provider:row.code,status,lastError}});
+ return{data:{provider:row.code,status}};
 });
 app.patch('/api/admin/integrations/:code',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
  const code=z.string().regex(/^[a-z0-9_-]+$/).safeParse((request.params as any).code);
