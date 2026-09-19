@@ -50,7 +50,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     if (!parsed.success) return reply.code(400).send({ error: 'INVALID_QUERY' });
 
     const params: unknown[] = [];
-    const where: string[] = [];
+    const where: string[] = [`sm.source_kind='external'`];
     const opdId = scopedOpd(request.socialAuth!, parsed.data.opdId);
     if (opdId) { params.push(opdId); where.push(`sm.opd_id=$${params.length}`); }
     if (parsed.data.platform) { params.push(parsed.data.platform); where.push(`sm.platform=$${params.length}`); }
@@ -164,7 +164,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   app.get('/api/social/summary', { preHandler: auth }, async (request, reply) => {
     const parsed=z.object({opdId:z.string().regex(/^\d+$/).optional(),from:z.string().optional(),to:z.string().optional()}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
-    const params:unknown[]=[],where:string[]=[];const opdId=scopedOpd(request.socialAuth!,parsed.data.opdId);
+    const params:unknown[]=[],where:string[]=[`source_kind='external'`];const opdId=scopedOpd(request.socialAuth!,parsed.data.opdId);
     if(opdId){params.push(opdId);where.push(`opd_id=$${params.length}`)}
     if(parsed.data.from){params.push(parsed.data.from);where.push(`published_at >= $${params.length}`)}
     if(parsed.data.to){params.push(parsed.data.to);where.push(`published_at < $${params.length}`)}
