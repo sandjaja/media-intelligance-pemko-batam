@@ -6,6 +6,7 @@ import { hasPermission, loadAuthorizationContext, type AuthorizationContext } fr
 import { ingestSocialBatch, type SocialCandidate } from './social-collector.js';
 import { collectOwnedWebsiteAccount } from './website-collector.js';
 import { rebuildOwnedContentClusters } from './owned-content-clustering.js';
+import { runCollection } from './collection-scheduler.js';
 
 declare module 'fastify' { interface FastifyRequest { socialIngestAuth?: AuthorizationContext } }
 
@@ -133,6 +134,13 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
       [ctx.id,JSON.stringify({accounts:accounts.length,succeeded,failed,results,clustering,durationMs:Date.now()-startedAt,routeVersion:'owned-websites-refresh-v1'})],
     );
     return reply.code(failed===accounts.length?422:failed?207:200).send({data:{accounts:accounts.length,succeeded,failed,results,clustering,durationMs:Date.now()-startedAt}});
+  });
+
+  app.post('/api/social/collection/run',{preHandler:[auth,requireWrite]},async(request,reply)=>{
+    const ctx=request.socialIngestAuth!;
+    const result=await runCollection(pool,'MANUAL',String(ctx.id),['social']);
+    await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'SOCIAL_MANUAL_COLLECTION',$2::jsonb)`,[ctx.id,JSON.stringify({runId:result.runId??null,status:result.status??null,skipped:result.skipped??false,reason:result.reason??null})]);
+    return reply.send({data:result});
   });
 
   app.get('/api/social/ingestion/status',{preHandler:auth},async(request)=>{
