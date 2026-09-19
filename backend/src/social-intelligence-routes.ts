@@ -198,6 +198,17 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     return reply.code(201).send({data:rows[0]});
   });
 
+  app.get('/api/social/conversation-insights', { preHandler: auth }, async (request, reply) => {
+    const parsed=z.object({days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7),platform:platformSchema.optional()}).safeParse(request.query);
+    if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
+    const params:unknown[]=[parsed.data.days],where:string[]=["source_kind='external'","COALESCE(published_at,captured_at) >= NOW() - ($1::int * INTERVAL '1 day')"];
+    if(parsed.data.platform){params.push(parsed.data.platform);where.push(`platform=${params.length}`);}
+    const filter='WHERE '+where.join(' AND ');
+    const trends=await pool.query(`SELECT date_trunc('day',COALESCE(published_at,captured_at))::date day,COUNT(*)::int mentions,COUNT(*) FILTER(WHERE sentiment='positive')::int positive,COUNT(*) FILTER(WHERE sentiment='neutral')::int neutral,COUNT(*) FILTER(WHERE sentiment='negative')::int negative,COUNT(*) FILTER(WHERE risk_level IN ('high','critical'))::int high_risk FROM social_mentions ${filter} GROUP BY 1 ORDER BY 1`,params);
+    const topics=await pool.query(`SELECT metadata->'v16Routing'->>'taxonomyId' taxonomy_id,metadata->'v16Routing'->>'taxonomyName' taxonomy_name,COUNT(*)::int mentions,COUNT(*) FILTER(WHERE sentiment='negative')::int negative,COUNT(*) FILTER(WHERE risk_level IN ('high','critical'))::int high_risk,COALESCE(ROUND(AVG(risk_score),2),0) avg_risk FROM social_mentions ${filter} AND metadata->'v16Routing'->>'routingStatus'='ROUTED' AND COALESCE(metadata->'v16Routing'->>'taxonomyName','')<>'' GROUP BY 1,2 ORDER BY mentions DESC,high_risk DESC,negative DESC LIMIT 10`,params);
+    return{trends:trends.rows,topics:topics.rows};
+  });
+
   app.get('/api/social/summary', { preHandler: auth }, async (request, reply) => {
     const parsed=z.object({opdId:z.string().regex(/^\d+$/).optional(),platform:platformSchema.optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),from:z.string().optional(),to:z.string().optional(),days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7)}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
