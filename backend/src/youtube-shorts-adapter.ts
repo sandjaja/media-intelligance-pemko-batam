@@ -30,6 +30,17 @@ function videoUrl(video:YouTubeShortParent){
  * contains no API credential. Eligibility as a YouTube Short must be decided
  * by the provider/collector before this adapter is called.
  */
+export function youtubeShortToSocialCandidate(input:{video:YouTubeShortParent;discovery?:SocialDiscoveryContext|null;rawPayload?:unknown}):SocialCandidate{
+ const {video}=input;
+ return{
+  platform:'youtube',externalId:video.videoId,contentType:'short',sourceKind:'external',
+  authorName:video.channelTitle??null,canonicalUrl:videoUrl(video),title:video.title??null,
+  content:video.description??null,publishedAt:video.publishedAt??null,collector:'youtube-shorts',
+  rawPayload:input.rawPayload??{},context:{discovery:input.discovery??null},
+  metadata:{provider:'youtube-data-api',channelId:video.channelId??null}
+ };
+}
+
 export function youtubeShortCommentToSocialCandidate(input:{
  video:YouTubeShortParent;
  comment:YouTubeCommentInput;
