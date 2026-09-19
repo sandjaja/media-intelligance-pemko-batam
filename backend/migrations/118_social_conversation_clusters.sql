@@ -4,7 +4,7 @@ CREATE TABLE IF NOT EXISTS social_conversation_clusters (
   id BIGSERIAL PRIMARY KEY,
   organization_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   canonical_title TEXT NOT NULL,
-  taxonomy_id BIGINT NULL REFERENCES taxonomy(id) ON DELETE SET NULL,
+  taxonomy_id BIGINT NULL REFERENCES taxonomy_categories(id) ON DELETE SET NULL,
   keyword_id BIGINT NULL REFERENCES keywords(id) ON DELETE SET NULL,
   representative_mention_id BIGINT NULL REFERENCES social_mentions(id) ON DELETE SET NULL,
   member_count INTEGER NOT NULL DEFAULT 0,
