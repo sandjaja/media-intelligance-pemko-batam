@@ -53,6 +53,19 @@ app.get('/api/admin/integrations',{preHandler:[requireAuth,requireRole('admin')]
   WHERE p.active=true ORDER BY p.name`);
  return{data:rows};
 });
+app.put('/api/admin/integrations/:code/settings',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
+ const code=z.string().regex(/^[a-z0-9_-]+$/).safeParse((request.params as any).code);
+ const body=z.object({query:z.string().trim().min(2).max(120),maxResults:z.coerce.number().int().min(1).max(25)}).safeParse(request.body);
+ if(!code.success||!body.success)return reply.code(400).send({error:'INVALID_INTEGRATION_SETTINGS'});
+ const orgs=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 2`)).rows;
+ if(orgs.length!==1)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ const provider=(await pool.query(`SELECT id,code FROM integration_providers WHERE code=$1 AND active=true LIMIT 1`,[code.data])).rows[0];
+ if(!provider)return reply.code(404).send({error:'INTEGRATION_PROVIDER_NOT_FOUND'});
+ const settings={query:body.data.query,maxResults:body.data.maxResults};
+ const {rows}=await pool.query(`INSERT INTO integration_settings(organization_id,provider_id,settings,updated_by) VALUES($1,$2,$3::jsonb,$4) ON CONFLICT(organization_id,provider_id) DO UPDATE SET settings=EXCLUDED.settings,updated_by=EXCLUDED.updated_by,updated_at=NOW() RETURNING settings,updated_at`,[orgs[0].id,provider.id,JSON.stringify(settings),request.user?.id]);
+ await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'INTEGRATION_SETTINGS_UPDATED',$2::jsonb)`,[request.user?.id,JSON.stringify({provider:provider.code,organizationId:orgs[0].id,settings})]);
+ return{data:rows[0]};
+});
 app.put('/api/admin/integrations/:code/credential',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
  const code=z.string().regex(/^[a-z0-9_-]+$/).safeParse((request.params as any).code);
  const body=z.object({credential:z.string().trim().min(8).max(8000),enabled:z.boolean().default(false),expiresAt:z.string().datetime().nullable().optional()}).safeParse(request.body);
