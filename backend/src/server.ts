@@ -13,6 +13,7 @@ import { ingestEnabledSources } from './ingestion.js';
 import { registerAskIntelligence } from './ask-intelligence.js';
 import { registerCollectionSchedulerRoutes } from './collection-scheduler-routes.js';
 import { runYouTubeShortsCollection } from './youtube-shorts-runner.js';
+import { encryptIntegrationCredential, integrationCredentialHint } from './integration-credentials.js';
 
 const env = { port: Number(process.env.PORT ?? 8080), databaseUrl: process.env.DATABASE_URL ?? '', jwtSecret: process.env.JWT_SECRET ?? '', accessTtl: process.env.ACCESS_TOKEN_TTL ?? '15m', refreshDays: Number(process.env.REFRESH_TOKEN_DAYS ?? 7), corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:3000', cookieSecure: process.env.COOKIE_SECURE === 'true' };
 if (!env.databaseUrl || !env.jwtSecret) throw new Error('DATABASE_URL and JWT_SECRET are required');
@@ -41,6 +42,44 @@ app.get('/api/dashboard',{preHandler:requireAuth},async(request,reply)=>{const q
 app.get('/api/ingestion/status',{preHandler:requireAuth},async()=>{const {rows}=await pool.query(`SELECT COUNT(*)::int sources,COUNT(*) FILTER(WHERE active=true)::int active_sources,COUNT(*) FILTER(WHERE active=true AND url IS NOT NULL)::int feed_sources,COUNT(*) FILTER(WHERE active=true AND url IS NOT NULL AND last_success_at IS NOT NULL)::int healthy_feeds,COUNT(*) FILTER(WHERE active=true AND url IS NOT NULL AND last_error IS NOT NULL)::int failed_feeds,MAX(last_success_at) last_success_at FROM media_sources`);const sources=await pool.query(`SELECT id,name,category,tier,url,active,last_checked_at,last_success_at,last_error,last_fetched_count,last_inserted_count FROM media_sources ORDER BY tier ASC,name ASC`);return{status:rows[0],sources:sources.rows};});
 app.get('/api/ingestion/history',{preHandler:requireAuth},async(request,reply)=>{const q=z.object({limit:z.coerce.number().int().min(1).max(100).default(20)}).safeParse(request.query);if(!q.success)return reply.code(400).send({error:'INVALID_QUERY'});const {rows}=await pool.query(`SELECT id,started_at,finished_at,status,source_count,successful_sources,failed_sources,fetched_count,inserted_count,details,error_message FROM ingestion_runs ORDER BY started_at DESC LIMIT $1`,[q.data.limit]);return{data:rows};});
 app.post('/api/ingestion/run',{preHandler:[requireAuth,requireRole('admin','operator')]},async()=>({results:await ingestEnabledSources(pool)}));
+app.get('/api/admin/integrations',{preHandler:[requireAuth,requireRole('admin')]},async()=>{
+ const {rows}=await pool.query(`SELECT p.id,p.code,p.name,p.auth_type,p.active,
+   c.enabled,c.credential_hint,c.expires_at,c.last_test_at,c.last_status,c.last_error,c.updated_at,
+   COALESCE(s.settings,'{}'::jsonb) settings
+  FROM integration_providers p
+  LEFT JOIN organizations o ON o.active=true
+  LEFT JOIN integration_credentials c ON c.provider_id=p.id AND c.organization_id=o.id
+  LEFT JOIN integration_settings s ON s.provider_id=p.id AND s.organization_id=o.id
+  WHERE p.active=true ORDER BY p.name`);
+ return{data:rows};
+});
+app.put('/api/admin/integrations/:code/credential',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
+ const code=z.string().regex(/^[a-z0-9_-]+$/).safeParse((request.params as any).code);
+ const body=z.object({credential:z.string().trim().min(8).max(8000),enabled:z.boolean().default(false),expiresAt:z.string().datetime().nullable().optional()}).safeParse(request.body);
+ if(!code.success||!body.success)return reply.code(400).send({error:'INVALID_INTEGRATION_CREDENTIAL'});
+ const org=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 1`)).rows[0];
+ if(!org)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ const provider=(await pool.query(`SELECT id,code,name FROM integration_providers WHERE code=$1 AND active=true LIMIT 1`,[code.data])).rows[0];
+ if(!provider)return reply.code(404).send({error:'INTEGRATION_PROVIDER_NOT_FOUND'});
+ const encrypted=encryptIntegrationCredential(body.data.credential);
+ const hint=integrationCredentialHint(body.data.credential);
+ const {rows}=await pool.query(`INSERT INTO integration_credentials(organization_id,provider_id,credential_ciphertext,credential_hint,enabled,expires_at,last_status,created_by,updated_by)
+ VALUES($1,$2,$3,$4,$5,$6,CASE WHEN $5 THEN 'untested' ELSE 'disabled' END,$7,$7)
+ ON CONFLICT(organization_id,provider_id) DO UPDATE SET credential_ciphertext=EXCLUDED.credential_ciphertext,credential_hint=EXCLUDED.credential_hint,enabled=EXCLUDED.enabled,expires_at=EXCLUDED.expires_at,last_status=CASE WHEN EXCLUDED.enabled THEN 'untested' ELSE 'disabled' END,last_error=NULL,updated_by=EXCLUDED.updated_by,updated_at=NOW()
+ RETURNING id,organization_id,provider_id,credential_hint,enabled,expires_at,last_status,updated_at`,[org.id,provider.id,encrypted,hint,body.data.enabled,body.data.expiresAt??null,request.user?.id]);
+ await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'INTEGRATION_CREDENTIAL_UPDATED',$2)`,[request.user?.id,{provider:provider.code,organizationId:org.id,enabled:body.data.enabled}]);
+ return{data:rows[0]};
+});
+app.patch('/api/admin/integrations/:code',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
+ const code=z.string().regex(/^[a-z0-9_-]+$/).safeParse((request.params as any).code);
+ const body=z.object({enabled:z.boolean()}).safeParse(request.body);
+ if(!code.success||!body.success)return reply.code(400).send({error:'INVALID_INTEGRATION_SETTING'});
+ const org=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 1`)).rows[0];
+ if(!org)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ const {rows}=await pool.query(`UPDATE integration_credentials c SET enabled=$1,last_status=CASE WHEN $1 THEN 'untested' ELSE 'disabled' END,updated_by=$2,updated_at=NOW() FROM integration_providers p WHERE c.provider_id=p.id AND c.organization_id=$3 AND p.code=$4 RETURNING c.id,c.credential_hint,c.enabled,c.last_status,c.updated_at`,[body.data.enabled,request.user?.id,org.id,code.data]);
+ if(!rows[0])return reply.code(404).send({error:'INTEGRATION_CREDENTIAL_NOT_FOUND'});
+ return{data:rows[0]};
+});
 app.post('/api/social/youtube-shorts/run',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
  const parsed=z.object({
   query:z.string().trim().min(2).max(120),
