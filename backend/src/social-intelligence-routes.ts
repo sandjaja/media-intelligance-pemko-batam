@@ -59,6 +59,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
       keywordId: z.string().regex(/^\d+$/).optional(),
       sentiment: sentimentSchema.optional(),
       riskLevel: z.enum(['low','medium','high','critical']).optional(),
+      sourceKind: z.enum(['external','owned']).default('external'),
       from: z.string().optional(),
       to: z.string().optional(),
       days: z.coerce.number().int().refine(v => [7,14,30].includes(v)).default(7),
@@ -68,7 +69,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     if (!parsed.success) return reply.code(400).send({ error: 'INVALID_QUERY' });
 
     const params: unknown[] = [];
-    const where: string[] = [`sm.source_kind='external'`];
+    const where: string[] = [`sm.source_kind='${parsed.data.sourceKind}'`];
     const bind = (value: unknown) => { params.push(value); return '$' + params.length; };
     const opdId = scopedOpd(request.socialAuth!, parsed.data.opdId);
 
