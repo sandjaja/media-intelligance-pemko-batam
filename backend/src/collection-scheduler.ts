@@ -49,12 +49,12 @@ async function collectSocial(pool:Pool){
   if(organizations.length!==1)throw new Error('ACTIVE_ORGANIZATION_UNRESOLVED');
   const orgId=Number(organizations[0].id);
   const row=(await pool.query(`SELECT c.credential_ciphertext,c.enabled,COALESCE(s.settings,'{}'::jsonb) settings FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id LEFT JOIN integration_settings s ON s.provider_id=p.id AND s.organization_id=c.organization_id WHERE c.organization_id=$1 AND p.code='youtube' LIMIT 1`,[orgId])).rows[0];
-  if(!row?.enabled)return {providers:1,succeeded:0,failed:0,results:[{provider:'youtube',skipped:true,reason:'YOUTUBE_INTEGRATION_DISABLED'}]};
+  if(!row?.enabled)return {providers:1,succeeded:0,failed:0,diagnostics:{status:'YOUTUBE_INTEGRATION_DISABLED'},results:[{provider:'youtube',skipped:true,reason:'YOUTUBE_INTEGRATION_DISABLED'}]};
   const settings=row.settings||{}; const query=String(settings.query||settings.collectionQuery||'').trim();
-  if(query.length<2)return {providers:1,succeeded:0,failed:0,results:[{provider:'youtube',skipped:true,reason:'SOCIAL_COLLECTION_QUERY_NOT_CONFIGURED'}]};
+  if(query.length<2)return {providers:1,succeeded:0,failed:0,diagnostics:{status:'SOCIAL_COLLECTION_QUERY_NOT_CONFIGURED'},results:[{provider:'youtube',skipped:true,reason:'SOCIAL_COLLECTION_QUERY_NOT_CONFIGURED'}]};
   const maxResults=Math.max(1,Math.min(25,Number(settings.maxResults||25)));
   try{const result=await runYouTubeShortsCollection(pool,{apiKey:decryptIntegrationCredential(row.credential_ciphertext),query,maxResults});const itemResults=result.results||[];return {providers:1,succeeded:1,failed:0,diagnostics:{query,maxResults,searchedVideos:result.diagnostics?.searchedVideos??0,shortCandidates:result.diagnostics?.shortCandidates??0,videosWithComments:result.diagnostics?.videosWithComments??0,commentsCollected:result.diagnostics?.commentsCollected??0,received:result.received,savedOrUpdated:result.succeeded,skipped:result.skipped,ingestionFailed:result.failed,manualLocked:itemResults.filter((x:any)=>x.reason==='MANUAL_CLASSIFICATION_LOCKED').length,outOfScope:itemResults.filter((x:any)=>String(x.reason||'').startsWith('ORGANIZATION_SCOPE_')).length,scopeReview:itemResults.filter((x:any)=>x.reason==='ORGANIZATION_SCOPE_REVIEW').length},results:[{provider:'youtube',query,maxResults,...result}]};}
-  catch(error){return {providers:1,succeeded:0,failed:1,results:[{provider:'youtube',query,error:error instanceof Error?error.message:String(error)}]};}
+  catch(error){const message=error instanceof Error?error.message:String(error);return {providers:1,succeeded:0,failed:1,diagnostics:{status:'PROVIDER_ERROR',query,maxResults,error:message},results:[{provider:'youtube',query,error:message}]};}
 }
 
 function summarizeOnline(batch:{results:Record<string,unknown>[],clustering:any}){
