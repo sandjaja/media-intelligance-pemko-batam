@@ -8,23 +8,28 @@ export type SocialConversationCluster={key:string;taxonomyId:string;taxonomyName
 const routing=(x:SocialConversationItem)=>x.metadata?.v16Routing||{};
 const clean=(v:unknown)=>String(v??'').trim();
 /** Social adapter: V16.5 supplies semantic evidence; no Social-only dictionary. */
+const stopwords=new Set(['yang','dan','di','ke','dari','untuk','dengan','pada','ini','itu','atau','oleh','akan','telah','dalam','sebagai','agar','karena','saat','para','kota','pemerintah']);
+const tokens=(x:SocialConversationItem)=>{const sc=x.metadata?.socialContext||{};const text=[x.title,x.content,sc.parentComment?.title,sc.parentComment?.content,sc.parentContent?.title,sc.parentContent?.content].filter(Boolean).join(' ').toLowerCase().replace(/https?:\/\/\S+/g,' ').replace(/[^a-z0-9\u00c0-\u024f]+/g,' ');return new Set(text.split(/\s+/).filter((t:string)=>t.length>=4&&!stopwords.has(t)))};
+const similarity=(a:Set<string>,b:Set<string>)=>{if(!a.size||!b.size)return 0;let common=0;for(const x of a)if(b.has(x))common++;return common/Math.min(a.size,b.size)};
+const timeOf=(x:SocialConversationItem)=>Date.parse(x.published_at||x.captured_at||'')||0;
+/** Social adapter: V16.5 is a semantic gate; lexical + parent context separates/merges actual conversations. */
 export function clusterSocialConversations(rows:SocialConversationItem[]):SocialConversationCluster[]{
-  const groups=new Map<string,SocialConversationCluster>();
-  for(const row of rows){
-    const r=routing(row); if(r.routingStatus!=='ROUTED')continue;
-    const taxonomyId=clean(r.taxonomyId),taxonomyName=clean(r.taxonomyName); if(!taxonomyId||!taxonomyName)continue;
-    const keywordId=clean(r.keywordId)||null,keyword=clean(r.keyword)||null;
-    const key=taxonomyId+':'+(keywordId||'taxonomy');
-    let g=groups.get(key);
-    if(!g){g={key,taxonomyId,taxonomyName,keywordId,keyword,mentions:[],platforms:[],negative:0,highRisk:0};groups.set(key,g);}
-    g.mentions.push(row);
-    if(row.platform&&!g.platforms.includes(row.platform))g.platforms.push(row.platform);
-    if(row.sentiment==='negative')g.negative++;
-    if(row.risk_level==='high'||row.risk_level==='critical')g.highRisk++;
+  const eligible=rows.filter(row=>{const r=routing(row);return r.routingStatus==='ROUTED'&&clean(r.taxonomyId)&&clean(r.taxonomyName)}).sort((a,b)=>timeOf(a)-timeOf(b));
+  const groups:SocialConversationCluster[]=[];
+  for(const row of eligible){
+    const r=routing(row),taxonomyId=clean(r.taxonomyId),taxonomyName=clean(r.taxonomyName),keywordId=clean(r.keywordId)||null,keyword=clean(r.keyword)||null,rowTokens=tokens(row);
+    let best:SocialConversationCluster|undefined,bestScore=0;
+    for(const g of groups){
+      const age=Math.abs(timeOf(row)-Math.max(...g.mentions.map(timeOf)));if(age>72*3600_000)continue;
+      const sameTaxonomy=g.taxonomyId===taxonomyId,sameKeyword=Boolean(keywordId&&g.keywordId===keywordId);
+      const score=Math.max(...g.mentions.map(m=>similarity(rowTokens,tokens(m))));
+      if((sameKeyword&&score>=0.18)||(sameTaxonomy&&score>=0.30)){const weighted=score+(sameKeyword?.15:0);if(weighted>bestScore){best=g;bestScore=weighted;}}
+    }
+    if(!best){best={key:taxonomyId+':'+(keywordId||'taxonomy')+':'+row.id,taxonomyId,taxonomyName,keywordId,keyword,mentions:[],platforms:[],negative:0,highRisk:0};groups.push(best);}
+    best.mentions.push(row);if(row.platform&&!best.platforms.includes(row.platform))best.platforms.push(row.platform);if(row.sentiment==='negative')best.negative++;if(row.risk_level==='high'||row.risk_level==='critical')best.highRisk++;
   }
-  return [...groups.values()].sort((a,b)=>b.mentions.length-a.mentions.length||b.highRisk-a.highRisk||b.negative-a.negative);
+  return groups.sort((a,b)=>b.mentions.length-a.mentions.length||b.highRisk-a.highRisk||b.negative-a.negative);
 }
-
 
 const ENGINE='social-conversation-v1';
 
