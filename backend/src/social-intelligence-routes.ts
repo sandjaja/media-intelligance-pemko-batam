@@ -3,7 +3,7 @@ import type { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { analyzeSocialRoutingV16 } from './social-v16-adapter.js';
-import { clusterSocialConversations } from './social-conversation-clustering.js';
+import { clusterSocialConversations, persistSocialConversationClusters } from './social-conversation-clustering.js';
 import { hasPermission, loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 
 declare module 'fastify' { interface FastifyRequest { socialAuth?: AuthorizationContext } }
@@ -197,6 +197,31 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     const d=body.data,measuredAt=d.measuredAt??new Date().toISOString();
     const {rows}=await pool.query(`INSERT INTO social_post_metrics(mention_id,measured_at,views,reach,impressions,likes,comments,shares,saves,clicks,reposts,engagement_count,engagement_rate,source,raw_payload) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb) ON CONFLICT(mention_id,measured_at) DO UPDATE SET views=EXCLUDED.views,reach=EXCLUDED.reach,impressions=EXCLUDED.impressions,likes=EXCLUDED.likes,comments=EXCLUDED.comments,shares=EXCLUDED.shares,saves=EXCLUDED.saves,clicks=EXCLUDED.clicks,reposts=EXCLUDED.reposts,engagement_count=EXCLUDED.engagement_count,engagement_rate=EXCLUDED.engagement_rate,source=EXCLUDED.source,raw_payload=EXCLUDED.raw_payload RETURNING *`,[id.data,measuredAt,d.views??null,d.reach??null,d.impressions??null,d.likes??null,d.comments??null,d.shares??null,d.saves??null,d.clicks??null,d.reposts??null,d.engagementCount??null,d.engagementRate??null,d.source??null,JSON.stringify(d.rawPayload??{})]);
     return reply.code(201).send({data:rows[0]});
+  });
+
+  app.post('/api/social/conversation-clusters/incremental',{preHandler:manager},async(request,reply)=>{
+    const body=z.object({days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7)}).safeParse(request.body??{});
+    if(!body.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+    const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
+    return{ok:true,result:await persistSocialConversationClusters(pool,organizationId,body.data.days)};
+  });
+
+  app.post('/api/social/conversation-clusters/manual/move',{preHandler:manager},async(request,reply)=>{
+    const body=z.object({mentionId:z.coerce.number().int().positive(),clusterId:z.coerce.number().int().positive(),reason:z.string().trim().max(500).optional()}).safeParse(request.body??{});
+    if(!body.success)return reply.code(400).send({error:'INVALID_REQUEST'});const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
+    const client=await pool.connect();try{await client.query('BEGIN');const cluster=(await client.query('SELECT id FROM social_conversation_clusters WHERE id=$1 AND organization_id=$2',[body.data.clusterId,organizationId])).rows[0];if(!cluster){await client.query('ROLLBACK');return reply.code(404).send({error:'CLUSTER_NOT_FOUND'});}await client.query('DELETE FROM social_conversation_manual_exclusions WHERE mention_id=$1',[body.data.mentionId]);await client.query('DELETE FROM social_conversation_cluster_members WHERE mention_id=$1',[body.data.mentionId]);await client.query(`INSERT INTO social_conversation_cluster_members(cluster_id,mention_id,similarity_score,similarity_type,matched_by,assignment_mode) VALUES($1,$2,1,'semantic','manual','MANUAL')`,[body.data.clusterId,body.data.mentionId]);await client.query('COMMIT');return{ok:true};}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
+  });
+
+  app.post('/api/social/conversation-clusters/manual/remove',{preHandler:manager},async(request,reply)=>{
+    const body=z.object({mentionId:z.coerce.number().int().positive(),reason:z.string().trim().max(500).optional()}).safeParse(request.body??{});if(!body.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+    const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
+    const client=await pool.connect();try{await client.query('BEGIN');await client.query('DELETE FROM social_conversation_cluster_members WHERE mention_id=$1',[body.data.mentionId]);await client.query(`INSERT INTO social_conversation_manual_exclusions(mention_id,organization_id,reason,excluded_by,excluded_at) VALUES($1,$2,$3,$4,NOW()) ON CONFLICT(mention_id) DO UPDATE SET organization_id=EXCLUDED.organization_id,reason=EXCLUDED.reason,excluded_by=EXCLUDED.excluded_by,excluded_at=NOW()`,[body.data.mentionId,organizationId,body.data.reason??null,request.socialAuth!.id]);await client.query('COMMIT');return{ok:true};}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
+  });
+
+  app.post('/api/social/conversation-clusters/manual/create',{preHandler:manager},async(request,reply)=>{
+    const body=z.object({name:z.string().trim().min(2).max(160),mentionId:z.coerce.number().int().positive(),reason:z.string().trim().max(500).optional()}).safeParse(request.body??{});if(!body.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+    const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});const mention=(await pool.query(`SELECT id,metadata,COALESCE(published_at,captured_at) published_at FROM social_mentions WHERE id=$1`,[body.data.mentionId])).rows[0];if(!mention)return reply.code(404).send({error:'MENTION_NOT_FOUND'});const routing=mention.metadata?.v16Routing||{};
+    const client=await pool.connect();try{await client.query('BEGIN');await client.query('DELETE FROM social_conversation_manual_exclusions WHERE mention_id=$1',[body.data.mentionId]);await client.query('DELETE FROM social_conversation_cluster_members WHERE mention_id=$1',[body.data.mentionId]);const ins=await client.query(`INSERT INTO social_conversation_clusters(organization_id,canonical_title,taxonomy_id,keyword_id,representative_mention_id,member_count,platform_count,first_published_at,last_published_at,engine_version,origin_mode) VALUES($1,$2,$3,$4,$5,1,1,$6,$6,'manual','MANUAL') RETURNING id`,[organizationId,body.data.name,routing.taxonomyId||null,routing.keywordId||null,body.data.mentionId,mention.published_at]);await client.query(`INSERT INTO social_conversation_cluster_members(cluster_id,mention_id,similarity_score,similarity_type,matched_by,assignment_mode) VALUES($1,$2,1,'representative','manual','MANUAL')`,[ins.rows[0].id,body.data.mentionId]);await client.query('COMMIT');return{ok:true,clusterId:ins.rows[0].id};}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
   });
 
   app.get('/api/social/conversation-insights', { preHandler: auth }, async (request, reply) => {
