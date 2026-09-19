@@ -58,16 +58,17 @@ async function collectSocial(pool:Pool){
     .filter((v,i,a)=>a.findIndex(x=>x.toLowerCase()===v.toLowerCase())===i).slice(0,5);
   if(!queries.length)return {providers:1,succeeded:0,failed:0,diagnostics:{status:'SOCIAL_DISCOVERY_TERMS_NOT_AVAILABLE'},results:[{provider:'youtube',skipped:true,reason:'SOCIAL_DISCOVERY_TERMS_NOT_AVAILABLE'}]};
   const apiKey=decryptIntegrationCredential(row.credential_ciphertext);
+  const publishedAfter=new Date(Date.now()-7*24*60*60*1000).toISOString();
   const allResults:any[]=[];let searchedVideos=0,shortCandidates=0,videosWithComments=0,commentsCollected=0,received=0,savedOrUpdated=0,skipped=0,ingestionFailed=0;
   for(const query of queries){
-    try{const result=await runYouTubeShortsCollection(pool,{apiKey,query,maxResults});searchedVideos+=result.diagnostics?.searchedVideos??0;shortCandidates+=result.diagnostics?.shortCandidates??0;videosWithComments+=result.diagnostics?.videosWithComments??0;commentsCollected+=result.diagnostics?.commentsCollected??0;received+=result.received;savedOrUpdated+=result.succeeded;skipped+=result.skipped;ingestionFailed+=result.failed;allResults.push(...(result.results||[]));}
+    try{const result=await runYouTubeShortsCollection(pool,{apiKey,query,maxResults,publishedAfter});searchedVideos+=result.diagnostics?.searchedVideos??0;shortCandidates+=result.diagnostics?.shortCandidates??0;videosWithComments+=result.diagnostics?.videosWithComments??0;commentsCollected+=result.diagnostics?.commentsCollected??0;received+=result.received;savedOrUpdated+=result.succeeded;skipped+=result.skipped;ingestionFailed+=result.failed;allResults.push(...(result.results||[]));}
     catch(error){ingestionFailed++;allResults.push({ok:false,query,error:error instanceof Error?error.message:String(error)});}
   }
   const manualLocked=allResults.filter(x=>x.reason==='MANUAL_CLASSIFICATION_LOCKED').length;
   const scopeReview=allResults.filter(x=>x.reason==='ORGANIZATION_SCOPE_REVIEW').length;
   const outOfScope=allResults.filter(x=>x.reason==='ORGANIZATION_SCOPE_OUT_OF_SCOPE').length;
   const ingestionErrors=allResults.filter(x=>x.ok===false).slice(0,5).map(x=>({platform:x.platform??'youtube',externalId:x.externalId??null,query:x.query??null,error:String(x.error||'UNKNOWN_ERROR').slice(0,240)}));
-  return {providers:1,succeeded:ingestionFailed<queries.length?1:0,failed:ingestionFailed>=queries.length?1:0,diagnostics:{discovery:'AUTOMATIC_ORGANIZATION_SCOPE',queries,maxResults,searchedVideos,shortCandidates,videosWithComments,commentsCollected,received,savedOrUpdated,skipped,ingestionFailed,manualLocked,outOfScope,scopeReview,ingestionErrors},results:[{provider:'youtube',queries,maxResults,results:allResults}]};
+  return {providers:1,succeeded:ingestionFailed<queries.length?1:0,failed:ingestionFailed>=queries.length?1:0,diagnostics:{discovery:'AUTOMATIC_ORGANIZATION_SCOPE',queries,maxResults,collectionWindowDays:7,searchedVideos,shortCandidates,videosWithComments,commentsCollected,received,savedOrUpdated,skipped,ingestionFailed,manualLocked,outOfScope,scopeReview,ingestionErrors},results:[{provider:'youtube',queries,maxResults,results:allResults}]};
 }
 
 function summarizeOnline(batch:{results:Record<string,unknown>[],clustering:any}){
