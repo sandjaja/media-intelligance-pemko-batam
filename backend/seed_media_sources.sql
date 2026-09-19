@@ -1,0 +1,3 @@
+-- Tenant-neutral installation: media sources and monitoring keywords are configured
+-- through the administration UI/database for each government organization.
+-- No city-, province-, media-, or OPD-code-specific records are seeded by default.
