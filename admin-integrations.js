@@ -11,16 +11,18 @@ async function load(){
   <div class="text-xs text-slate-400">Credential: <b class="text-slate-200">${esc(p.credential_hint||'Belum ada')}</b></div>
   <div class="flex flex-wrap gap-2"><button data-save="${esc(p.code)}" class="px-3 py-2 rounded-lg bg-cyan-500 text-slate-950 font-black text-xs">Simpan Credential</button>
   <button data-test="${esc(p.code)}" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 font-bold text-xs" ${p.credential_hint?'':'disabled'}>Test Connection</button>
-  <button data-toggle="${esc(p.code)}" data-enabled="${p.enabled?'1':'0'}" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 font-bold text-xs" ${p.credential_hint?'':'disabled'}>${p.enabled?'Nonaktifkan':'Aktifkan'}</button></div>
+  <button data-toggle="${esc(p.code)}" data-enabled="${p.enabled?'1':'0'}" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 font-bold text-xs" ${p.credential_hint?'':'disabled'}>${p.enabled?'Nonaktifkan':'Aktifkan'}</button>
+  ${p.code==='youtube'?'<button data-collect-youtube class="px-3 py-2 rounded-lg bg-emerald-500 text-slate-950 font-black text-xs" '+(p.enabled?'':'disabled')+'>Uji Koleksi</button>':''}</div>
   ${p.last_error?'<p class="text-xs text-rose-400">'+esc(p.last_error)+'</p>':''}
  </article>`).join('')||'<div class="text-sm text-slate-500">Belum ada provider.</div>'}catch(e){box.innerHTML='<div class="text-sm text-rose-400">'+esc(e.message)+'</div>'}
 }
 document.addEventListener('click',async e=>{
- const save=e.target.closest?.('[data-save]'),test=e.target.closest?.('[data-test]'),toggle=e.target.closest?.('[data-toggle]');
+ const save=e.target.closest?.('[data-save]'),test=e.target.closest?.('[data-test]'),toggle=e.target.closest?.('[data-toggle]'),collect=e.target.closest?.('[data-collect-youtube]');
  try{
   if(save){const credential=prompt('Masukkan credential/API key. Nilai ini akan dikirim ke backend untuk dienkripsi dan tidak ditampilkan kembali.');if(!credential)return;await api('/api/admin/integrations/'+encodeURIComponent(save.dataset.save)+'/credential',{method:'PUT',body:JSON.stringify({credential,enabled:false})});await load();}
   if(test){test.disabled=true;await api('/api/admin/integrations/'+encodeURIComponent(test.dataset.test)+'/test',{method:'POST',body:JSON.stringify({})});alert('Koneksi berhasil. Credential provider valid dan dapat digunakan.');await load();}
   if(toggle){toggle.disabled=true;await api('/api/admin/integrations/'+encodeURIComponent(toggle.dataset.toggle),{method:'PATCH',body:JSON.stringify({enabled:toggle.dataset.enabled!=='1'})});await load();}
+  if(collect){collect.disabled=true;const query=prompt('Query uji koleksi YouTube Shorts:','Pemko Batam');if(!query){collect.disabled=false;return;}const {data}=await api('/api/social/youtube-shorts/run',{method:'POST',body:JSON.stringify({query,maxResults:3})});alert('Uji koleksi selesai. Received: '+(data?.received??0)+' | Succeeded: '+(data?.succeeded??0)+' | Skipped: '+(data?.skipped??0)+' | Failed: '+(data?.failed??0));await load();}
  }catch(err){alert(err.message);await load();}
 });
 window.loadAdminIntegrations=load;
