@@ -207,9 +207,80 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   const auditConversation=async(client:any,userId:string,action:string,metadata:any)=>client.query('INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,$2,$3::jsonb)',[userId,action,JSON.stringify(metadata)]);
 
   app.get('/api/social/conversation-clusters',{preHandler:auth},async(request,reply)=>{
-    const parsed=z.object({days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7)}).safeParse(request.query);if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
+    const parsed=z.object({days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7),platform:platformSchema.optional(),opdId:z.string().regex(/^\\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),routingStatus:z.enum(['ROUTED','UNROUTED']).optional()}).safeParse(request.query);if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
     const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
-    const {rows}=await pool.query(`SELECT c.id,c.canonical_title,c.taxonomy_id,c.keyword_id,c.member_count,c.platform_count,c.origin_mode,c.status,c.first_published_at,c.last_published_at,COALESCE(jsonb_agg(jsonb_build_object('id',sm.id,'platform',sm.platform,'title',sm.title,'content',sm.content,'authorName',sm.author_name,'authorHandle',sm.author_handle,'publishedAt',sm.published_at,'capturedAt',sm.captured_at,'sentiment',sm.sentiment,'riskLevel',sm.risk_level,'riskScore',sm.risk_score,'assignmentMode',cm.assignment_mode) ORDER BY COALESCE(sm.published_at,sm.captured_at) DESC) FILTER(WHERE sm.id IS NOT NULL),'[]'::jsonb) members FROM social_conversation_clusters c LEFT JOIN social_conversation_cluster_members cm ON cm.cluster_id=c.id LEFT JOIN social_mentions sm ON sm.id=cm.mention_id WHERE c.organization_id=$1 AND c.status='ACTIVE' AND COALESCE(c.last_published_at,c.updated_at)>=NOW()-($2::int*INTERVAL '1 day') GROUP BY c.id ORDER BY c.member_count DESC,c.last_published_at DESC`,[organizationId,parsed.data.days]);return{data:rows};
+    const params:unknown[]=[organizationId,parsed.data.days],memberWhere:string[]=[`COALESCE(sm.published_at,sm.captured_at)>=NOW()-($2::int*INTERVAL '1 day')`];const bind=(v:unknown)=>{params.push(v);return '
+
+  app.post('/api/social/conversation-clusters/incremental',{preHandler:manager},async(request,reply)=>{
+    const body=z.object({days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7)}).safeParse(request.body??{});
+    if(!body.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+    const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
+    return{ok:true,result:await persistSocialConversationClusters(pool,organizationId,body.data.days)};
+  });
+
+  app.post('/api/social/conversation-clusters/manual/move',{preHandler:manager},async(request,reply)=>{
+    const body=z.object({mentionId:z.coerce.number().int().positive(),clusterId:z.coerce.number().int().positive(),reason:z.string().trim().max(500).optional()}).safeParse(request.body??{});
+    if(!body.success)return reply.code(400).send({error:'INVALID_REQUEST'});const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
+    const client=await pool.connect();try{await client.query('BEGIN');const cluster=(await client.query('SELECT id FROM social_conversation_clusters WHERE id=$1 AND organization_id=$2',[body.data.clusterId,organizationId])).rows[0];if(!cluster){await client.query('ROLLBACK');return reply.code(404).send({error:'CLUSTER_NOT_FOUND'});}const previous=(await client.query('SELECT cluster_id FROM social_conversation_cluster_members WHERE mention_id=$1',[body.data.mentionId])).rows[0]?.cluster_id??null;await client.query('DELETE FROM social_conversation_manual_exclusions WHERE mention_id=$1',[body.data.mentionId]);await client.query('DELETE FROM social_conversation_cluster_members WHERE mention_id=$1',[body.data.mentionId]);await client.query(`INSERT INTO social_conversation_cluster_members(cluster_id,mention_id,similarity_score,similarity_type,matched_by,assignment_mode) VALUES($1,$2,1,'semantic','manual','MANUAL')`,[body.data.clusterId,body.data.mentionId]);if(previous&&String(previous)!==String(body.data.clusterId))await refreshConversationCluster(client,previous);await refreshConversationCluster(client,body.data.clusterId);await auditConversation(client,request.socialAuth!.id,'SOCIAL_CONVERSATION_CLUSTER_MOVE',{organizationId,mentionId:body.data.mentionId,fromClusterId:previous,toClusterId:body.data.clusterId,reason:body.data.reason??null});await client.query('COMMIT');return{ok:true};}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
+  });
+
+  app.post('/api/social/conversation-clusters/manual/remove',{preHandler:manager},async(request,reply)=>{
+    const body=z.object({mentionId:z.coerce.number().int().positive(),reason:z.string().trim().max(500).optional()}).safeParse(request.body??{});if(!body.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+    const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
+    const client=await pool.connect();try{await client.query('BEGIN');const previous=(await client.query('SELECT cluster_id FROM social_conversation_cluster_members WHERE mention_id=$1',[body.data.mentionId])).rows[0]?.cluster_id??null;await client.query('DELETE FROM social_conversation_cluster_members WHERE mention_id=$1',[body.data.mentionId]);await client.query(`INSERT INTO social_conversation_manual_exclusions(mention_id,organization_id,reason,excluded_by,excluded_at) VALUES($1,$2,$3,$4,NOW()) ON CONFLICT(mention_id) DO UPDATE SET organization_id=EXCLUDED.organization_id,reason=EXCLUDED.reason,excluded_by=EXCLUDED.excluded_by,excluded_at=NOW()`,[body.data.mentionId,organizationId,body.data.reason??null,request.socialAuth!.id]);if(previous)await refreshConversationCluster(client,previous);await auditConversation(client,request.socialAuth!.id,'SOCIAL_CONVERSATION_CLUSTER_REMOVE',{organizationId,mentionId:body.data.mentionId,fromClusterId:previous,reason:body.data.reason??null});await client.query('COMMIT');return{ok:true};}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
+  });
+
+  app.post('/api/social/conversation-clusters/manual/create',{preHandler:manager},async(request,reply)=>{
+    const body=z.object({name:z.string().trim().min(2).max(160),mentionId:z.coerce.number().int().positive(),reason:z.string().trim().max(500).optional()}).safeParse(request.body??{});if(!body.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+    const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});const mention=(await pool.query(`SELECT id,metadata,COALESCE(published_at,captured_at) published_at FROM social_mentions WHERE id=$1`,[body.data.mentionId])).rows[0];if(!mention)return reply.code(404).send({error:'MENTION_NOT_FOUND'});const routing=mention.metadata?.v16Routing||{};
+    const client=await pool.connect();try{await client.query('BEGIN');const previous=(await client.query('SELECT cluster_id FROM social_conversation_cluster_members WHERE mention_id=$1',[body.data.mentionId])).rows[0]?.cluster_id??null;await client.query('DELETE FROM social_conversation_manual_exclusions WHERE mention_id=$1',[body.data.mentionId]);await client.query('DELETE FROM social_conversation_cluster_members WHERE mention_id=$1',[body.data.mentionId]);const ins=await client.query(`INSERT INTO social_conversation_clusters(organization_id,canonical_title,taxonomy_id,keyword_id,representative_mention_id,member_count,platform_count,first_published_at,last_published_at,engine_version,origin_mode) VALUES($1,$2,$3,$4,$5,1,1,$6,$6,'manual','MANUAL') RETURNING id`,[organizationId,body.data.name,routing.taxonomyId||null,routing.keywordId||null,body.data.mentionId,mention.published_at]);await client.query(`INSERT INTO social_conversation_cluster_members(cluster_id,mention_id,similarity_score,similarity_type,matched_by,assignment_mode) VALUES($1,$2,1,'representative','manual','MANUAL')`,[ins.rows[0].id,body.data.mentionId]);if(previous)await refreshConversationCluster(client,previous);await auditConversation(client,request.socialAuth!.id,'SOCIAL_CONVERSATION_CLUSTER_CREATE',{organizationId,clusterId:ins.rows[0].id,mentionId:body.data.mentionId,name:body.data.name,reason:body.data.reason??null});await client.query('COMMIT');return{ok:true,clusterId:ins.rows[0].id};}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
+  });
+
+  app.patch('/api/social/conversation-clusters/:id',{preHandler:manager},async(request,reply)=>{
+    const params=z.object({id:z.coerce.number().int().positive()}).safeParse(request.params),body=z.object({name:z.string().trim().min(2).max(160),reason:z.string().trim().max(500).optional()}).safeParse(request.body??{});
+    if(!params.success||!body.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+    const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
+    const client=await pool.connect();try{await client.query('BEGIN');const current=(await client.query('SELECT canonical_title,origin_mode FROM social_conversation_clusters WHERE id=$1 AND organization_id=$2 AND status=$3',[params.data.id,organizationId,'ACTIVE'])).rows[0];if(!current){await client.query('ROLLBACK');return reply.code(404).send({error:'CLUSTER_NOT_FOUND'});}await client.query(`UPDATE social_conversation_clusters SET canonical_title=$3,origin_mode='MANUAL',updated_at=NOW() WHERE id=$1 AND organization_id=$2`,[params.data.id,organizationId,body.data.name]);await client.query(`UPDATE social_conversation_cluster_members SET assignment_mode='MANUAL',matched_by='manual' WHERE cluster_id=$1`,[params.data.id]);await auditConversation(client,request.socialAuth!.id,'SOCIAL_CONVERSATION_CLUSTER_RENAME',{organizationId,clusterId:params.data.id,fromName:current.canonical_title,toName:body.data.name,reason:body.data.reason??null});await client.query('COMMIT');return{ok:true};}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
+  });
+
+  app.get('/api/social/conversation-insights', { preHandler: auth }, async (request, reply) => {
+    const parsed=z.object({days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7),platform:platformSchema.optional()}).safeParse(request.query);
+    if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
+    const params:unknown[]=[parsed.data.days],where:string[]=["source_kind='external'","COALESCE(published_at,captured_at) >= NOW() - ($1::int * INTERVAL '1 day')"];
+    if(parsed.data.platform){params.push(parsed.data.platform);where.push(`platform=$${params.length}`);}
+    const filter='WHERE '+where.join(' AND ');
+    const mentions=await pool.query(`SELECT id::text,platform,title,content,published_at,captured_at,sentiment,risk_level,risk_score,metadata FROM social_mentions ${filter} ORDER BY COALESCE(published_at,captured_at) ASC,id ASC`,params);
+    const trends=await pool.query(`SELECT date_trunc('day',COALESCE(published_at,captured_at))::date day,COUNT(*)::int mentions,COUNT(*) FILTER(WHERE sentiment='positive')::int positive,COUNT(*) FILTER(WHERE sentiment='neutral')::int neutral,COUNT(*) FILTER(WHERE sentiment='negative')::int negative,COUNT(*) FILTER(WHERE risk_level IN ('high','critical'))::int high_risk FROM social_mentions ${filter} GROUP BY 1 ORDER BY 1`,params);
+    const clusters=clusterSocialConversations(mentions.rows).slice(0,10).map(c=>({
+      key:c.key,taxonomyId:c.taxonomyId,taxonomyName:c.taxonomyName,keywordId:c.keywordId,keyword:c.keyword,
+      mentions:c.mentions.length,platforms:c.platforms,platformCount:c.platforms.length,negative:c.negative,highRisk:c.highRisk,
+      representative:c.mentions[0]??null
+    }));
+    return{trends:trends.rows,clusters};
+  });
+
+  app.get('/api/social/summary', { preHandler: auth }, async (request, reply) => {
+    const parsed=z.object({opdId:z.string().regex(/^\d+$/).optional(),platform:platformSchema.optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),from:z.string().optional(),to:z.string().optional(),days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7)}).safeParse(request.query);
+    if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
+    const params:unknown[]=[],where:string[]=[`source_kind='external'`];const opdId=scopedOpd(request.socialAuth!,parsed.data.opdId);
+    const bind=(value:unknown)=>{params.push(value);return '$'+params.length;};
+    if(opdId)where.push(`opd_id=${bind(opdId)}`);
+    if(parsed.data.platform)where.push(`platform=${bind(parsed.data.platform)}`);
+    if(parsed.data.sentiment)where.push(`sentiment=${bind(parsed.data.sentiment)}`);
+    if(parsed.data.riskLevel)where.push(`risk_level=${bind(parsed.data.riskLevel)}`);
+    if(parsed.data.from)where.push(`published_at >= ${bind(parsed.data.from)}`);
+    else where.push(`COALESCE(published_at,captured_at) >= NOW() - (${bind(parsed.data.days)}::int * INTERVAL '1 day')`);
+    if(parsed.data.to)where.push(`published_at < ${bind(parsed.data.to)}`);
+    const filter=where.length?'WHERE '+where.join(' AND '):'';
+    const metrics=await pool.query(`SELECT COUNT(*)::int total_mentions,COUNT(*) FILTER(WHERE sentiment='positive')::int positive,COUNT(*) FILTER(WHERE sentiment='neutral')::int neutral,COUNT(*) FILTER(WHERE sentiment='negative')::int negative,COUNT(*) FILTER(WHERE risk_level IN ('high','critical'))::int high_risk,COUNT(*) FILTER(WHERE COALESCE(metadata->'v16Routing'->>'routingStatus','UNROUTED')<>'ROUTED')::int unmapped,COALESCE(ROUND(AVG(risk_score),2),0) avg_risk,COALESCE(ROUND(AVG(influence_score),2),0) avg_influence FROM social_mentions ${filter}`,params);
+    const byPlatform=await pool.query(`SELECT platform,COUNT(*)::int mentions,COUNT(*) FILTER(WHERE sentiment='negative')::int negative FROM social_mentions ${filter} GROUP BY platform ORDER BY mentions DESC`,params);
+    return {metrics:metrics.rows[0],byPlatform:byPlatform.rows};
+  });
+}
++params.length;};const opdId=scopedOpd(request.socialAuth!,parsed.data.opdId);
+    if(opdId)memberWhere.push(`sm.opd_id=${bind(opdId)}`);if(parsed.data.platform)memberWhere.push(`sm.platform=${bind(parsed.data.platform)}`);if(parsed.data.sentiment)memberWhere.push(`sm.sentiment=${bind(parsed.data.sentiment)}`);if(parsed.data.riskLevel)memberWhere.push(`sm.risk_level=${bind(parsed.data.riskLevel)}`);if(parsed.data.routingStatus){const p=bind(parsed.data.routingStatus);memberWhere.push(`COALESCE(sm.metadata->'v16Routing'->>'routingStatus','UNROUTED')=${p}`);}
+    const memberFilter=memberWhere.join(' AND ');
+    const {rows}=await pool.query(`SELECT c.id,c.canonical_title,c.taxonomy_id,c.keyword_id,c.origin_mode,c.status,MIN(COALESCE(sm.published_at,sm.captured_at)) first_published_at,MAX(COALESCE(sm.published_at,sm.captured_at)) last_published_at,COUNT(sm.id)::int member_count,COUNT(DISTINCT sm.platform)::int platform_count,COALESCE(jsonb_agg(jsonb_build_object('id',sm.id,'platform',sm.platform,'title',sm.title,'content',sm.content,'authorName',sm.author_name,'authorHandle',sm.author_handle,'publishedAt',sm.published_at,'capturedAt',sm.captured_at,'sentiment',sm.sentiment,'riskLevel',sm.risk_level,'riskScore',sm.risk_score,'assignmentMode',cm.assignment_mode) ORDER BY COALESCE(sm.published_at,sm.captured_at) DESC) FILTER(WHERE sm.id IS NOT NULL),'[]'::jsonb) members FROM social_conversation_clusters c JOIN social_conversation_cluster_members cm ON cm.cluster_id=c.id JOIN social_mentions sm ON sm.id=cm.mention_id AND ${memberFilter} WHERE c.organization_id=$1 AND c.status='ACTIVE' GROUP BY c.id HAVING COUNT(sm.id)>0 ORDER BY COUNT(sm.id) DESC,MAX(COALESCE(sm.published_at,sm.captured_at)) DESC`,params);return{data:rows};
   });
 
   app.post('/api/social/conversation-clusters/incremental',{preHandler:manager},async(request,reply)=>{
