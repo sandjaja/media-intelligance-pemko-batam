@@ -4,6 +4,9 @@ import type { SocialDiscoveryContext } from './social-context-adapter.js';
 
 const API='https://www.googleapis.com/youtube/v3';
 
+export type YouTubeShortsDiagnostics={searchedVideos:number;shortCandidates:number;videosWithComments:number;commentsCollected:number};
+export type YouTubeShortsCollection={candidates:SocialCandidate[];diagnostics:YouTubeShortsDiagnostics};
+
 export type YouTubeShortsCollectorOptions={
  apiKey?:string;
  query:string;
@@ -37,16 +40,18 @@ function commentInput(item:any,parentCommentId?:string):YouTubeCommentInput{
  return{commentId:String(item.id),text:String(s.textDisplay??s.textOriginal??''),authorName:s.authorDisplayName??null,authorChannelUrl:s.authorChannelUrl??null,publishedAt:s.publishedAt??null,parentCommentId:parentCommentId??s.parentId??null,rawPayload:item};
 }
 
-export async function collectYouTubeShortCandidates(options:YouTubeShortsCollectorOptions):Promise<SocialCandidate[]>{
+export async function collectYouTubeShortCandidatesWithDiagnostics(options:YouTubeShortsCollectorOptions):Promise<YouTubeShortsCollection>{
  const apiKey=key(options.apiKey),max=Math.max(1,Math.min(50,options.maxResults??10));
  const discovery:SocialDiscoveryContext={method:'keyword',query:options.query};
  const search=await getJson('/search',{part:'snippet',type:'video',q:options.query,maxResults:max,order:'date',publishedAfter:options.publishedAfter},apiKey);
- const ids=(search.items??[]).map((x:any)=>x?.id?.videoId).filter(Boolean); if(!ids.length)return[];
+ const ids=(search.items??[]).map((x:any)=>x?.id?.videoId).filter(Boolean); if(!ids.length)return{candidates:[],diagnostics:{searchedVideos:0,shortCandidates:0,videosWithComments:0,commentsCollected:0}};
  const details=await getJson('/videos',{part:'snippet,contentDetails',id:ids.join(',')},apiKey);
  const candidates:SocialCandidate[]=[];
- for(const video of (details.items??[]).filter(looksLikeShort)){
+ const shortVideos=(details.items??[]).filter(looksLikeShort); let videosWithComments=0;
+ for(const video of shortVideos){
   const parent=videoParent(video);
   const threads=await getJson('/commentThreads',{part:'snippet,replies',videoId:parent.videoId,maxResults:100,textFormat:'plainText'},apiKey);
+  if((threads.items??[]).length)videosWithComments++;
   for(const thread of threads.items??[]){
    const top=thread?.snippet?.topLevelComment;if(!top)continue;
    candidates.push(youtubeShortCommentToSocialCandidate({video:parent,comment:commentInput(top),discovery}));
@@ -64,5 +69,9 @@ export async function collectYouTubeShortCandidates(options:YouTubeShortsCollect
    }
   }
  }
- return candidates;
+ return{candidates,diagnostics:{searchedVideos:ids.length,shortCandidates:shortVideos.length,videosWithComments,commentsCollected:candidates.length}};
+}
+
+export async function collectYouTubeShortCandidates(options:YouTubeShortsCollectorOptions):Promise<SocialCandidate[]>{
+ return (await collectYouTubeShortCandidatesWithDiagnostics(options)).candidates;
 }
