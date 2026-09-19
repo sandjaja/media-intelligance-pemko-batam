@@ -6,7 +6,7 @@ function fakePool() {
   return {
     async query(sql: string, params?: unknown[]) {
       if (sql.includes('FROM organizations WHERE active=true')) return { rows: [{ id: '1', name: 'Pemerintah Kota Contoh', code: 'PKC' }] };
-      if (sql.includes('FROM government_branding WHERE active=true')) return { rows: [{ government_name: 'Pemerintah Kota Contoh', short_name: 'Pemko Contoh', aliases: ['Pemkot Contoh'], city_name: 'Kota Contoh', tagline: null }] };
+      if (sql.includes('FROM government_branding WHERE is_active=true')) return { rows: [{ government_name: 'Pemerintah Kota Contoh', short_name: 'Pemko Contoh', aliases: ['Pemkot Contoh'], city_name: 'Kota Contoh', tagline: null }] };
       if (sql.includes('FROM districts WHERE organization_id=')) return { rows: [{ name: 'Kecamatan Utara', code: 'UTARA' }] };
       if (sql.includes('FROM taxonomy_categories tc JOIN classification_sectors cs')) {
         return { rows: [{ id: '10', name: 'Infrastruktur Jalan dan Jembatan', sector_name: 'Infrastruktur' }] };
