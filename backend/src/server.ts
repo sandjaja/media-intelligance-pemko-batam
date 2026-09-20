@@ -86,33 +86,59 @@ app.put('/api/admin/integrations/:code/credential',{preHandler:[requireAuth,requ
 app.post('/api/admin/integrations/:code/test',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
  const code=z.string().regex(/^[a-z0-9_-]+$/).safeParse((request.params as any).code);
  if(!code.success)return reply.code(400).send({error:'INVALID_INTEGRATION_PROVIDER'});
- const org=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 1`)).rows[0];
- if(!org)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
- const row=(await pool.query(`SELECT c.id,c.credential_ciphertext,p.code FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id WHERE c.organization_id=$1 AND p.code=$2 LIMIT 1`,[org.id,code.data])).rows[0];
+ const orgs=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 2`)).rows;
+ if(orgs.length!==1)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ const row=(await pool.query(`SELECT c.id,c.credential_ciphertext,p.code FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id WHERE c.organization_id=$1 AND p.code=$2 LIMIT 1`,[orgs[0].id,code.data])).rows[0];
  if(!row)return reply.code(404).send({error:'INTEGRATION_CREDENTIAL_NOT_FOUND'});
  if(!['youtube','threads','tiktok'].includes(row.code))return reply.code(501).send({error:'INTEGRATION_TEST_NOT_IMPLEMENTED',provider:row.code});
  let status:'healthy'|'error'='error'; let lastError:string|null=null;
+ const safeApiError=async(response:Response,prefix:string)=>{
+  const payload:any=await response.json().catch(()=>null);
+  const apiError=payload?.error;
+  const code=apiError?.code||apiError?.error_subcode||payload?.error_code||payload?.code;
+  const type=apiError?.type||payload?.error;
+  const message=apiError?.message||payload?.error_description||payload?.message;
+  const parts=[prefix+'_HTTP_'+response.status,code?String(code):'',type?String(type):'',message?String(message).slice(0,240):''].filter(Boolean);
+  return parts.join(' | ');
+ };
  try{
-  const key=decryptIntegrationCredential(row.credential_ciphertext);
+  const credential=decryptIntegrationCredential(row.credential_ciphertext);
   if(row.code==='threads'){
-   const url=new URL('https://graph.threads.net/v1.0/me'); url.searchParams.set('fields','id,username'); url.searchParams.set('access_token',key);
-   const response=await fetch(url,{headers:{accept:'application/json'}}); if(!response.ok)throw new Error('THREADS_API_HTTP_'+response.status);
-   const payload:any=await response.json(); if(!payload?.id)throw new Error('THREADS_API_INVALID_RESPONSE'); status='healthy';
+   const url=new URL('https://graph.threads.net/v1.0/me');
+   url.searchParams.set('fields','id,username');
+   url.searchParams.set('access_token',credential);
+   const response=await fetch(url,{headers:{accept:'application/json'}});
+   if(!response.ok)throw new Error(await safeApiError(response,'THREADS_API'));
+   const payload:any=await response.json();
+   if(!payload?.id)throw new Error('THREADS_API_INVALID_RESPONSE');
+   status='healthy';
   }else if(row.code==='tiktok'){
-   const url=new URL('https://open.tiktokapis.com/v2/user/info/'); url.searchParams.set('fields','open_id,display_name');
-   const headers=new Headers({accept:'application/json'}); headers.set('Authorization','Bearer '+key);
-   const response=await fetch(url,{headers}); if(!response.ok)throw new Error('TIKTOK_API_HTTP_'+response.status);
-   const payload:any=await response.json(); if(payload?.error?.code&&payload.error.code!=='ok')throw new Error('TIKTOK_API_'+String(payload.error.code)); status='healthy';
+   // TikTok Research API uses a client access token and research.data.basic.
+   // A minimal public-video query validates both token type and Research API authorization.
+   const endDate=new Date();
+   const startDate=new Date(endDate.getTime()-24*60*60*1000);
+   const ymd=(d:Date)=>d.toISOString().slice(0,10).replace(/-/g,'');
+   const url=new URL('https://open.tiktokapis.com/v2/research/video/query/');
+   url.searchParams.set('fields','id');
+   const response=await fetch(url,{
+    method:'POST',
+    headers:{accept:'application/json','content-type':'application/json',authorization:'Bearer '+credential},
+    body:JSON.stringify({query:{and:[{operation:'EQ',field_name:'keyword',field_values:['test']}]},max_count:1,start_date:ymd(startDate),end_date:ymd(endDate)})
+   });
+   const payload:any=await response.json().catch(()=>null);
+   if(!response.ok)throw new Error(await safeApiError(new Response(JSON.stringify(payload),{status:response.status,headers:{'content-type':'application/json'}}),'TIKTOK_RESEARCH_API'));
+   if(payload?.error?.code&&payload.error.code!=='ok')throw new Error(['TIKTOK_RESEARCH_API',String(payload.error.code),String(payload.error.message||'')].filter(Boolean).join(' | '));
+   status='healthy';
   }else{
    const url=new URL('https://www.googleapis.com/youtube/v3/videos');
-  url.searchParams.set('part','id'); url.searchParams.set('id','dQw4w9WgXcQ'); url.searchParams.set('key',key);
-  const response=await fetch(url,{headers:{accept:'application/json'}});
-  if(!response.ok)throw new Error('YOUTUBE_API_HTTP_'+response.status);
+   url.searchParams.set('part','id'); url.searchParams.set('id','dQw4w9WgXcQ'); url.searchParams.set('key',credential);
+   const response=await fetch(url,{headers:{accept:'application/json'}});
+   if(!response.ok)throw new Error('YOUTUBE_API_HTTP_'+response.status);
    status='healthy';
   }
- }catch(error){lastError=error instanceof Error?error.message:'YOUTUBE_API_TEST_FAILED';}
+ }catch(error){lastError=error instanceof Error?error.message:(row.code.toUpperCase()+'_API_TEST_FAILED');}
  await pool.query(`UPDATE integration_credentials SET last_test_at=NOW(),last_status=$1,last_error=$2,updated_at=NOW() WHERE id=$3`,[status,lastError,row.id]);
- await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'INTEGRATION_CONNECTION_TESTED',$2)`,[request.user?.id,{provider:row.code,organizationId:org.id,status}]);
+ await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'INTEGRATION_CONNECTION_TESTED',$2)`,[request.user?.id,{provider:row.code,organizationId:orgs[0].id,status}]);
  if(status==='error')return reply.code(422).send({data:{provider:row.code,status,lastError}});
  return{data:{provider:row.code,status}};
 });
