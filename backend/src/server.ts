@@ -176,10 +176,12 @@ app.post('/api/social/threads/smoke-search',{preHandler:[requireAuth,requireRole
   await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'THREADS_KEYWORD_SMOKE_TEST',$2::jsonb)`,[request.user?.id,JSON.stringify({query:parsed.data.query,searchType:parsed.data.searchType,status:'error',httpStatus:response.status,detail})]);
   return reply.code(422).send({error:'THREADS_KEYWORD_SEARCH_FAILED',httpStatus:response.status,detail});
  }
- const items=Array.isArray(payload?.data)?payload.data.slice(0,parsed.data.limit):[];
+ const rawData=Array.isArray(payload?.data)?payload.data:[];
+ const items=rawData.slice(0,parsed.data.limit);
  const normalized=items.map((item:any)=>({externalId:item?.id?String(item.id):null,platform:'threads',contentType:'post',sourceKind:'external',authorHandle:item?.username??null,canonicalUrl:item?.permalink??null,content:item?.text??null,publishedAt:item?.timestamp??null,mediaType:item?.media_type??null}));
- await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'THREADS_KEYWORD_SMOKE_TEST',$2::jsonb)`,[request.user?.id,JSON.stringify({query:parsed.data.query,searchType:parsed.data.searchType,status:'healthy',received:normalized.length})]);
- return{data:{provider:'threads',mode:'keyword_search_smoke',query:parsed.data.query,searchType:parsed.data.searchType,received:normalized.length,items:normalized,paging:Boolean(payload?.paging)}};
+ const diagnostic={httpStatus:response.status,ok:response.ok,dataIsArray:Array.isArray(payload?.data),rawDataCount:rawData.length,topLevelKeys:payload&&typeof payload==='object'?Object.keys(payload).filter((key)=>key!=='access_token').slice(0,20):[],pagingPresent:Boolean(payload?.paging),pagingKeys:payload?.paging&&typeof payload.paging==='object'?Object.keys(payload.paging).slice(0,10):[],errorPresent:Boolean(payload?.error)};
+ await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'THREADS_KEYWORD_SMOKE_TEST',$2::jsonb)`,[request.user?.id,JSON.stringify({query:parsed.data.query,searchType:parsed.data.searchType,status:'healthy',received:normalized.length,diagnostic})]);
+ return{data:{provider:'threads',mode:'keyword_search_smoke',query:parsed.data.query,searchType:parsed.data.searchType,received:normalized.length,items:normalized,paging:Boolean(payload?.paging),diagnostic}};
 });
 app.post('/api/social/youtube-shorts/run',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
  const parsed=z.object({
