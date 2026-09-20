@@ -36,7 +36,7 @@ export async function loadExternalSocialProviderContext(pool:Pool,organizationId
    WHERE c.organization_id=$1 AND p.code=$2
    LIMIT 1`,[organizationId,code]);
  const row=rows[0];
- if(!row?.enabled)return null;
+ if(!row?.enabled||!row?.credential_ciphertext)return null;
  return{organizationId,credential:decryptIntegrationCredential(row.credential_ciphertext),settings:row.settings||{}} as ExternalSocialProviderContext;
 }
 
