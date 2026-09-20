@@ -3,8 +3,8 @@ import { runOnlineSourceCollection } from './online-article-moderation-routes.js
 import { clusterNewOnlineArticles } from './online-story-clustering.js';
 import { collectOwnedWebsiteAccount } from './website-collector.js';
 import { rebuildOwnedContentClusters } from './owned-content-clustering.js';
-import { runYouTubeShortsCollection } from './youtube-shorts-runner.js';
-import { decryptIntegrationCredential } from './integration-credentials.js';
+import { ingestSocialBatch } from './social-collector.js';
+import { getExternalSocialProvider, loadExternalSocialProviderContext } from './external-social-provider.js';
 import { loadOrganizationMediaScope } from './organization-media-scope.js';
 
 export type CollectionSource='online'|'owned'|'social';
@@ -48,21 +48,25 @@ async function collectOwned(pool:Pool){
 async function collectSocial(pool:Pool){
   const scope=await loadOrganizationMediaScope(pool);
   if(!scope)throw new Error('ACTIVE_ORGANIZATION_UNRESOLVED');
-  const orgId=scope.organizationId;
-  const row=(await pool.query(`SELECT c.credential_ciphertext,c.enabled,COALESCE(s.settings,'{}'::jsonb) settings FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id LEFT JOIN integration_settings s ON s.provider_id=p.id AND s.organization_id=c.organization_id WHERE c.organization_id=$1 AND p.code='youtube' LIMIT 1`,[orgId])).rows[0];
-  if(!row?.enabled)return {providers:1,succeeded:0,failed:0,diagnostics:{status:'YOUTUBE_INTEGRATION_DISABLED'},results:[{provider:'youtube',skipped:true,reason:'YOUTUBE_INTEGRATION_DISABLED'}]};
-  const settings=row.settings||{};
-  const maxResults=Math.max(1,Math.min(25,Number(settings.maxResults||25)));
+  const orgId=scope.organizationId,provider=getExternalSocialProvider('youtube');
+  if(!provider)throw new Error('YOUTUBE_PROVIDER_NOT_REGISTERED');
+  const context=await loadExternalSocialProviderContext(pool,orgId,'youtube');
+  if(!context)return {providers:1,succeeded:0,failed:0,diagnostics:{status:'YOUTUBE_INTEGRATION_DISABLED'},results:[{provider:'youtube',skipped:true,reason:'YOUTUBE_INTEGRATION_DISABLED'}]};
+  const maxResults=Math.max(1,Math.min(25,Number(context.settings.maxResults||25)));
   const queries=[scope.governmentName,scope.shortName,scope.organizationName,...scope.governmentAliases]
     .map(v=>String(v||'').trim()).filter(v=>v.length>=3&&!/^\d+$/.test(v))
     .filter((v,i,a)=>a.findIndex(x=>x.toLowerCase()===v.toLowerCase())===i).slice(0,5);
   if(!queries.length)return {providers:1,succeeded:0,failed:0,diagnostics:{status:'SOCIAL_DISCOVERY_TERMS_NOT_AVAILABLE'},results:[{provider:'youtube',skipped:true,reason:'SOCIAL_DISCOVERY_TERMS_NOT_AVAILABLE'}]};
-  const apiKey=decryptIntegrationCredential(row.credential_ciphertext);
   const publishedAfter=new Date(Date.now()-7*24*60*60*1000).toISOString();
   const allResults:any[]=[];let searchedVideos=0,shortCandidates=0,videosWithComments=0,commentsCollected=0,received=0,savedOrUpdated=0,skipped=0,ingestionFailed=0;
   for(const query of queries){
-    try{const result=await runYouTubeShortsCollection(pool,{apiKey,query,maxResults,publishedAfter});searchedVideos+=result.diagnostics?.searchedVideos??0;shortCandidates+=result.diagnostics?.shortCandidates??0;videosWithComments+=result.diagnostics?.videosWithComments??0;commentsCollected+=result.diagnostics?.commentsCollected??0;received+=result.received;savedOrUpdated+=result.succeeded;skipped+=result.skipped;ingestionFailed+=result.failed;allResults.push(...(result.results||[]));}
-    catch(error){ingestionFailed++;allResults.push({ok:false,query,error:error instanceof Error?error.message:String(error)});}
+    try{
+      const collected=await provider.collect(context,{query,maxResults,publishedAfter});
+      const d:any=collected.diagnostics||{};searchedVideos+=Number(d.searchedVideos||0);shortCandidates+=Number(d.shortCandidates||0);videosWithComments+=Number(d.videosWithComments||0);commentsCollected+=Number(d.commentsCollected||0);
+      if(!collected.candidates.length)continue;
+      const ingested=await ingestSocialBatch(pool,collected.candidates,'youtube-shorts'),results=ingested.results as any[];
+      received+=ingested.received;savedOrUpdated+=results.filter(x=>x.ok===true&&x.skipped!==true).length;skipped+=results.filter(x=>x.skipped===true).length;ingestionFailed+=ingested.failed;allResults.push(...results);
+    }catch(error){ingestionFailed++;allResults.push({ok:false,query,error:error instanceof Error?error.message:String(error)});}
   }
   const manualLocked=allResults.filter(x=>x.reason==='MANUAL_CLASSIFICATION_LOCKED').length;
   const scopeReview=allResults.filter(x=>x.reason==='ORGANIZATION_SCOPE_REVIEW').length;
