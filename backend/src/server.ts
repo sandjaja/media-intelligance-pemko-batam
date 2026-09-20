@@ -183,6 +183,28 @@ app.post('/api/social/threads/smoke-search',{preHandler:[requireAuth,requireRole
  await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'THREADS_KEYWORD_SMOKE_TEST',$2::jsonb)`,[request.user?.id,JSON.stringify({query:parsed.data.query,searchType:parsed.data.searchType,status:'healthy',received:normalized.length,diagnostic})]);
  return{data:{provider:'threads',mode:'keyword_search_smoke',query:parsed.data.query,searchType:parsed.data.searchType,received:normalized.length,items:normalized,paging:Boolean(payload?.paging),diagnostic}};
 });
+app.post('/api/social/threads/smoke-matrix',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
+ const parsed=z.object({query:z.string().trim().min(2).max(120).default('Batam'),limit:z.coerce.number().int().min(1).max(10).default(5)}).safeParse(request.body??{});
+ if(!parsed.success)return reply.code(400).send({error:'INVALID_THREADS_MATRIX_REQUEST'});
+ const org=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 1`)).rows[0];
+ if(!org)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ const row=(await pool.query(`SELECT c.credential_ciphertext,c.enabled FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id WHERE c.organization_id=$1 AND p.code='threads' LIMIT 1`,[org.id])).rows[0];
+ if(!row)return reply.code(503).send({error:'THREADS_CREDENTIAL_NOT_CONFIGURED'});
+ if(!row.enabled)return reply.code(409).send({error:'THREADS_INTEGRATION_DISABLED'});
+ let credential:string;try{credential=decryptIntegrationCredential(row.credential_ciphertext);}catch{return reply.code(503).send({error:'THREADS_CREDENTIAL_DECRYPT_FAILED'});}
+ const tests=[] as any[];
+ for(const searchType of ['TOP','RECENT'] as const){
+  const url=new URL('https://graph.threads.net/v1.0/keyword_search');
+  url.searchParams.set('q',parsed.data.query);url.searchParams.set('search_type',searchType);url.searchParams.set('search_mode','KEYWORD');
+  url.searchParams.set('fields','id,text,username,permalink,timestamp,media_type');url.searchParams.set('limit',String(parsed.data.limit));url.searchParams.set('access_token',credential);
+  const response=await fetch(url,{headers:{accept:'application/json'}});const payload:any=await response.json().catch(()=>null);
+  const data=Array.isArray(payload?.data)?payload.data:[];
+  const apiError=payload?.error;const detail=[apiError?.code,apiError?.type,apiError?.message].filter(Boolean).join(' | ').slice(0,500);
+  tests.push({searchType,searchMode:'KEYWORD',httpStatus:response.status,ok:response.ok,rawDataCount:data.length,pagingPresent:Boolean(payload?.paging),topLevelKeys:payload&&typeof payload==='object'?Object.keys(payload).slice(0,20):[],detail:detail||null,items:data.slice(0,parsed.data.limit).map((item:any)=>({externalId:item?.id?String(item.id):null,authorHandle:item?.username??null,canonicalUrl:item?.permalink??null,content:item?.text??null,publishedAt:item?.timestamp??null,mediaType:item?.media_type??null}))});
+ }
+ await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'THREADS_KEYWORD_MATRIX_TEST',$2::jsonb)`,[request.user?.id,JSON.stringify({query:parsed.data.query,tests:tests.map(t=>({searchType:t.searchType,httpStatus:t.httpStatus,ok:t.ok,rawDataCount:t.rawDataCount,pagingPresent:t.pagingPresent,detail:t.detail}))})]);
+ return{data:{provider:'threads',mode:'keyword_search_matrix',query:parsed.data.query,tests}};
+});
 app.post('/api/social/youtube-shorts/run',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
  const parsed=z.object({
   query:z.string().trim().min(2).max(120),
