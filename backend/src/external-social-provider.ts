@@ -39,3 +39,25 @@ export async function loadExternalSocialProviderContext(pool:Pool,organizationId
  if(!row?.enabled)return null;
  return{organizationId,credential:decryptIntegrationCredential(row.credential_ciphertext),settings:row.settings||{}} as ExternalSocialProviderContext;
 }
+
+
+import { collectYouTubeShortCandidatesWithDiagnostics } from './youtube-shorts-collector.js';
+
+/** Reference implementation: existing YouTube Shorts collector behind the shared provider contract. */
+export const youtubeExternalSocialProvider:ExternalSocialProviderAdapter={
+ code:'youtube',
+ platform:'youtube',
+ async collect(context,discovery){
+  const maxFromSettings=Number(context.settings.maxResults||25);
+  const maxResults=Math.max(1,Math.min(25,Number(discovery.maxResults??maxFromSettings)));
+  const result=await collectYouTubeShortCandidatesWithDiagnostics({
+   apiKey:context.credential,
+   query:discovery.query,
+   maxResults,
+   publishedAfter:discovery.publishedAfter
+  });
+  return{candidates:result.candidates,diagnostics:{...result.diagnostics,maxResults}};
+ }
+};
+
+registerExternalSocialProvider(youtubeExternalSocialProvider);
