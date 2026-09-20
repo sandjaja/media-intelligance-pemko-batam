@@ -65,3 +65,21 @@ export async function linkSocialMentionToIssueMonitors(pool:Pool,args:{mentionId
   }
   return matches;
 }
+
+
+export async function linkOnlineArticleToIssueMonitors(pool:Pool,args:{articleId:string|number;publishedAt?:Date|string|null;title?:string|null;content?:string|null;taxonomyId?:number|null;}){
+  const manual=(await pool.query(`SELECT 1 FROM issue_articles WHERE article_id=$1 AND assignment_source='MANUAL' LIMIT 1`,[args.articleId])).rowCount;
+  if(manual)return[];
+  const matches=await matchActiveIssueMonitors(pool,{sourceType:'online',publishedAt:args.publishedAt,title:args.title,content:args.content,taxonomyId:args.taxonomyId});
+  for(const match of matches){
+    await pool.query(
+      `INSERT INTO issue_articles(issue_id,article_id,relevance_score,assignment_source)
+       VALUES($1,$2,$3,'ISSUE_MONITOR')
+       ON CONFLICT(issue_id,article_id) DO UPDATE
+       SET relevance_score=GREATEST(issue_articles.relevance_score,EXCLUDED.relevance_score),
+           assignment_source=CASE WHEN issue_articles.assignment_source='MANUAL' THEN issue_articles.assignment_source ELSE EXCLUDED.assignment_source END`,
+      [match.issueId,args.articleId,match.relevanceScore]
+    ).catch(()=>undefined);
+  }
+  return matches;
+}
