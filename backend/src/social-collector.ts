@@ -5,6 +5,7 @@ import { analyzeSocialRoutingV16 } from './social-v16-adapter.js';
 import { loadOrganizationMediaScope } from './organization-media-scope.js';
 import { classifySocialOrganizationScope } from './social-organization-scope.js';
 import type { SocialConversationContext } from './social-context-adapter.js';
+import { linkSocialMentionToIssueMonitors } from './issue-monitor-matcher.js';
 
 export type SocialPlatform = 'instagram'|'facebook'|'tiktok'|'x'|'youtube'|'website'|'threads'|'other';
 export type SocialContentType = 'post'|'comment'|'reply'|'video'|'short'|'reel'|'story'|'live'|'article'|'other';
@@ -51,9 +52,10 @@ export async function ingestSocialCandidate(pool:Pool,candidate:SocialCandidate,
  if(existing?.metadata?.manualClassification?.locked===true)return{...existing,skipped:true,reason:'MANUAL_CLASSIFICATION_LOCKED',scopeDecision,routing:existing.metadata?.v16Routing??null};
  const{rows}=await pool.query(sql,values),mention=rows[0];
  if(routing.keywordId)await pool.query(`INSERT INTO social_mention_keywords(mention_id,keyword_id,matched_text,match_count,confidence) VALUES($1,$2,$3,1,$4) ON CONFLICT(mention_id,keyword_id) DO UPDATE SET matched_text=EXCLUDED.matched_text,match_count=EXCLUDED.match_count,confidence=EXCLUDED.confidence`,[mention.id,routing.keywordId,routing.keyword??'',routing.score>0?Math.min(1,routing.score/100):0]);
- if(routing.taxonomyId)await pool.query(`INSERT INTO social_mention_issues(mention_id,issue_id,relevance_score) SELECT $1,i.id,$3 FROM issues i WHERE i.taxonomy_category_id=$2 AND i.status IN ('active','watch') ORDER BY CASE WHEN i.status='active' THEN 0 ELSE 1 END,i.id LIMIT 1 ON CONFLICT(mention_id,issue_id) DO UPDATE SET relevance_score=EXCLUDED.relevance_score`,[mention.id,routing.taxonomyId,Math.min(100,Math.max(0,routing.score))]).catch(()=>undefined);
+ const monitorMatches=await linkSocialMentionToIssueMonitors(pool,{mentionId:Number(mention.id),sourceKind:candidate.sourceKind,publishedAt,title:candidate.title,content:routingContent,taxonomyId:routing.taxonomyId});
+ if(!monitorMatches.length&&routing.taxonomyId)await pool.query(`INSERT INTO social_mention_issues(mention_id,issue_id,relevance_score) SELECT $1,i.id,$3 FROM issues i WHERE i.taxonomy_category_id=$2 AND i.status IN ('active','watch') ORDER BY CASE WHEN i.status='active' THEN 0 ELSE 1 END,i.id LIMIT 1 ON CONFLICT(mention_id,issue_id) DO UPDATE SET relevance_score=EXCLUDED.relevance_score`,[mention.id,routing.taxonomyId,Math.min(100,Math.max(0,routing.score))]).catch(()=>undefined);
  await pool.query(`INSERT INTO evidence_sources(source_type,source_url,source_label,captured_at,content_hash,metadata,social_mention_id) SELECT $1,$2,$3,now(),$4,$5::jsonb,$6 WHERE NOT EXISTS(SELECT 1 FROM evidence_sources WHERE social_mention_id=$6)`,[candidate.sourceKind==='owned'?'owned_social':'social',candidate.canonicalUrl??null,candidate.authorName??candidate.authorHandle??candidate.platform,contentHash,JSON.stringify({collector:candidate.collector??defaultCollector,externalId:candidate.externalId??null,classificationEngine:routing.engine}),mention.id]);
- return{...mention,keywordMatches:routing.keywordId?1:0,matchedKeywordIds:routing.keywordId?[Number(routing.keywordId)]:[],scopeDecision,routing};
+ return{...mention,keywordMatches:routing.keywordId?1:0,matchedKeywordIds:routing.keywordId?[Number(routing.keywordId)]:[],issueMonitorMatches:monitorMatches,scopeDecision,routing};
 }
 
 export async function ingestSocialBatch(pool:Pool,candidates:SocialCandidate[],collector='social-batch'){const results:Record<string,unknown>[]=[];for(const candidate of candidates){try{results.push({ok:true,...await ingestSocialCandidate(pool,candidate,collector)})}catch(error){results.push({ok:false,platform:candidate.platform,externalId:candidate.externalId??null,error:error instanceof Error?error.message:String(error)})}}return{received:candidates.length,succeeded:results.filter(r=>r.ok).length,failed:results.filter(r=>!r.ok).length,results}}
