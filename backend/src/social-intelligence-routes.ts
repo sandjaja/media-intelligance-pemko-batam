@@ -49,6 +49,52 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     return r.rowCount === 1 ? Number(r.rows[0].id) : 0;
   };
 
+  app.post('/api/social/reanalyze', { preHandler: manager }, async (request, reply) => {
+    const organizationId = await resolveOrganizationId(request.socialAuth!);
+    if (!organizationId) return reply.code(409).send({ error: 'ORGANIZATION_UNRESOLVED' });
+    const mentions = (await pool.query(`
+      SELECT id,title,content,metadata,opd_id
+      FROM social_mentions
+      WHERE source_kind='external'
+        AND COALESCE(published_at,captured_at) >= NOW() - INTERVAL '7 days'
+      ORDER BY COALESCE(published_at,captured_at) DESC,id DESC
+    `)).rows;
+    let analyzed=0,routed=0,unrouted=0,manualLocked=0,failed=0;
+    const errors:Array<{id:string;error:string}>=[];
+    for (const mention of mentions) {
+      if (mention.metadata?.manualClassification?.locked===true) { manualLocked++; continue; }
+      try {
+        const routing=await analyzeSocialRoutingV16(pool,{title:mention.title,content:mention.content});
+        const client=await pool.connect();
+        try {
+          await client.query('BEGIN');
+          const metadata={...(mention.metadata||{}),v16Routing:routing};
+          await client.query(`UPDATE social_mentions SET opd_id=$2,metadata=$3::jsonb,processing_status=$4,updated_at=NOW() WHERE id=$1`,[
+            mention.id,routing.primaryOpdId,JSON.stringify(metadata),routing.routingStatus==='ROUTED'?'classified':'captured'
+          ]);
+          await client.query(`DELETE FROM social_mention_keywords WHERE mention_id=$1`,[mention.id]);
+          if(routing.keywordId) await client.query(`INSERT INTO social_mention_keywords(mention_id,keyword_id,matched_text,match_count,confidence) VALUES($1,$2,$3,1,$4) ON CONFLICT(mention_id,keyword_id) DO UPDATE SET matched_text=EXCLUDED.matched_text,match_count=1,confidence=EXCLUDED.confidence`,[
+            mention.id,routing.keywordId,routing.keyword??'',routing.score>0?Math.min(1,routing.score/100):0
+          ]);
+          await client.query(`DELETE FROM social_mention_issues WHERE mention_id=$1 AND COALESCE(linkage_source,'rule')<>'manual'`,[mention.id]);
+          if(routing.taxonomyId) await client.query(`INSERT INTO social_mention_issues(mention_id,issue_id,relevance_score,linkage_source) SELECT $1,i.id,$3,'rule' FROM issues i WHERE i.organization_id=$4 AND i.taxonomy_category_id=$2 AND i.status IN ('active','watch') ORDER BY CASE WHEN i.status='active' THEN 0 ELSE 1 END,i.id LIMIT 1 ON CONFLICT(mention_id,issue_id) DO UPDATE SET relevance_score=EXCLUDED.relevance_score,linkage_source=CASE WHEN social_mention_issues.linkage_source='manual' THEN 'manual' ELSE 'rule' END`,[
+            mention.id,routing.taxonomyId,Math.min(100,Math.max(0,routing.score)),organizationId
+          ]);
+          await client.query('COMMIT');
+        } catch(e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
+        analyzed++; if(routing.routingStatus==='ROUTED')routed++;else unrouted++;
+      } catch(e) {
+        failed++; if(errors.length<20)errors.push({id:String(mention.id),error:e instanceof Error?e.message:String(e)});
+      }
+    }
+    let clustering:null|Record<string,unknown>=null;
+    try { clustering=await persistSocialConversationClusters(pool,organizationId,7) as unknown as Record<string,unknown>; } catch(e) { request.log.error({err:e},'social reanalyze clustering failed'); }
+    await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'SOCIAL_REANALYZE_7D',$2::jsonb)`,[
+      request.socialAuth!.id,JSON.stringify({organizationId,windowDays:7,total:mentions.length,analyzed,routed,unrouted,manualLocked,failed})
+    ]).catch(()=>undefined);
+    return {ok:true,data:{windowDays:7,total:mentions.length,analyzed,routed,unrouted,manualLocked,failed,errors,clustering}};
+  });
+
   app.get('/api/admin/social/:id/classification-keywords',{preHandler:manager},async(request,reply)=>{const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});const mentionId=Number((request.params as any).id),q=String((request.query as any)?.q||'').trim();if(!Number.isInteger(mentionId)||mentionId<=0)return reply.code(400).send({error:'INVALID_MENTION_ID'});const params:any[]=[organizationId];let search='';if(q){params.push(`%${q}%`);search=` AND (k.keyword ILIKE $2 OR t.name ILIKE $2)`;}const rows=(await pool.query(`SELECT k.id keyword_id,k.keyword,kt.weight,t.id taxonomy_id,t.name taxonomy_name,(SELECT jsonb_agg(jsonb_build_object('opdId',ko.opd_id,'opdName',o.name,'role',ko.routing_role) ORDER BY CASE WHEN ko.routing_role='PRIMARY' THEN 0 ELSE 1 END,o.name) FROM keyword_opd ko JOIN opd o ON o.id=ko.opd_id AND o.active=true WHERE ko.keyword_id=k.id AND ko.active=true) routing FROM keywords k JOIN keyword_taxonomy kt ON kt.keyword_id=k.id AND kt.active=true JOIN taxonomy_categories t ON t.id=kt.category_id AND t.active=true WHERE k.organization_id=$1 AND k.active=true AND k.opd_id IS NULL AND k.district_id IS NULL ${search} ORDER BY kt.weight DESC,k.keyword LIMIT 80`,params)).rows;return{data:rows};});
 
   app.put('/api/admin/social/:id/classification-keyword',{preHandler:manager},async(request,reply)=>{const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});const mentionId=Number((request.params as any).id),p=z.object({keywordId:z.number().int().positive(),reason:z.string().trim().max(1000).optional().default('')}).safeParse(request.body);if(!Number.isInteger(mentionId)||mentionId<=0||!p.success)return reply.code(400).send({error:'INVALID_REQUEST'});const actor=request.socialAuth!;const mention=(await pool.query(`SELECT id,title,content,source_kind,metadata,opd_id FROM social_mentions WHERE id=$1`,[mentionId])).rows[0];if(!mention)return reply.code(404).send({error:'MENTION_NOT_FOUND'});if(mention.source_kind!=='external')return reply.code(409).send({error:'EXTERNAL_SOCIAL_REQUIRED'});const valid=(await pool.query(`SELECT k.id,k.keyword,COUNT(*) FILTER(WHERE ko.routing_role='PRIMARY' AND ko.active=true AND o.active=true)::int primary_count FROM keywords k LEFT JOIN keyword_opd ko ON ko.keyword_id=k.id LEFT JOIN opd o ON o.id=ko.opd_id WHERE k.id=$1 AND k.organization_id=$2 AND k.active=true GROUP BY k.id,k.keyword`,[p.data.keywordId,organizationId])).rows[0];if(!valid||Number(valid.primary_count)!==1)return reply.code(400).send({error:'KEYWORD_REQUIRES_EXACTLY_ONE_PRIMARY_OPD'});const routing=await analyzeSocialRoutingV16(pool,{title:mention.title,content:mention.content,manualKeywordId:p.data.keywordId});if(routing.routingStatus!=='ROUTED'||!routing.primaryOpdId)return reply.code(409).send({error:'MANUAL_KEYWORD_DID_NOT_PRODUCE_PRIMARY_OPD'});const client=await pool.connect();try{await client.query('BEGIN');const metadata={...(mention.metadata||{}),v16Routing:routing,manualClassification:{locked:true,keywordId:p.data.keywordId,organizationId,keyword:valid.keyword,reason:p.data.reason||null,selectedBy:actor.id,selectedAt:new Date().toISOString()}};await client.query(`UPDATE social_mentions SET opd_id=$2,metadata=$3::jsonb,processing_status='classified',updated_at=NOW() WHERE id=$1`,[mentionId,routing.primaryOpdId,JSON.stringify(metadata)]);await client.query(`DELETE FROM social_mention_keywords WHERE mention_id=$1`,[mentionId]);await client.query(`INSERT INTO social_mention_keywords(mention_id,keyword_id,matched_text,match_count,confidence) VALUES($1,$2,$3,1,1) ON CONFLICT(mention_id,keyword_id) DO UPDATE SET matched_text=EXCLUDED.matched_text,match_count=1,confidence=1`,[mentionId,p.data.keywordId,valid.keyword]);await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'SOCIAL_CLASSIFICATION_KEYWORD_CORRECTED',$2)`,[actor.id,{mentionId:String(mentionId),before:{opdId:mention.opd_id},after:{opdId:routing.primaryOpdId},keywordId:p.data.keywordId,keyword:valid.keyword,reason:p.data.reason||null}]);await client.query('COMMIT');return{ok:true,data:{mentionId:String(mentionId),keywordId:p.data.keywordId,routing,locked:true}};}catch(e){await client.query('ROLLBACK');request.log.error({err:e,mentionId},'social classification correction failed');return reply.code(409).send({error:'CLASSIFICATION_CORRECTION_FAILED'});}finally{client.release();}});
