@@ -83,3 +83,20 @@ export async function linkOnlineArticleToIssueMonitors(pool:Pool,args:{articleId
   }
   return matches;
 }
+
+
+export async function findPrintIssueMonitorCandidates(pool:Pool,args:{printArticleId:number;publishedAt?:Date|string|null;title?:string|null;content?:string|null;taxonomyId?:number|null;}){
+  const matches=await matchActiveIssueMonitors(pool,{sourceType:'print',publishedAt:args.publishedAt,title:args.title,content:args.content,taxonomyId:args.taxonomyId});
+  for(const match of matches){
+    await pool.query(
+      `INSERT INTO issue_print_articles(issue_id,print_article_id,relevance_score,linkage_status,evidence)
+       VALUES($1,$2,$3,'candidate',$4::jsonb)
+       ON CONFLICT(issue_id,print_article_id) DO UPDATE
+       SET relevance_score=CASE WHEN issue_print_articles.linkage_status='candidate' THEN GREATEST(issue_print_articles.relevance_score,EXCLUDED.relevance_score) ELSE issue_print_articles.relevance_score END,
+           evidence=CASE WHEN issue_print_articles.linkage_status='candidate' THEN EXCLUDED.evidence ELSE issue_print_articles.evidence END,
+           updated_at=CASE WHEN issue_print_articles.linkage_status='candidate' THEN now() ELSE issue_print_articles.updated_at END`,
+      [match.issueId,args.printArticleId,match.relevanceScore,JSON.stringify({engine:'ISSUE_MONITOR',monitorId:match.monitorId,monitorName:match.monitorName,matchedTerms:match.matchedTerms,reasons:[`Issue Monitor aktif: ${match.monitorName}`,`Term cocok: ${match.matchedTerms.join(', ')}`]})]
+    );
+  }
+  return matches;
+}
