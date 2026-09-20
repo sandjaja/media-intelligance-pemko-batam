@@ -15,6 +15,8 @@ export type SocialV16RoutingResult={
  engine:typeof SOCIAL_CLASSIFICATION_VERSION;
  generatedAt:string;
  routingStatus:'ROUTED'|'AMBIGUOUS'|'UNROUTED';
+ newsClassification:'UTAMA'|'PENDUKUNG';
+ newsClassificationSource:'AUTO'|'MANUAL';
  primaryOpdId:string|null;
  primaryOpdName:string|null;
  primaryOpdCode:string|null;
@@ -50,6 +52,7 @@ export async function analyzeSocialRoutingV16(pool:Pool,input:SocialV16Input):Pr
   const routingStatus:SocialV16RoutingResult['routingStatus']=headlineTaxonomies.length?'AMBIGUOUS':'UNROUTED';
   return{
    engine:SOCIAL_CLASSIFICATION_VERSION,generatedAt:new Date().toISOString(),routingStatus,
+   newsClassification:headlineTaxonomies.length?'UTAMA':'PENDUKUNG',newsClassificationSource:keywordSource,
    primaryOpdId:null,primaryOpdName:null,primaryOpdCode:null,supportingOpdIds:[],supportingOpds:[],
    keywordId:null,keyword:null,keywordSource,
    taxonomyId:headlineTaxonomies[0]?.id||null,taxonomyName:headlineTaxonomies[0]?.name||null,
@@ -70,6 +73,7 @@ export async function analyzeSocialRoutingV16(pool:Pool,input:SocialV16Input):Pr
 
  return{
   engine:SOCIAL_CLASSIFICATION_VERSION,generatedAt:new Date().toISOString(),routingStatus:'ROUTED',
+  newsClassification:'UTAMA',newsClassificationSource:keywordSource,
   primaryOpdId:evidence.opdId,primaryOpdName:primaryOpd?.name||null,primaryOpdCode:primaryOpd?.code||null,
   supportingOpdIds:evidence.supportingOpdIds,supportingOpds,
   keywordId:evidence.keywordId,keyword:evidence.keyword,keywordSource,
