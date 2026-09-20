@@ -3,6 +3,8 @@ import { Pool, PoolClient } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
+import { analyzePrintRoutingV16 } from './print-v16-adapter.js';
+import { findPrintIssueMonitorCandidates } from './issue-monitor-matcher.js';
 
 declare module 'fastify' { interface FastifyRequest { printIssueAuth?: AuthorizationContext } }
 
@@ -30,7 +32,7 @@ async function compute(client:PoolClient,article:any,analysis:Phase2EAnalysisLik
  }
  candidates.sort((a,b)=>b.score-a.score);const top=candidates.slice(0,3);return{engine:ENGINE,generatedAt:new Date().toISOString(),candidateCount:top.length,linkedIssueId:null,candidates:top,note:top.length?'Kandidat memiliki issue-specific anchor dan evidence kontekstual. Anchor numerik/tahun tidak dihitung sebagai anchor mandiri. Keputusan akhir tetap Humas/Super Admin.':'Belum ada issue aktif/watch dengan anchor spesifik yang cukup relevan. Kesamaan taxonomy/OPD/tahun saja tidak membentuk kandidat.'};
 }
-export async function evaluatePrintIssueLinkage(client:PoolClient,article:any,analysis:Phase2EAnalysisLike):Promise<IssueLinkageResult>{try{return await compute(client,article,analysis);}catch(e){console.error('print issue linkage degraded',e);return{engine:ENGINE,generatedAt:new Date().toISOString(),candidateCount:0,linkedIssueId:null,candidates:[],degraded:true,note:'Issue linkage gagal dihitung tetapi tidak memblokir proses analisis utama.'};}}
+export async function evaluatePrintIssueLinkage(client:PoolClient,article:any,analysis:Phase2EAnalysisLike):Promise<IssueLinkageResult>{try{const routing=await analyzePrintRoutingV16(client as any,{title:article.title,summary:article.summary,bodyText:article.body_text});await findPrintIssueMonitorCandidates(client as any,{printArticleId:Number(article.id),publishedAt:article.edition_date??article.created_at,title:article.title,content:`${article.summary||''} ${article.body_text||''}`,taxonomyId:routing.taxonomyId?Number(routing.taxonomyId):null});return await compute(client,article,analysis);}catch(e){console.error('print issue linkage degraded',e);return{engine:ENGINE,generatedAt:new Date().toISOString(),candidateCount:0,linkedIssueId:null,candidates:[],degraded:true,note:'Issue linkage gagal dihitung tetapi tidak memblokir proses analisis utama.'};}}
 
 export async function registerPrintIssueLinkageRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
  const auth=async(request:FastifyRequest,reply:any)=>{const token=request.cookies.access_token;if(!token)return reply.code(401).send({error:'UNAUTHENTICATED'});try{const decoded=jwt.verify(token,jwtSecret) as jwt.JwtPayload;if(typeof decoded.sub!=='string')throw new Error('invalid');const ctx=await loadAuthorizationContext(pool,decoded.sub);if(!ctx?.active)return reply.code(403).send({error:'ACCOUNT_INACTIVE'});request.printIssueAuth=ctx;}catch{return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'});}};const canManage=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
