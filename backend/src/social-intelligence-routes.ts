@@ -56,10 +56,10 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
       SELECT id,title,content,metadata,opd_id
       FROM social_mentions
       WHERE source_kind='external'
-        AND COALESCE(published_at,captured_at) >= NOW() - INTERVAL '7 days'
-      ORDER BY COALESCE(published_at,captured_at) DESC,id DESC
+        AND published_at >= NOW() - INTERVAL '7 days'
+      ORDER BY published_at DESC,id DESC
     `)).rows;
-    let analyzed=0,routed=0,unrouted=0,manualLocked=0,failed=0;
+    let analyzed=0,utama=0,ambigu=0,pendukung=0,manualLocked=0,failed=0;
     const errors:Array<{id:string;error:string}>=[];
     for (const mention of mentions) {
       if (mention.metadata?.manualClassification?.locked===true) { manualLocked++; continue; }
@@ -82,7 +82,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
           ]);
           await client.query('COMMIT');
         } catch(e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
-        analyzed++; if(routing.routingStatus==='ROUTED')routed++;else unrouted++;
+        analyzed++; if(routing.routingStatus==='AMBIGUOUS')ambigu++;else if(routing.newsClassification==='UTAMA')utama++;else pendukung++;
       } catch(e) {
         failed++; if(errors.length<20)errors.push({id:String(mention.id),error:e instanceof Error?e.message:String(e)});
       }
@@ -90,9 +90,9 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     let clustering:null|Record<string,unknown>=null;
     try { clustering=await persistSocialConversationClusters(pool,organizationId,7) as unknown as Record<string,unknown>; } catch(e) { request.log.error({err:e},'social reanalyze clustering failed'); }
     await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'SOCIAL_REANALYZE_7D',$2::jsonb)`,[
-      request.socialAuth!.id,JSON.stringify({organizationId,windowDays:7,total:mentions.length,analyzed,routed,unrouted,manualLocked,failed})
+      request.socialAuth!.id,JSON.stringify({organizationId,windowDays:7,total:mentions.length,analyzed,utama,ambigu,pendukung,manualLocked,failed})
     ]).catch(()=>undefined);
-    return {ok:true,data:{windowDays:7,total:mentions.length,analyzed,routed,unrouted,manualLocked,failed,errors,clustering}};
+    return {ok:true,data:{windowDays:7,total:mentions.length,analyzed,utama,ambigu,pendukung,manualLocked,failed,errors,clustering}};
   });
 
   app.get('/api/admin/social/:id/classification-keywords',{preHandler:manager},async(request,reply)=>{const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});const mentionId=Number((request.params as any).id),q=String((request.query as any)?.q||'').trim();if(!Number.isInteger(mentionId)||mentionId<=0)return reply.code(400).send({error:'INVALID_MENTION_ID'});const params:any[]=[organizationId];let search='';if(q){params.push(`%${q}%`);search=` AND (k.keyword ILIKE $2 OR t.name ILIKE $2)`;}const rows=(await pool.query(`SELECT k.id keyword_id,k.keyword,kt.weight,t.id taxonomy_id,t.name taxonomy_name,(SELECT jsonb_agg(jsonb_build_object('opdId',ko.opd_id,'opdName',o.name,'role',ko.routing_role) ORDER BY CASE WHEN ko.routing_role='PRIMARY' THEN 0 ELSE 1 END,o.name) FROM keyword_opd ko JOIN opd o ON o.id=ko.opd_id AND o.active=true WHERE ko.keyword_id=k.id AND ko.active=true) routing FROM keywords k JOIN keyword_taxonomy kt ON kt.keyword_id=k.id AND kt.active=true JOIN taxonomy_categories t ON t.id=kt.category_id AND t.active=true WHERE k.organization_id=$1 AND k.active=true AND k.opd_id IS NULL AND k.district_id IS NULL ${search} ORDER BY kt.weight DESC,k.keyword LIMIT 80`,params)).rows;return{data:rows};});
@@ -106,7 +106,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
       keywordId: z.string().regex(/^\d+$/).optional(),
       sentiment: sentimentSchema.optional(),
       riskLevel: z.enum(['low','medium','high','critical']).optional(),
-      routingStatus: z.enum(['ROUTED','UNROUTED']).optional(),
+      classification: z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional(),
       sourceKind: z.enum(['external','owned']).default('external'),
       from: z.string().optional(),
       to: z.string().optional(),
@@ -125,7 +125,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     if (parsed.data.platform) where.push(`sm.platform=${bind(parsed.data.platform)}`);
     if (parsed.data.sentiment) where.push(`sm.sentiment=${bind(parsed.data.sentiment)}`);
     if (parsed.data.riskLevel) where.push(`sm.risk_level=${bind(parsed.data.riskLevel)}`);
-    if (parsed.data.routingStatus) where.push(`COALESCE(sm.metadata->'v16Routing'->>'routingStatus','UNROUTED')=${bind(parsed.data.routingStatus)}`);
+    if (parsed.data.classification) { const cp=bind(parsed.data.classification); where.push(`CASE WHEN COALESCE(sm.metadata->'manualClassification'->>'locked','false')='true' THEN 'MANUAL' WHEN COALESCE(sm.metadata->'v16Routing'->>'routingStatus','UNROUTED')='AMBIGUOUS' THEN 'AMBIGU' ELSE COALESCE(sm.metadata->'v16Routing'->>'newsClassification',CASE WHEN COALESCE(sm.metadata->'v16Routing'->>'routingStatus','UNROUTED')='ROUTED' THEN 'UTAMA' ELSE 'PENDUKUNG' END) END=${cp}`); }
     if (parsed.data.from) where.push(`sm.published_at >= ${bind(parsed.data.from)}`);
     else where.push(`COALESCE(sm.published_at,sm.captured_at) >= NOW() - (${bind(parsed.data.days)}::int * INTERVAL '1 day')`);
     if (parsed.data.to) where.push(`sm.published_at < ${bind(parsed.data.to)}`);
@@ -255,7 +255,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   const auditConversation=async(client:any,userId:string,action:string,metadata:any)=>client.query('INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,$2,$3::jsonb)',[userId,action,JSON.stringify(metadata)]);
 
   app.get('/api/social/conversation-clusters',{preHandler:auth},async(request,reply)=>{
-    const parsed=z.object({days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7),platform:platformSchema.optional(),opdId:z.string().regex(/^\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),routingStatus:z.enum(['ROUTED','UNROUTED']).optional()}).safeParse(request.query);
+    const parsed=z.object({days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7),platform:platformSchema.optional(),opdId:z.string().regex(/^\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional()}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
     const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
     const params:unknown[]=[organizationId,parsed.data.days],memberWhere:string[]=["COALESCE(sm.published_at,sm.captured_at)>=NOW()-($2::int*INTERVAL '1 day')"];
@@ -265,7 +265,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     if(parsed.data.platform)memberWhere.push(`sm.platform=${bind(parsed.data.platform)}`);
     if(parsed.data.sentiment)memberWhere.push(`sm.sentiment=${bind(parsed.data.sentiment)}`);
     if(parsed.data.riskLevel)memberWhere.push(`sm.risk_level=${bind(parsed.data.riskLevel)}`);
-    if(parsed.data.routingStatus)memberWhere.push(`COALESCE(sm.metadata->'v16Routing'->>'routingStatus','UNROUTED')=${bind(parsed.data.routingStatus)}`);
+    if(parsed.data.classification){const cp=bind(parsed.data.classification);memberWhere.push(`CASE WHEN COALESCE(sm.metadata->'manualClassification'->>'locked','false')='true' THEN 'MANUAL' WHEN COALESCE(sm.metadata->'v16Routing'->>'routingStatus','UNROUTED')='AMBIGUOUS' THEN 'AMBIGU' ELSE COALESCE(sm.metadata->'v16Routing'->>'newsClassification',CASE WHEN COALESCE(sm.metadata->'v16Routing'->>'routingStatus','UNROUTED')='ROUTED' THEN 'UTAMA' ELSE 'PENDUKUNG' END) END=${cp}`)}
     const memberFilter=memberWhere.join(' AND ');
     const {rows}=await pool.query(`SELECT c.id,c.canonical_title,c.taxonomy_id,c.keyword_id,c.origin_mode,c.status,MIN(COALESCE(sm.published_at,sm.captured_at)) first_published_at,MAX(COALESCE(sm.published_at,sm.captured_at)) last_published_at,COUNT(sm.id)::int member_count,COUNT(DISTINCT sm.platform)::int platform_count,COALESCE(jsonb_agg(jsonb_build_object('id',sm.id,'platform',sm.platform,'title',sm.title,'content',sm.content,'authorName',sm.author_name,'authorHandle',sm.author_handle,'publishedAt',sm.published_at,'capturedAt',sm.captured_at,'sentiment',sm.sentiment,'riskLevel',sm.risk_level,'riskScore',sm.risk_score,'assignmentMode',cm.assignment_mode) ORDER BY COALESCE(sm.published_at,sm.captured_at) DESC) FILTER(WHERE sm.id IS NOT NULL),'[]'::jsonb) members FROM social_conversation_clusters c JOIN social_conversation_cluster_members cm ON cm.cluster_id=c.id JOIN social_mentions sm ON sm.id=cm.mention_id AND ${memberFilter} WHERE c.organization_id=$1 AND c.status='ACTIVE' GROUP BY c.id HAVING COUNT(sm.id)>0 ORDER BY COUNT(sm.id) DESC,MAX(COALESCE(sm.published_at,sm.captured_at)) DESC`,params);
     return{data:rows};
@@ -304,7 +304,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   });
 
   app.get('/api/social/conversation-insights', { preHandler: auth }, async (request, reply) => {
-    const parsed=z.object({days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7),platform:platformSchema.optional(),opdId:z.string().regex(/^\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),routingStatus:z.enum(['ROUTED','UNROUTED']).optional()}).safeParse(request.query);
+    const parsed=z.object({days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7),platform:platformSchema.optional(),opdId:z.string().regex(/^\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional()}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
     const params:unknown[]=[parsed.data.days],where:string[]=["source_kind='external'","COALESCE(published_at,captured_at) >= NOW() - ($1::int * INTERVAL '1 day')"];
     const bind=(value:unknown)=>{params.push(value);return '$'+params.length;};
@@ -313,7 +313,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     if(parsed.data.platform)where.push(`platform=${bind(parsed.data.platform)}`);
     if(parsed.data.sentiment)where.push(`sentiment=${bind(parsed.data.sentiment)}`);
     if(parsed.data.riskLevel)where.push(`risk_level=${bind(parsed.data.riskLevel)}`);
-    if(parsed.data.routingStatus)where.push(`COALESCE(metadata->'v16Routing'->>'routingStatus','UNROUTED')=${bind(parsed.data.routingStatus)}`);
+    if(parsed.data.classification){const cp=bind(parsed.data.classification);where.push(`CASE WHEN COALESCE(metadata->'manualClassification'->>'locked','false')='true' THEN 'MANUAL' WHEN COALESCE(metadata->'v16Routing'->>'routingStatus','UNROUTED')='AMBIGUOUS' THEN 'AMBIGU' ELSE COALESCE(metadata->'v16Routing'->>'newsClassification',CASE WHEN COALESCE(metadata->'v16Routing'->>'routingStatus','UNROUTED')='ROUTED' THEN 'UTAMA' ELSE 'PENDUKUNG' END) END=${cp}`)}
     const filter='WHERE '+where.join(' AND ');
     const mentions=await pool.query(`SELECT id::text,platform,title,content,published_at,captured_at,sentiment,risk_level,risk_score,metadata FROM social_mentions ${filter} ORDER BY COALESCE(published_at,captured_at) ASC,id ASC`,params);
     const trends=await pool.query(`SELECT date_trunc('day',COALESCE(published_at,captured_at))::date AS day,COUNT(*)::int AS mentions,COUNT(*) FILTER(WHERE sentiment='positive')::int positive,COUNT(*) FILTER(WHERE sentiment='neutral')::int neutral,COUNT(*) FILTER(WHERE sentiment='negative')::int negative,COUNT(*) FILTER(WHERE risk_level IN ('high','critical'))::int high_risk FROM social_mentions ${filter} GROUP BY 1 ORDER BY 1`,params);
@@ -326,7 +326,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   });
 
   app.get('/api/social/summary', { preHandler: auth }, async (request, reply) => {
-    const parsed=z.object({opdId:z.string().regex(/^\d+$/).optional(),platform:platformSchema.optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),routingStatus:z.enum(['ROUTED','UNROUTED']).optional(),from:z.string().optional(),to:z.string().optional(),days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7)}).safeParse(request.query);
+    const parsed=z.object({opdId:z.string().regex(/^\d+$/).optional(),platform:platformSchema.optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional(),from:z.string().optional(),to:z.string().optional(),days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7)}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
     const params:unknown[]=[],where:string[]=[`source_kind='external'`];const opdId=scopedOpd(request.socialAuth!,parsed.data.opdId);
     const bind=(value:unknown)=>{params.push(value);return '$'+params.length;};
@@ -334,12 +334,12 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     if(parsed.data.platform)where.push(`platform=${bind(parsed.data.platform)}`);
     if(parsed.data.sentiment)where.push(`sentiment=${bind(parsed.data.sentiment)}`);
     if(parsed.data.riskLevel)where.push(`risk_level=${bind(parsed.data.riskLevel)}`);
-    if(parsed.data.routingStatus)where.push(`COALESCE(metadata->'v16Routing'->>'routingStatus','UNROUTED')=${bind(parsed.data.routingStatus)}`);
+    if(parsed.data.classification){const cp=bind(parsed.data.classification);where.push(`CASE WHEN COALESCE(metadata->'manualClassification'->>'locked','false')='true' THEN 'MANUAL' WHEN COALESCE(metadata->'v16Routing'->>'routingStatus','UNROUTED')='AMBIGUOUS' THEN 'AMBIGU' ELSE COALESCE(metadata->'v16Routing'->>'newsClassification',CASE WHEN COALESCE(metadata->'v16Routing'->>'routingStatus','UNROUTED')='ROUTED' THEN 'UTAMA' ELSE 'PENDUKUNG' END) END=${cp}`)}
     if(parsed.data.from)where.push(`published_at >= ${bind(parsed.data.from)}`);
     else where.push(`COALESCE(published_at,captured_at) >= NOW() - (${bind(parsed.data.days)}::int * INTERVAL '1 day')`);
     if(parsed.data.to)where.push(`published_at < ${bind(parsed.data.to)}`);
     const filter='WHERE '+where.join(' AND ');
-    const metrics=await pool.query(`SELECT COUNT(*)::int total_mentions,COUNT(*) FILTER(WHERE sentiment='positive')::int positive,COUNT(*) FILTER(WHERE sentiment='neutral')::int neutral,COUNT(*) FILTER(WHERE sentiment='negative')::int negative,COUNT(*) FILTER(WHERE risk_level IN ('high','critical'))::int high_risk,COUNT(*) FILTER(WHERE COALESCE(metadata->'v16Routing'->>'routingStatus','UNROUTED')<>'ROUTED')::int unmapped,COALESCE(ROUND(AVG(risk_score),2),0) avg_risk,COALESCE(ROUND(AVG(influence_score),2),0) avg_influence FROM social_mentions ${filter}`,params);
+    const metrics=await pool.query(`SELECT COUNT(*)::int total_mentions,COUNT(*) FILTER(WHERE sentiment='positive')::int positive,COUNT(*) FILTER(WHERE sentiment='neutral')::int neutral,COUNT(*) FILTER(WHERE sentiment='negative')::int negative,COUNT(*) FILTER(WHERE risk_level IN ('high','critical'))::int high_risk,COUNT(*) FILTER(WHERE COALESCE(metadata->'v16Routing'->>'newsClassification',CASE WHEN COALESCE(metadata->'v16Routing'->>'routingStatus','UNROUTED')='ROUTED' THEN 'UTAMA' ELSE 'PENDUKUNG' END)='UTAMA' AND COALESCE(metadata->'v16Routing'->>'routingStatus','UNROUTED')<>'AMBIGUOUS')::int utama,COUNT(*) FILTER(WHERE COALESCE(metadata->'v16Routing'->>'routingStatus','UNROUTED')='AMBIGUOUS')::int ambigu,COUNT(*) FILTER(WHERE COALESCE(metadata->'v16Routing'->>'newsClassification',CASE WHEN COALESCE(metadata->'v16Routing'->>'routingStatus','UNROUTED')='ROUTED' THEN 'UTAMA' ELSE 'PENDUKUNG' END)='PENDUKUNG')::int pendukung,COALESCE(ROUND(AVG(risk_score),2),0) avg_risk,COALESCE(ROUND(AVG(influence_score),2),0) avg_influence FROM social_mentions ${filter}`,params);
     const byPlatform=await pool.query(`SELECT platform,COUNT(*)::int mentions,COUNT(*) FILTER(WHERE sentiment='negative')::int negative FROM social_mentions ${filter} GROUP BY platform ORDER BY mentions DESC`,params);
     return {metrics:metrics.rows[0],byPlatform:byPlatform.rows};
   });
