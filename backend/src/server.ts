@@ -155,9 +155,9 @@ app.patch('/api/admin/integrations/:code',{preHandler:[requireAuth,requireRole('
 app.post('/api/social/threads/smoke-search',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
  const parsed=z.object({query:z.string().trim().min(2).max(120).default('Batam'),searchType:z.enum(['TOP','RECENT']).default('RECENT'),limit:z.coerce.number().int().min(1).max(10).default(5)}).safeParse(request.body??{});
  if(!parsed.success)return reply.code(400).send({error:'INVALID_THREADS_SMOKE_REQUEST'});
- const org=(await pool.query(\`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 1\`)).rows[0];
+ const org=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 1`)).rows[0];
  if(!org)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
- const row=(await pool.query(\`SELECT c.credential_ciphertext,c.enabled FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id WHERE c.organization_id=$1 AND p.code='threads' LIMIT 1\`,[org.id])).rows[0];
+ const row=(await pool.query(`SELECT c.credential_ciphertext,c.enabled FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id WHERE c.organization_id=$1 AND p.code='threads' LIMIT 1`,[org.id])).rows[0];
  if(!row)return reply.code(503).send({error:'THREADS_CREDENTIAL_NOT_CONFIGURED'});
  if(!row.enabled)return reply.code(409).send({error:'THREADS_INTEGRATION_DISABLED'});
  let credential:string;
@@ -173,12 +173,12 @@ app.post('/api/social/threads/smoke-search',{preHandler:[requireAuth,requireRole
  if(!response.ok){
   const apiError=payload?.error;
   const detail=[apiError?.code,apiError?.type,apiError?.message].filter(Boolean).join(' | ').slice(0,500);
-  await pool.query(\`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'THREADS_KEYWORD_SMOKE_TEST',$2::jsonb)\`,[request.user?.id,JSON.stringify({query:parsed.data.query,searchType:parsed.data.searchType,status:'error',httpStatus:response.status,detail})]);
+  await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'THREADS_KEYWORD_SMOKE_TEST',$2::jsonb)`,[request.user?.id,JSON.stringify({query:parsed.data.query,searchType:parsed.data.searchType,status:'error',httpStatus:response.status,detail})]);
   return reply.code(422).send({error:'THREADS_KEYWORD_SEARCH_FAILED',httpStatus:response.status,detail});
  }
  const items=Array.isArray(payload?.data)?payload.data.slice(0,parsed.data.limit):[];
  const normalized=items.map((item:any)=>({externalId:item?.id?String(item.id):null,platform:'threads',contentType:'post',sourceKind:'external',authorHandle:item?.username??null,canonicalUrl:item?.permalink??null,content:item?.text??null,publishedAt:item?.timestamp??null,mediaType:item?.media_type??null}));
- await pool.query(\`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'THREADS_KEYWORD_SMOKE_TEST',$2::jsonb)\`,[request.user?.id,JSON.stringify({query:parsed.data.query,searchType:parsed.data.searchType,status:'healthy',received:normalized.length})]);
+ await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'THREADS_KEYWORD_SMOKE_TEST',$2::jsonb)`,[request.user?.id,JSON.stringify({query:parsed.data.query,searchType:parsed.data.searchType,status:'healthy',received:normalized.length})]);
  return{data:{provider:'threads',mode:'keyword_search_smoke',query:parsed.data.query,searchType:parsed.data.searchType,received:normalized.length,items:normalized,paging:Boolean(payload?.paging)}};
 });
 app.post('/api/social/youtube-shorts/run',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
