@@ -128,6 +128,22 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     return{ok:true,data:{mentionId:String(mentionId),verificationStatus:'REOPENED'}};
   });
 
+  app.post('/api/admin/social/classification-verification/bulk',{preHandler:manager},async(request,reply)=>{
+    const p=z.object({mentionIds:z.array(z.number().int().positive()).min(1).max(100)}).safeParse(request.body);
+    if(!p.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+    const actor=request.socialAuth!,ids=[...new Set(p.data.mentionIds)];let locked=0,skipped=0;const errors:Array<{id:number;error:string}>=[];
+    for(const mentionId of ids){try{
+      const mention=(await pool.query(`SELECT id,source_kind,metadata,opd_id FROM social_mentions WHERE id=$1`,[mentionId])).rows[0];
+      if(!mention||mention.source_kind!=='external'||mention.metadata?.manualClassification?.locked===true||mention.metadata?.socialVerification?.status==='LOCKED'){skipped++;continue;}
+      const routing=mention.metadata?.v16Routing||{},classification=routing.newsClassification||(routing.routingStatus==='ROUTED'?'UTAMA':routing.routingStatus==='AMBIGUOUS'?'UTAMA':'PENDUKUNG');
+      if(classification!=='UTAMA'||routing.routingStatus!=='ROUTED'||!mention.opd_id){skipped++;continue;}
+      const verification={status:'LOCKED',verifiedBy:actor.id,verifiedAt:new Date().toISOString(),reason:'Persetujuan massal Media Sosial'};
+      await pool.query(`UPDATE social_mentions SET metadata=jsonb_set(COALESCE(metadata,'{}'::jsonb),'{socialVerification}',$2::jsonb,true),updated_at=NOW() WHERE id=$1`,[mentionId,JSON.stringify(verification)]);
+      await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'SOCIAL_CLASSIFICATION_VERIFIED',$2::jsonb)`,[actor.id,JSON.stringify({mentionId:String(mentionId),classification:'UTAMA',opdId:mention.opd_id,bulk:true})]);locked++;
+    }catch(e){errors.push({id:mentionId,error:e instanceof Error?e.message:String(e)});}}
+    return{ok:true,data:{requested:ids.length,locked,skipped,failed:errors.length,errors:errors.slice(0,20)}};
+  });
+
   app.get('/api/social/mentions', { preHandler: auth }, async (request, reply) => {
     const parsed = z.object({
       platform: platformSchema.optional(),
