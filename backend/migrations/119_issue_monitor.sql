@@ -31,3 +31,12 @@ CREATE TABLE IF NOT EXISTS issue_monitor_sources (
   created_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (monitor_id, source_type)
 );
+
+-- Extend existing evidence-link provenance without changing legacy values.
+ALTER TABLE issue_articles DROP CONSTRAINT IF EXISTS issue_articles_assignment_source_check;
+ALTER TABLE issue_articles ADD CONSTRAINT issue_articles_assignment_source_check
+  CHECK (assignment_source IN ('AUTO','MANUAL','ISSUE_MONITOR'));
+
+ALTER TABLE social_mention_issues DROP CONSTRAINT IF EXISTS social_mention_issues_linkage_source_check;
+ALTER TABLE social_mention_issues ADD CONSTRAINT social_mention_issues_linkage_source_check
+  CHECK (linkage_source IN ('rule','ai','manual','ISSUE_MONITOR'));
