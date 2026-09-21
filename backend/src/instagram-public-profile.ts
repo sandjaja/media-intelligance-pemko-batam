@@ -1,4 +1,4 @@
-export type InstagramPublicProbeStatus='public_html_available'|'login_wall'|'challenge'|'blocked'|'unverified_html';
+export type InstagramPublicProbeStatus='public_metrics_available'|'page_only'|'login_wall'|'challenge'|'blocked'|'unverified_html';
 
 export type InstagramPublicProbeResult={
  status:InstagramPublicProbeStatus;
@@ -52,7 +52,8 @@ export async function probeInstagramPublicProfile(handleInput:string):Promise<In
  const profileSignals=lower.includes(handle.toLowerCase())&&(lower.includes('follower')||lower.includes('instagram'));
  const description=decodeMeta(html.match(/<meta[^>]+(?:property|name)=["'](?:og:description|description)["'][^>]+content=["']([^"']*)/i)?.[1]);
  const title=decodeMeta(html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']*)/i)?.[1]);
- const status:InstagramPublicProbeStatus=blocked?'blocked':challenge?'challenge':loginWall&&!profileSignals?'login_wall':response.ok&&profileSignals?'public_html_available':'unverified_html';
  const publicMetrics=parsePublicMetrics(description);
+ const hasPublicMetrics=publicMetrics.followers!=null||publicMetrics.following!=null||publicMetrics.posts!=null;
+ const status:InstagramPublicProbeStatus=blocked?'blocked':challenge?'challenge':loginWall&&!profileSignals?'login_wall':response.ok&&hasPublicMetrics?'public_metrics_available':response.ok&&profileSignals?'page_only':'unverified_html';
  return{status,httpStatus:response.status,finalUrl:response.url,htmlBytes:html.length,loginWall,challenge,blocked,profileSignals,title,description,publicMetrics};
 }
