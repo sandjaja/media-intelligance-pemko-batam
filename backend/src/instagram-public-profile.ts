@@ -36,6 +36,7 @@ function parsePublicMetrics(description:string|null){
  return{followers,following,posts,source:followers!=null||following!=null||posts!=null?'meta_description':null};
 }
 
+// Diagnostic only: inspect public payload without persisting raw Instagram HTML.
 function inspectPublicHtml(html:string,handle:string){
  const lower=html.toLowerCase();
  const keys=['follower_count','following_count','media_count','edge_followed_by','edge_follow','edge_owner_to_timeline_media','profile_id','user_id','shortcode'];
