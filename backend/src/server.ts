@@ -14,6 +14,7 @@ import { registerAskIntelligence } from './ask-intelligence.js';
 import { registerCollectionSchedulerRoutes } from './collection-scheduler-routes.js';
 import { runYouTubeShortsCollection } from './youtube-shorts-runner.js';
 import { decryptIntegrationCredential, encryptIntegrationCredential, integrationCredentialHint } from './integration-credentials.js';
+import { probeInstagramPublicProfile } from './instagram-public-profile.js';
 
 const env = { port: Number(process.env.PORT ?? 8080), databaseUrl: process.env.DATABASE_URL ?? '', jwtSecret: process.env.JWT_SECRET ?? '', accessTtl: process.env.ACCESS_TOKEN_TTL ?? '15m', refreshDays: Number(process.env.REFRESH_TOKEN_DAYS ?? 7), corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:3000', cookieSecure: process.env.COOKIE_SECURE === 'true' };
 if (!env.databaseUrl || !env.jwtSecret) throw new Error('DATABASE_URL and JWT_SECRET are required');
@@ -204,6 +205,12 @@ app.post('/api/social/threads/smoke-matrix',{preHandler:[requireAuth,requireRole
  }
  await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'THREADS_KEYWORD_MATRIX_TEST',$2::jsonb)`,[request.user?.id,JSON.stringify({query:parsed.data.query,tests:tests.map(t=>({searchType:t.searchType,httpStatus:t.httpStatus,ok:t.ok,rawDataCount:t.rawDataCount,pagingPresent:t.pagingPresent,detail:t.detail}))})]);
  return{data:{provider:'threads',mode:'keyword_search_matrix',query:parsed.data.query,tests}};
+});
+app.post('/api/social/instagram/public-profile-smoke-test',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
+ const parsed=z.object({accountId:z.coerce.number().int().positive()}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+ const account=(await pool.query("SELECT a.id,a.account_name,a.handle,a.profile_url,a.opd_id,o.name opd_name FROM owned_social_accounts a LEFT JOIN opd o ON o.id=a.opd_id WHERE a.id=$1 AND a.platform='instagram' AND a.active=true",[parsed.data.accountId])).rows[0];if(!account)return reply.code(404).send({error:'INSTAGRAM_OWNED_ACCOUNT_NOT_FOUND'});
+ const handle=String(account.handle||'').trim().replace(/^@/,'')||String(account.profile_url||'').match(/instagram\\.com\\/([^/?#]+)/i)?.[1]||'';if(!handle)return reply.code(409).send({error:'INSTAGRAM_HANDLE_UNRESOLVED'});
+ try{const probe=await probeInstagramPublicProfile(handle);await pool.query("INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'INSTAGRAM_PUBLIC_PROFILE_SMOKE_TEST',$2::jsonb)",[request.user?.id,JSON.stringify({accountId:account.id,handle,httpStatus:probe.httpStatus,status:probe.status,bytes:probe.htmlBytes,finalUrl:probe.finalUrl})]);return{data:{provider:'instagram',mode:'public_html_smoke_test',account:{id:account.id,opdName:account.opd_name,accountName:account.account_name,handle:'@'+handle},probe,persisted:false,note:'Smoke test only; no performance snapshot is written.'}}}catch(e:any){return reply.code(502).send({error:'INSTAGRAM_PUBLIC_FETCH_FAILED',detail:String(e?.message||e).slice(0,300)})}
 });
 app.post('/api/social/youtube/account-smoke-test',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
  const parsed=z.object({handle:z.string().trim().min(2).max(100)}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_YOUTUBE_HANDLE'});
