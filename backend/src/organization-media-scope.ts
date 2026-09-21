@@ -54,7 +54,7 @@ export function classifyArticleOrganizationScope(article:OnlineArticle,scope:Org
   const {strong,supporting}=organizationScopeTerms(scope);if(!strong.length)return{status:'OUT_OF_SCOPE',reason:'organization scope has no strong terms',matchedTerms:[]};
   const title=normalize(article.title),strongHits=strong.filter(term=>containsTerm(title,term)),supportingHits=supporting.filter(term=>containsTerm(title,term));
   const internalActorHits=[
-    ...uniqueTerms([scope.organizationName,scope.governmentName,scope.shortName,...scope.governmentAliases]).filter(term=>containsTerm(title,term)),
+    ...strong.filter(term=>containsTerm(title,term)),
     ...scope.actors.flatMap(actor=>actor.aliases.filter(term=>containsTerm(title,term)&&strongHits.length>0)),
     ...scope.districts.map(d=>normalize(d)).filter(d=>d&&containsTerm(title,`kecamatan ${d}`)).map(d=>`kecamatan ${d}`)
   ];
