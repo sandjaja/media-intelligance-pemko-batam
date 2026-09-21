@@ -45,7 +45,7 @@ app.get('/api/ingestion/history',{preHandler:requireAuth},async(request,reply)=>
 app.post('/api/ingestion/run',{preHandler:[requireAuth,requireRole('admin','operator')]},async()=>({results:await ingestEnabledSources(pool)}));
 app.get('/api/admin/integrations',{preHandler:[requireAuth,requireRole('admin')]},async()=>{
  const {rows}=await pool.query(`SELECT p.id,p.code,p.name,p.auth_type,p.active,
-   c.enabled,c.credential_hint,c.expires_at,c.last_test_at,c.last_status,c.last_error,c.updated_at,
+   c.enabled,c.credential_hint,c.app_id,c.app_secret_hint,c.expires_at,c.last_test_at,c.last_status,c.last_error,c.updated_at,
    COALESCE(s.settings,'{}'::jsonb) settings
   FROM integration_providers p
   LEFT JOIN organizations o ON o.active=true
@@ -53,6 +53,26 @@ app.get('/api/admin/integrations',{preHandler:[requireAuth,requireRole('admin')]
   LEFT JOIN integration_settings s ON s.provider_id=p.id AND s.organization_id=o.id
   WHERE p.active=true ORDER BY p.name`);
  return{data:rows};
+});
+app.put('/api/admin/integrations/:code/app-credentials',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
+ const code=z.enum(['instagram','threads']).safeParse((request.params as any).code);
+ const body=z.object({appId:z.string().trim().min(3).max(300),appSecret:z.string().trim().min(8).max(2000)}).safeParse(request.body);
+ if(!code.success||!body.success)return reply.code(400).send({error:'INVALID_APP_CREDENTIALS'});
+ const org=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 1`)).rows[0];
+ if(!org)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ const provider=(await pool.query(`SELECT id,code FROM integration_providers WHERE code=$1 AND active=true LIMIT 1`,[code.data])).rows[0];
+ if(!provider)return reply.code(404).send({error:'INTEGRATION_PROVIDER_NOT_FOUND'});
+ const encrypted=encryptIntegrationCredential(body.data.appSecret);
+ const hint=integrationCredentialHint(body.data.appSecret);
+ const existing=(await pool.query(`SELECT id FROM integration_credentials WHERE organization_id=$1 AND provider_id=$2`,[org.id,provider.id])).rows[0];
+ if(existing){
+  await pool.query(`UPDATE integration_credentials SET app_id=$1,app_secret_ciphertext=$2,app_secret_hint=$3,updated_by=$4,updated_at=NOW() WHERE id=$5`,[body.data.appId,encrypted,hint,request.user?.id,existing.id]);
+ }else{
+  const placeholder=encryptIntegrationCredential('not-configured');
+  await pool.query(`INSERT INTO integration_credentials(organization_id,provider_id,credential_ciphertext,credential_hint,enabled,last_status,created_by,updated_by,app_id,app_secret_ciphertext,app_secret_hint) VALUES($1,$2,$3,NULL,false,'disabled',$4,$4,$5,$6,$7)`,[org.id,provider.id,placeholder,request.user?.id,body.data.appId,encrypted,hint]);
+ }
+ await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'INTEGRATION_APP_CREDENTIALS_UPDATED',$2::jsonb)`,[request.user?.id,JSON.stringify({provider:provider.code,organizationId:org.id,appIdConfigured:true,appSecretConfigured:true})]);
+ return{data:{provider:provider.code,appId:body.data.appId,appSecretHint:hint}};
 });
 app.put('/api/admin/integrations/:code/settings',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
  const code=z.string().regex(/^[a-z0-9_-]+$/).safeParse((request.params as any).code);
