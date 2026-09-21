@@ -59,7 +59,13 @@ export async function collectYouTubeShortCandidatesWithDiagnostics(options:YouTu
  for(const video of shortVideos){
   const parent=videoParent(video);
   candidates.push(youtubeShortToSocialCandidate({video:parent,discovery,rawPayload:video}));
-  const threads=await getJson('/commentThreads',{part:'snippet,replies',videoId:parent.videoId,maxResults:100,textFormat:'plainText'},apiKey);
+  let threads:any;
+  try{threads=await getJson('/commentThreads',{part:'snippet,replies',videoId:parent.videoId,maxResults:100,textFormat:'plainText'},apiKey);}
+  catch(error){
+   const message=error instanceof Error?error.message:String(error);
+   if(message.includes('commentsDisabled'))continue;
+   throw error;
+  }
   if((threads.items??[]).length)videosWithComments++;
   for(const thread of threads.items??[]){
    const top=thread?.snippet?.topLevelComment;if(!top)continue;
