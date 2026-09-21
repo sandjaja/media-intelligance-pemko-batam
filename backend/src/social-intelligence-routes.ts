@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
+import { linkEligibleSocial } from './issue-monitor-matcher.js';
 import type { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
@@ -118,7 +119,8 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
       const verification={status:'LOCKED',verifiedBy:actor.id,verifiedAt:new Date().toISOString(),reason:p.data.reason||null};
       await pool.query(`UPDATE social_mentions SET metadata=jsonb_set(COALESCE(metadata,'{}'::jsonb),'{socialVerification}',$2::jsonb,true),updated_at=NOW() WHERE id=$1`,[mentionId,JSON.stringify(verification)]);
       await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'SOCIAL_CLASSIFICATION_VERIFIED',$2::jsonb)`,[actor.id,JSON.stringify({mentionId:String(mentionId),classification:'UTAMA',opdId:mention.opd_id,reason:p.data.reason||null})]);
-      return{ok:true,data:{mentionId:String(mentionId),verificationStatus:'LOCKED'}};
+      let issueMonitorMatches=0;try{const evidence=(await pool.query(`SELECT sm.published_at,sm.title,sm.content,sm.metadata->'v16Routing'->>'taxonomyId' taxonomy_id FROM social_mentions sm WHERE sm.id=$1`,[mentionId])).rows[0];if(evidence)issueMonitorMatches=(await linkEligibleSocial(pool,{mentionId,sourceKind:'external',evidenceId:mentionId,publishedAt:evidence.published_at,title:evidence.title,content:evidence.content,taxonomyId:evidence.taxonomy_id?Number(evidence.taxonomy_id):null})).length;}catch(e){request.log.warn({err:e,mentionId},'Issue Monitor social linkage skipped');}
+      return{ok:true,data:{mentionId:String(mentionId),verificationStatus:'LOCKED',issueMonitorMatches}};
     }
     if(!manualLocked&&!socialLocked)return reply.code(409).send({error:'SOCIAL_CLASSIFICATION_NOT_LOCKED'});
     const metadata={...(mention.metadata||{}),socialVerification:{status:'REOPENED',reopenedBy:actor.id,reopenedAt:new Date().toISOString(),reason:p.data.reason}};
@@ -139,7 +141,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
       if(classification!=='UTAMA'||routing.routingStatus!=='ROUTED'||!mention.opd_id){skipped++;continue;}
       const verification={status:'LOCKED',verifiedBy:actor.id,verifiedAt:new Date().toISOString(),reason:'Persetujuan massal Media Sosial'};
       await pool.query(`UPDATE social_mentions SET metadata=jsonb_set(COALESCE(metadata,'{}'::jsonb),'{socialVerification}',$2::jsonb,true),updated_at=NOW() WHERE id=$1`,[mentionId,JSON.stringify(verification)]);
-      await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'SOCIAL_CLASSIFICATION_VERIFIED',$2::jsonb)`,[actor.id,JSON.stringify({mentionId:String(mentionId),classification:'UTAMA',opdId:mention.opd_id,bulk:true})]);locked++;
+      await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'SOCIAL_CLASSIFICATION_VERIFIED',$2::jsonb)`,[actor.id,JSON.stringify({mentionId:String(mentionId),classification:'UTAMA',opdId:mention.opd_id,bulk:true})]);try{const evidence=(await pool.query(`SELECT published_at,title,content,metadata->'v16Routing'->>'taxonomyId' taxonomy_id FROM social_mentions WHERE id=$1`,[mentionId])).rows[0];if(evidence)await linkEligibleSocial(pool,{mentionId,sourceKind:'external',evidenceId:mentionId,publishedAt:evidence.published_at,title:evidence.title,content:evidence.content,taxonomyId:evidence.taxonomy_id?Number(evidence.taxonomy_id):null});}catch(e){request.log.warn({err:e,mentionId},'Issue Monitor bulk social linkage skipped');}locked++;
     }catch(e){errors.push({id:mentionId,error:e instanceof Error?e.message:String(e)});}}
     return{ok:true,data:{requested:ids.length,locked,skipped,failed:errors.length,errors:errors.slice(0,20)}};
   });
