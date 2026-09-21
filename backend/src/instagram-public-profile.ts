@@ -13,6 +13,7 @@ export type InstagramPublicProbeResult={
  description:string|null;
  publicMetrics:{followers:number|null;following:number|null;posts:number|null;source:string|null};
  diagnostics:{jsonScriptCount:number;hasHandle:boolean;signals:Record<string,boolean>};
+ diagnostics:{jsonScriptCount:number;hasHandle:boolean;signals:Record<string,boolean>};
 };
 
 function decodeMeta(value:string|null|undefined){
