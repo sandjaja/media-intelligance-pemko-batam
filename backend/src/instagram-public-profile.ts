@@ -11,6 +11,7 @@ export type InstagramPublicProbeResult={
  profileSignals:boolean;
  title:string|null;
  description:string|null;
+ publicMetrics:{followers:number|null;following:number|null;posts:number|null;source:string|null};
 };
 
 function decodeMeta(value:string|null|undefined){
@@ -35,5 +36,6 @@ export async function probeInstagramPublicProfile(handleInput:string):Promise<In
  const description=decodeMeta(html.match(/<meta[^>]+(?:property|name)=["'](?:og:description|description)["'][^>]+content=["']([^"']*)/i)?.[1]);
  const title=decodeMeta(html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']*)/i)?.[1]);
  const status:InstagramPublicProbeStatus=blocked?'blocked':challenge?'challenge':loginWall&&!profileSignals?'login_wall':response.ok&&profileSignals?'public_html_available':'unverified_html';
- return{status,httpStatus:response.status,finalUrl:response.url,htmlBytes:html.length,loginWall,challenge,blocked,profileSignals,title,description};
+ const publicMetrics=parsePublicMetrics(description);
+ return{status,httpStatus:response.status,finalUrl:response.url,htmlBytes:html.length,loginWall,challenge,blocked,profileSignals,title,description,publicMetrics};
 }
