@@ -121,8 +121,19 @@ export async function runScheduledCollectionIfDue(pool:Pool,now=new Date()){
   const hour=parts.find(x=>x.type==='hour')?.value||'00';
   const scheduled=String(config.run_time||'08:00:00').slice(0,5);
   if(`${hour}:00`!==scheduled.slice(0,2)+':00')return {ok:true,skipped:true,reason:'NOT_DUE',scheduled};
-  if(config.last_run_at){
-    const last=new Date(config.last_run_at);
+  // Only a successful/partial SCHEDULED run may suppress today's automatic run.
+  // Manual "Jalankan Sekarang" runs must never consume the daily schedule.
+  const latestScheduled=(await pool.query(
+    `SELECT finished_at
+       FROM collection_scheduler_runs
+      WHERE trigger_type='SCHEDULED'
+        AND status IN ('SUCCESS','PARTIAL')
+        AND finished_at IS NOT NULL
+      ORDER BY finished_at DESC
+      LIMIT 1`
+  )).rows[0];
+  if(latestScheduled?.finished_at){
+    const last=new Date(latestScheduled.finished_at);
     const dayFmt=new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit'});
     if(dayFmt.format(last)===dayFmt.format(now))return {ok:true,skipped:true,reason:'ALREADY_RAN_TODAY'};
   }
