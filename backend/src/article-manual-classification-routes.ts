@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { analyzeArticle } from './analyzer-v14.js';
 import { clearSupportingIntelligenceLinks } from './news-classification.js';
+import { linkEligibleOnline } from './issue-monitor-matcher.js';
 
 declare module 'fastify' { interface FastifyRequest { articleCorrectionAuth?: AuthorizationContext } }
 const canManage=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
