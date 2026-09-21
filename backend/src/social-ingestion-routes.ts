@@ -64,6 +64,39 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
     return reply.code(result.failed?207:201).send({data:result});
   });
 
+  app.get('/api/social/website/opd-comparison',{preHandler:auth},async(request,reply)=>{
+    const ctx=request.socialIngestAuth!;
+    if(!canReadAll(ctx))return reply.code(403).send({error:'FORBIDDEN'});
+    const parsed=z.object({days:z.coerce.number().int().refine(v=>v===7||v===30).default(7)}).safeParse(request.query||{});
+    if(!parsed.success)return reply.code(400).send({error:'INVALID_PERIOD'});
+    const days=parsed.data.days;
+    try{
+      const rows=(await pool.query(`SELECT a.id account_id,a.opd_id,a.account_name,a.handle,a.profile_url,
+        COALESCE(o.code,'') opd_code,COALESCE(o.name,a.account_name) opd_name,
+        COUNT(m.id) FILTER(WHERE COALESCE(m.published_at,m.captured_at)>=now()-($1::text||' days')::interval)::int articles_period,
+        MAX(m.published_at) last_published_at,MIN(COALESCE(m.published_at,m.captured_at)) first_data_at,
+        MAX(COALESCE(m.published_at,m.captured_at)) last_data_at
+        FROM owned_social_accounts a
+        LEFT JOIN opds o ON o.id=a.opd_id
+        LEFT JOIN social_mentions m ON m.platform='website' AND m.owned_account_id=a.id
+        WHERE a.platform='website' AND a.active=true AND a.opd_id IS NOT NULL
+        GROUP BY a.id,a.opd_id,a.account_name,a.handle,a.profile_url,o.code,o.name
+        ORDER BY articles_period DESC,opd_name ASC`,[days])).rows;
+      const daily=(await pool.query(`SELECT date_trunc('day',COALESCE(m.published_at,m.captured_at))::date day,a.opd_id,
+        COALESCE(o.name,a.account_name) opd_name,COUNT(*)::int articles
+        FROM owned_social_accounts a JOIN social_mentions m ON m.platform='website' AND m.owned_account_id=a.id
+        LEFT JOIN opds o ON o.id=a.opd_id
+        WHERE a.platform='website' AND a.active=true AND a.opd_id IS NOT NULL
+          AND COALESCE(m.published_at,m.captured_at)>=now()-($1::text||' days')::interval
+        GROUP BY day,a.opd_id,o.name,a.account_name ORDER BY day ASC`,[days])).rows;
+      const data=rows.map(r=>({accountId:Number(r.account_id),opdId:Number(r.opd_id),opdCode:r.opd_code,opdName:r.opd_name,profileUrl:r.profile_url,
+        articles:Number(r.articles_period||0),avgPerDay:Number((Number(r.articles_period||0)/days).toFixed(2)),
+        lastPublishedAt:r.last_published_at,firstDataAt:r.first_data_at,lastDataAt:r.last_data_at,
+        coverageDays:r.first_data_at?Math.min(days,Math.max(1,Math.ceil((Date.now()-new Date(r.first_data_at).getTime())/86400000))):0}));
+      return reply.send({data:{days,summary:{websites:data.length,active:data.filter(x=>x.articles>0).length,totalArticles:data.reduce((n,x)=>n+x.articles,0),inactive:data.filter(x=>x.articles===0).length},opds:data,daily:daily.map(r=>({day:r.day,opdId:Number(r.opd_id),opdName:r.opd_name,articles:Number(r.articles)}))}});
+    }catch(error){const message=error instanceof Error?error.message:String(error);app.log.error({err:error},'Website OPD comparison failed');return reply.code(500).send({error:'WEBSITE_OPD_COMPARISON_FAILED',message})}
+  });
+
   app.get('/api/social/website/account-performance/:accountId',{preHandler:auth},async(request,reply)=>{
     const accountId=z.coerce.number().int().positive().safeParse((request.params as any).accountId);
     if(!accountId.success)return reply.code(400).send({error:'INVALID_ACCOUNT_ID'});
