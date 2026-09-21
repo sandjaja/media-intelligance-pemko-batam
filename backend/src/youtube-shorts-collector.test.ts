@@ -44,7 +44,7 @@ test('YouTube provider surfaces API failure without leaking credential',async(t)
  globalThis.fetch=async()=>response({error:{message:'quota'}},403);
  t.after(()=>{globalThis.fetch=original;});
  await assert.rejects(()=>collectYouTubeShortCandidates({apiKey:'secret-fixture',query:'contoh'}),(error:any)=>{
-  assert.equal(error.message,'YOUTUBE_API_ERROR_403');
+  assert.match(error.message,/^YOUTUBE_API_ERROR_403 \\| search \\|/);
   assert.equal(error.message.includes('secret-fixture'),false);
   return true;
  });
