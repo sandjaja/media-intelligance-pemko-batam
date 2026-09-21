@@ -12,8 +12,7 @@ export type InstagramPublicProbeResult={
  title:string|null;
  description:string|null;
  publicMetrics:{followers:number|null;following:number|null;posts:number|null;source:string|null};
- diagnostics:{jsonScriptCount:number;hasHandle:boolean;signals:Record<string,boolean>};
- diagnostics:{jsonScriptCount:number;hasHandle:boolean;signals:Record<string,boolean>};
+ diagnostics:{jsonScriptCount:number;hasHandle:boolean;signals:Record<string,boolean>;candidateValues:Record<string,number|null>};
 };
 
 function decodeMeta(value:string|null|undefined){
@@ -40,9 +39,11 @@ function parsePublicMetrics(description:string|null){
 function inspectPublicHtml(html:string,handle:string){
  const lower=html.toLowerCase();
  const keys=['follower_count','following_count','media_count','edge_followed_by','edge_follow','edge_owner_to_timeline_media','profile_id','user_id','shortcode'];
- const signals:Object=Object.fromEntries(keys.map(key=>[key,lower.includes(key)]));
- const jsonScriptCount=(html.match(/<script[^>]+type=["']application\/(?:ld\+json|json)["'][^>]*>/gi)||[]).length;
- return{jsonScriptCount,hasHandle:lower.includes(handle.toLowerCase()),signals:signals as Record<string,boolean>};
+ const signals=Object.fromEntries(keys.map(key=>[key,lower.includes(key)])) as Record<string,boolean>;
+ const read=(key:string)=>{const escaped=key.replace(/[.*+?^$\{\}()|[\]\\]/g,'\\$&');const direct=html.match(new RegExp('["\\']'+escaped+'["\\']\\s*:\\s*([0-9]+)','i'));if(direct){const n=Number(direct[1]);return Number.isFinite(n)?n:null}const counted=html.match(new RegExp('["\\']'+escaped+'["\\']\\s*:\\s*\\{[^}]{0,160}?["\\']count["\\']\\s*:\\s*([0-9]+)','i'));if(counted){const n=Number(counted[1]);return Number.isFinite(n)?n:null}return null};
+ const candidateValues:Record<string,number|null>={follower_count:read('follower_count'),following_count:read('following_count'),media_count:read('media_count'),edge_followed_by:read('edge_followed_by'),edge_follow:read('edge_follow'),edge_owner_to_timeline_media:read('edge_owner_to_timeline_media')};
+ const jsonScriptCount=(html.match(/<script[^>]+type=["']application\\/(?:ld\\+json|json)["'][^>]*>/gi)||[]).length;
+ return{jsonScriptCount,hasHandle:lower.includes(handle.toLowerCase()),signals,candidateValues};
 }
 
 export async function probeInstagramPublicProfile(handleInput:string):Promise<InstagramPublicProbeResult>{
@@ -67,7 +68,6 @@ export async function probeInstagramPublicProfile(handleInput:string):Promise<In
  if(publicMetrics.followers==null&&diagnostics.candidateValues.follower_count!=null){publicMetrics.followers=diagnostics.candidateValues.follower_count;publicMetrics.source='structured_html'}
  if(publicMetrics.following==null&&diagnostics.candidateValues.following_count!=null){publicMetrics.following=diagnostics.candidateValues.following_count;publicMetrics.source='structured_html'}
  if(publicMetrics.posts==null&&diagnostics.candidateValues.media_count!=null){publicMetrics.posts=diagnostics.candidateValues.media_count;publicMetrics.source='structured_html'}
- const diagnostics=inspectPublicHtml(html,handle);
  const hasPublicMetrics=publicMetrics.followers!=null||publicMetrics.following!=null||publicMetrics.posts!=null;
  const status:InstagramPublicProbeStatus=blocked?'blocked':challenge?'challenge':loginWall&&!profileSignals?'login_wall':response.ok&&hasPublicMetrics?'public_metrics_available':response.ok&&profileSignals?'page_only':'unverified_html';
  return{status,httpStatus:response.status,finalUrl:response.url,htmlBytes:html.length,loginWall,challenge,blocked,profileSignals,title,description,publicMetrics,diagnostics};
