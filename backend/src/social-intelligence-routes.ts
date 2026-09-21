@@ -74,7 +74,8 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
           const client=await pool.connect();
           try{
             await client.query('BEGIN');
-            const metadata={...(mention.metadata||{}),organizationScope:scopeDecision};
+            const {v16Routing:_staleRouting,...restMetadata}=mention.metadata||{};
+            const metadata={...restMetadata,organizationScope:scopeDecision};
             await client.query(`UPDATE social_mentions SET opd_id=NULL,metadata=$2::jsonb,processing_status='captured',updated_at=NOW() WHERE id=$1`,[mention.id,JSON.stringify(metadata)]);
             await client.query(`DELETE FROM social_mention_keywords WHERE mention_id=$1`,[mention.id]);
             await client.query(`DELETE FROM social_mention_issues WHERE mention_id=$1 AND COALESCE(linkage_source,'rule')<>'manual'`,[mention.id]);
