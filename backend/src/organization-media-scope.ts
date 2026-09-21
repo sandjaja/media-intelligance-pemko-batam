@@ -43,9 +43,19 @@ export async function loadOrganizationMediaScope(pool: Pool, organizationId?: nu
   return {organizationId:Number(org.id),organizationName:String(org.name||''),organizationCode:org.code??null,governmentName:branding.government_name??null,shortName:branding.short_name??null,governmentAliases,cityName:branding.city_name??null,tagline:branding.tagline??null,districts,actors};
 }
 
+function isSpecificOrganizationAlias(term:string,scope:OrganizationMediaScope){
+  const normalized=normalize(term),city=normalize(scope.cityName);
+  if(!normalized)return false;
+  if(city&&containsTerm(normalized,city))return true;
+  const formal=uniqueTerms([scope.organizationName,scope.governmentName,scope.shortName]);
+  return formal.includes(normalized);
+}
+
 export function organizationScopeTerms(scope:OrganizationMediaScope){
-  const strong=uniqueTerms([scope.cityName,scope.organizationName,scope.governmentName,scope.shortName,...scope.governmentAliases,...scope.districts]);
-  const supporting=uniqueTerms([scope.tagline,scope.organizationCode?.replace(/_/g,' ')]);
+  const formal=uniqueTerms([scope.organizationName,scope.governmentName,scope.shortName]);
+  const aliases=uniqueTerms(scope.governmentAliases);
+  const strong=uniqueTerms([...formal,...aliases.filter(term=>isSpecificOrganizationAlias(term,scope))]);
+  const supporting=uniqueTerms([scope.tagline,scope.organizationCode?.replace(/_/g,' '),...aliases.filter(term=>!isSpecificOrganizationAlias(term,scope))]);
   return{strong,supporting};
 }
 export function organizationScopeTokens(scope:OrganizationMediaScope):string[]{const{strong,supporting}=organizationScopeTerms(scope);return[...new Set([...strong,...supporting].flatMap(term=>term.split(/\s+/)).filter(token=>token.length>=3))];}
