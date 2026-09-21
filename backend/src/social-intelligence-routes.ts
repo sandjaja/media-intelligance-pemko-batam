@@ -77,10 +77,10 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
           if(routing.keywordId) await client.query(`INSERT INTO social_mention_keywords(mention_id,keyword_id,matched_text,match_count,confidence) VALUES($1,$2,$3,1,$4) ON CONFLICT(mention_id,keyword_id) DO UPDATE SET matched_text=EXCLUDED.matched_text,match_count=1,confidence=EXCLUDED.confidence`,[
             mention.id,routing.keywordId,routing.keyword??'',routing.score>0?Math.min(1,routing.score/100):0
           ]);
+          // Issue evidence is intentionally not created during re-analysis.
+          // External social becomes eligible only after explicit socialVerification=LOCKED,
+          // where the Issue Monitor applies period/source/topic matching.
           await client.query(`DELETE FROM social_mention_issues WHERE mention_id=$1 AND COALESCE(linkage_source,'rule')<>'manual'`,[mention.id]);
-          if(routing.taxonomyId) await client.query(`INSERT INTO social_mention_issues(mention_id,issue_id,relevance_score,linkage_source) SELECT $1,i.id,$3,'rule' FROM issues i WHERE i.organization_id=$4 AND i.taxonomy_category_id=$2 AND i.status IN ('active','watch') ORDER BY CASE WHEN i.status='active' THEN 0 ELSE 1 END,i.id LIMIT 1 ON CONFLICT(mention_id,issue_id) DO UPDATE SET relevance_score=EXCLUDED.relevance_score,linkage_source=CASE WHEN social_mention_issues.linkage_source='manual' THEN 'manual' ELSE 'rule' END`,[
-            mention.id,routing.taxonomyId,Math.min(100,Math.max(0,routing.score)),organizationId
-          ]);
           await client.query('COMMIT');
         } catch(e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
         analyzed++; if(routing.routingStatus==='AMBIGUOUS')ambigu++;else if(routing.newsClassification==='UTAMA')utama++;else pendukung++;
