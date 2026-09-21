@@ -4,6 +4,8 @@ import type { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { analyzeSocialRoutingV16 } from './social-v16-adapter.js';
+import { loadOrganizationMediaScope } from './organization-media-scope.js';
+import { classifySocialOrganizationScope } from './social-organization-scope.js';
 import { clusterSocialConversations, persistSocialConversationClusters } from './social-conversation-clustering.js';
 import { hasPermission, loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 
@@ -53,6 +55,8 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   app.post('/api/social/reanalyze', { preHandler: manager }, async (request, reply) => {
     const organizationId = await resolveOrganizationId(request.socialAuth!);
     if (!organizationId) return reply.code(409).send({ error: 'ORGANIZATION_UNRESOLVED' });
+    const scope=await loadOrganizationMediaScope(pool,organizationId);
+    if(!scope)return reply.code(409).send({error:'ORGANIZATION_SCOPE_UNRESOLVED'});
     const mentions = (await pool.query(`
       SELECT id,title,content,metadata,opd_id
       FROM social_mentions
@@ -60,11 +64,25 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
         AND published_at >= NOW() - INTERVAL '7 days'
       ORDER BY published_at DESC,id DESC
     `)).rows;
-    let analyzed=0,utama=0,ambigu=0,pendukung=0,manualLocked=0,failed=0;
+    let analyzed=0,utama=0,ambigu=0,pendukung=0,manualLocked=0,outOfScope=0,reviewScope=0,failed=0;
     const errors:Array<{id:string;error:string}>=[];
     for (const mention of mentions) {
       if (mention.metadata?.manualClassification?.locked===true || mention.metadata?.socialVerification?.status==='LOCKED') { manualLocked++; continue; }
       try {
+        const scopeDecision=classifySocialOrganizationScope({title:mention.title,content:mention.content},scope);
+        if(scopeDecision.status!=='RELEVANT'){
+          const client=await pool.connect();
+          try{
+            await client.query('BEGIN');
+            const metadata={...(mention.metadata||{}),organizationScope:scopeDecision};
+            await client.query(`UPDATE social_mentions SET opd_id=NULL,metadata=$2::jsonb,processing_status='captured',updated_at=NOW() WHERE id=$1`,[mention.id,JSON.stringify(metadata)]);
+            await client.query(`DELETE FROM social_mention_keywords WHERE mention_id=$1`,[mention.id]);
+            await client.query(`DELETE FROM social_mention_issues WHERE mention_id=$1 AND COALESCE(linkage_source,'rule')<>'manual'`,[mention.id]);
+            await client.query('COMMIT');
+          }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
+          if(scopeDecision.status==='OUT_OF_SCOPE')outOfScope++;else reviewScope++;
+          continue;
+        }
         const routing=await analyzeSocialRoutingV16(pool,{title:mention.title,content:mention.content});
         const client=await pool.connect();
         try {
@@ -91,9 +109,9 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     let clustering:null|Record<string,unknown>=null;
     try { clustering=await persistSocialConversationClusters(pool,organizationId,7) as unknown as Record<string,unknown>; } catch(e) { request.log.error({err:e},'social reanalyze clustering failed'); }
     await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'SOCIAL_REANALYZE_7D',$2::jsonb)`,[
-      request.socialAuth!.id,JSON.stringify({organizationId,windowDays:7,total:mentions.length,analyzed,utama,ambigu,pendukung,manualLocked,failed})
+      request.socialAuth!.id,JSON.stringify({organizationId,windowDays:7,total:mentions.length,analyzed,utama,ambigu,pendukung,manualLocked,outOfScope,reviewScope,failed})
     ]).catch(()=>undefined);
-    return {ok:true,data:{windowDays:7,total:mentions.length,analyzed,utama,ambigu,pendukung,manualLocked,failed,errors,clustering}};
+    return {ok:true,data:{windowDays:7,total:mentions.length,analyzed,utama,ambigu,pendukung,manualLocked,outOfScope,reviewScope,failed,errors,clustering}};
   });
 
   app.get('/api/admin/social/:id/classification-keywords',{preHandler:manager},async(request,reply)=>{const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});const mentionId=Number((request.params as any).id),q=String((request.query as any)?.q||'').trim();if(!Number.isInteger(mentionId)||mentionId<=0)return reply.code(400).send({error:'INVALID_MENTION_ID'});const params:any[]=[organizationId];let search='';if(q){params.push(`%${q}%`);search=` AND (k.keyword ILIKE $2 OR t.name ILIKE $2)`;}const rows=(await pool.query(`SELECT k.id keyword_id,k.keyword,kt.weight,t.id taxonomy_id,t.name taxonomy_name,(SELECT jsonb_agg(jsonb_build_object('opdId',ko.opd_id,'opdName',o.name,'role',ko.routing_role) ORDER BY CASE WHEN ko.routing_role='PRIMARY' THEN 0 ELSE 1 END,o.name) FROM keyword_opd ko JOIN opd o ON o.id=ko.opd_id AND o.active=true WHERE ko.keyword_id=k.id AND ko.active=true) routing FROM keywords k JOIN keyword_taxonomy kt ON kt.keyword_id=k.id AND kt.active=true JOIN taxonomy_categories t ON t.id=kt.category_id AND t.active=true WHERE k.organization_id=$1 AND k.active=true AND k.opd_id IS NULL AND k.district_id IS NULL ${search} ORDER BY kt.weight DESC,k.keyword LIMIT 80`,params)).rows;return{data:rows};});
