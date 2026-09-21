@@ -27,7 +27,7 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
   };
   const requireWrite=async(request:FastifyRequest,reply:any)=>{
     const ctx=request.socialIngestAuth!;
-    if(!hasPermission(ctx,'intelligence.write')&&!hasPermission(ctx,'platform.admin'))return reply.code(403).send({error:'FORBIDDEN'});
+    if(!hasPermission(ctx,'intelligence.write')&&!hasPermission(ctx,'platform.admin')&&!ctx.roles.includes('humas'))return reply.code(403).send({error:'FORBIDDEN'});
   };
   const canReadAll=(ctx:AuthorizationContext)=>hasPermission(ctx,'platform.admin')||hasPermission(ctx,'intelligence.read.all');
 
@@ -74,7 +74,7 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
     try{
       const rows=(await pool.query(`SELECT a.id account_id,a.opd_id,a.account_name,a.handle,a.profile_url,
         COALESCE(o.code,'') opd_code,COALESCE(o.name,a.account_name) opd_name,
-        COUNT(m.id) FILTER(WHERE COALESCE(m.published_at,m.captured_at)>=now()-($1::text||' days')::interval)::int articles_period,
+        COUNT(m.id) FILTER(WHERE COALESCE(m.published_at,m.captured_at)>=now()-make_interval(days => $1::int))::int articles_period,
         MAX(m.published_at) last_published_at,MIN(COALESCE(m.published_at,m.captured_at)) first_data_at,
         MAX(COALESCE(m.published_at,m.captured_at)) last_data_at
         FROM owned_social_accounts a
@@ -88,7 +88,7 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
         FROM owned_social_accounts a JOIN social_mentions m ON m.platform='website' AND m.owned_account_id=a.id
         LEFT JOIN opd o ON o.id=a.opd_id
         WHERE a.platform='website' AND a.active=true AND a.opd_id IS NOT NULL
-          AND COALESCE(m.published_at,m.captured_at)>=now()-($1::text||' days')::interval
+          AND COALESCE(m.published_at,m.captured_at)>=now()-make_interval(days => $1::int)
         GROUP BY day,a.opd_id,o.name,a.account_name ORDER BY day ASC`,[days])).rows;
       const data=rows.map(r=>({accountId:Number(r.account_id),opdId:Number(r.opd_id),opdCode:r.opd_code,opdName:r.opd_name,profileUrl:r.profile_url,
         articles:Number(r.articles_period||0),avgPerDay:Number((Number(r.articles_period||0)/days).toFixed(2)),
@@ -130,7 +130,7 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
     try{
       const account=(await pool.query(`SELECT id,opd_id,account_name,profile_url FROM owned_social_accounts WHERE id=$1 AND platform='website' AND active=true LIMIT 1`,[accountId.data])).rows[0];
       if(!account)return reply.code(404).send({error:'WEBSITE_ACCOUNT_NOT_FOUND'});
-      if(!canReadAll(ctx)&&String(account.opd_id??'')!==String(ctx.opdId??''))return reply.code(403).send({error:'FORBIDDEN'});
+      if(!canReadAll(ctx)&&!ctx.roles.includes('humas')&&String(account.opd_id??'')!==String(ctx.opdId??''))return reply.code(403).send({error:'FORBIDDEN'});
 
       await pool.query(
         `INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'WEBSITE_SOCIAL_INGEST_STARTED',$2::jsonb)`,
