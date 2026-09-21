@@ -78,7 +78,7 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
         MAX(m.published_at) last_published_at,MIN(COALESCE(m.published_at,m.captured_at)) first_data_at,
         MAX(COALESCE(m.published_at,m.captured_at)) last_data_at
         FROM owned_social_accounts a
-        LEFT JOIN opds o ON o.id=a.opd_id
+        LEFT JOIN opd o ON o.id=a.opd_id
         LEFT JOIN social_mentions m ON m.platform='website' AND m.owned_account_id=a.id
         WHERE a.platform='website' AND a.active=true AND a.opd_id IS NOT NULL
         GROUP BY a.id,a.opd_id,a.account_name,a.handle,a.profile_url,o.code,o.name
@@ -86,7 +86,7 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
       const daily=(await pool.query(`SELECT date_trunc('day',COALESCE(m.published_at,m.captured_at))::date day,a.opd_id,
         COALESCE(o.name,a.account_name) opd_name,COUNT(*)::int articles
         FROM owned_social_accounts a JOIN social_mentions m ON m.platform='website' AND m.owned_account_id=a.id
-        LEFT JOIN opds o ON o.id=a.opd_id
+        LEFT JOIN opd o ON o.id=a.opd_id
         WHERE a.platform='website' AND a.active=true AND a.opd_id IS NOT NULL
           AND COALESCE(m.published_at,m.captured_at)>=now()-($1::text||' days')::interval
         GROUP BY day,a.opd_id,o.name,a.account_name ORDER BY day ASC`,[days])).rows;
@@ -104,7 +104,7 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
     const ctx=request.socialIngestAuth!;
     const account=(await pool.query(`SELECT id,opd_id,account_name,handle,profile_url FROM owned_social_accounts WHERE id=$1 AND platform='website' AND active=true LIMIT 1`,[accountId.data])).rows[0];
     if(!account)return reply.code(404).send({error:'WEBSITE_ACCOUNT_NOT_FOUND'});
-    if(!canReadAll(ctx)&&String(account.opd_id??'')!==String(ctx.opdId??''))return reply.code(403).send({error:'FORBIDDEN'});
+    if(!canReadAll(ctx)&&!ctx.roles.includes('humas')&&String(account.opd_id??'')!==String(ctx.opdId??''))return reply.code(403).send({error:'FORBIDDEN'});
     try{
       const stats=(await pool.query(`SELECT
         COUNT(*) FILTER(WHERE COALESCE(published_at,captured_at)>=now()-interval '7 days')::int articles_7d,
