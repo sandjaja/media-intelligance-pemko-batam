@@ -41,9 +41,18 @@ function inspectPublicHtml(html:string,handle:string){
  const lower=html.toLowerCase();
  const keys=['follower_count','following_count','media_count','edge_followed_by','edge_follow','edge_owner_to_timeline_media','profile_id','user_id','shortcode'];
  const signals=Object.fromEntries(keys.map(key=>[key,lower.includes(key)])) as Record<string,boolean>;
- const read=(key:string)=>{const escaped=key.replace(/[.*+?^$\{\}()|[\]\\]/g,'\\$&');const direct=html.match(new RegExp('["\\']'+escaped+'["\\']\\s*:\\s*([0-9]+)','i'));if(direct){const n=Number(direct[1]);return Number.isFinite(n)?n:null}const counted=html.match(new RegExp('["\\']'+escaped+'["\\']\\s*:\\s*\\{[^}]{0,160}?["\\']count["\\']\\s*:\\s*([0-9]+)','i'));if(counted){const n=Number(counted[1]);return Number.isFinite(n)?n:null}return null};
+ const read=(key:string)=>{
+  const marker='"'+key+'"';
+  const pos=html.indexOf(marker);
+  if(pos<0)return null;
+  const chunk=html.slice(pos+marker.length,pos+marker.length+220);
+  const direct=chunk.match(/^\s*:\s*(\d+)/);
+  if(direct)return Number(direct[1]);
+  const counted=chunk.match(/^\s*:\s*\{[^}]{0,180}?"count"\s*:\s*(\d+)/);
+  return counted?Number(counted[1]):null;
+ };
  const candidateValues:Record<string,number|null>={follower_count:read('follower_count'),following_count:read('following_count'),media_count:read('media_count'),edge_followed_by:read('edge_followed_by'),edge_follow:read('edge_follow'),edge_owner_to_timeline_media:read('edge_owner_to_timeline_media')};
- const jsonScriptCount=(html.match(/<script[^>]+type=["']application\\/(?:ld\\+json|json)["'][^>]*>/gi)||[]).length;
+ const jsonScriptCount=(html.match(/<script[^>]+type=["']application\\\/(?:ld\\+json|json)["'][^>]*>/gi)||[]).length;
  return{jsonScriptCount,hasHandle:lower.includes(handle.toLowerCase()),signals,candidateValues};
 }
 
