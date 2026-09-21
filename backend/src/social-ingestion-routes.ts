@@ -83,18 +83,18 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
         WHERE a.platform='website' AND a.active=true AND a.opd_id IS NOT NULL
         GROUP BY a.id,a.opd_id,a.account_name,a.handle,a.profile_url,o.code,o.name
         ORDER BY articles_period DESC,opd_name ASC`,[days])).rows;
-      const daily=(await pool.query(`SELECT date_trunc('day',COALESCE(m.published_at,m.captured_at))::date day,a.opd_id,
+      const daily=(await pool.query(`SELECT date_trunc('day',COALESCE(m.published_at,m.captured_at))::date AS publication_date,a.opd_id,
         COALESCE(o.name,a.account_name) opd_name,COUNT(*)::int articles
         FROM owned_social_accounts a JOIN social_mentions m ON m.platform='website' AND m.owned_account_id=a.id
         LEFT JOIN opd o ON o.id=a.opd_id
         WHERE a.platform='website' AND a.active=true AND a.opd_id IS NOT NULL
           AND COALESCE(m.published_at,m.captured_at)>=now()-make_interval(days => $1::int)
-        GROUP BY day,a.opd_id,o.name,a.account_name ORDER BY day ASC`,[days])).rows;
+        GROUP BY date_trunc('day',COALESCE(m.published_at,m.captured_at))::date,a.opd_id,o.name,a.account_name ORDER BY publication_date ASC`,[days])).rows;
       const data=rows.map(r=>({accountId:Number(r.account_id),opdId:Number(r.opd_id),opdCode:r.opd_code,opdName:r.opd_name,profileUrl:r.profile_url,
         articles:Number(r.articles_period||0),avgPerDay:Number((Number(r.articles_period||0)/days).toFixed(2)),
         lastPublishedAt:r.last_published_at,firstDataAt:r.first_data_at,lastDataAt:r.last_data_at,
         coverageDays:r.first_data_at?Math.min(days,Math.max(1,Math.ceil((Date.now()-new Date(r.first_data_at).getTime())/86400000))):0}));
-      return reply.send({data:{days,summary:{websites:data.length,active:data.filter(x=>x.articles>0).length,totalArticles:data.reduce((n,x)=>n+x.articles,0),inactive:data.filter(x=>x.articles===0).length},opds:data,daily:daily.map(r=>({day:r.day,opdId:Number(r.opd_id),opdName:r.opd_name,articles:Number(r.articles)}))}});
+      return reply.send({data:{days,summary:{websites:data.length,active:data.filter(x=>x.articles>0).length,totalArticles:data.reduce((n,x)=>n+x.articles,0),inactive:data.filter(x=>x.articles===0).length},opds:data,daily:daily.map(r=>({day:r.publication_date,opdId:Number(r.opd_id),opdName:r.opd_name,articles:Number(r.articles)}))}});
     }catch(error){const message=error instanceof Error?error.message:String(error);app.log.error({err:error},'Website OPD comparison failed');return reply.code(500).send({error:'WEBSITE_OPD_COMPARISON_FAILED',message})}
   });
 
