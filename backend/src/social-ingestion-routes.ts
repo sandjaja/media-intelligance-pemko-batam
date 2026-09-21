@@ -64,6 +64,24 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
     return reply.code(result.failed?207:201).send({data:result});
   });
 
+  app.get('/api/social/website/account-performance/:accountId',{preHandler:auth},async(request,reply)=>{
+    const accountId=z.coerce.number().int().positive().safeParse((request.params as any).accountId);
+    if(!accountId.success)return reply.code(400).send({error:'INVALID_ACCOUNT_ID'});
+    const ctx=request.socialIngestAuth!;
+    const account=(await pool.query(`SELECT id,opd_id,account_name,handle,profile_url FROM owned_social_accounts WHERE id=$1 AND platform='website' AND active=true LIMIT 1`,[accountId.data])).rows[0];
+    if(!account)return reply.code(404).send({error:'WEBSITE_ACCOUNT_NOT_FOUND'});
+    if(!canReadAll(ctx)&&String(account.opd_id??'')!==String(ctx.opdId??''))return reply.code(403).send({error:'FORBIDDEN'});
+    const stats=(await pool.query(`SELECT
+      COUNT(*) FILTER(WHERE published_at>=now()-interval '7 days')::int articles_7d,
+      COUNT(*) FILTER(WHERE published_at>=now()-interval '30 days')::int articles_30d,
+      MAX(published_at) last_published_at,
+      MAX(captured_at) last_captured_at
+      FROM social_mentions WHERE platform='website' AND owned_account_id=$1`,[accountId.data])).rows[0];
+    const recent=(await pool.query(`SELECT id,title,canonical_url,published_at,captured_at FROM social_mentions WHERE platform='website' AND owned_account_id=$1 ORDER BY COALESCE(published_at,captured_at) DESC LIMIT 10`,[accountId.data])).rows;
+    const articles7=Number(stats?.articles_7d||0),articles30=Number(stats?.articles_30d||0);
+    return reply.send({data:{account:{id:Number(account.id),opdId:account.opd_id==null?null:Number(account.opd_id),accountName:account.account_name,handle:account.handle,profileUrl:account.profile_url},metrics:{articles7d:articles7,articles30d:articles30,avgPerDay7d:Number((articles7/7).toFixed(2)),avgPerDay30d:Number((articles30/30).toFixed(2)),lastPublishedAt:stats?.last_published_at||null,lastCapturedAt:stats?.last_captured_at||null},recent}});
+  });
+
   app.post('/api/social/ingestion/website/:accountId',{preHandler:[auth,requireWrite]},async(request,reply)=>{
     const accountId=z.coerce.number().int().positive().safeParse((request.params as any).accountId);
     if(!accountId.success)return reply.code(400).send({error:'INVALID_ACCOUNT_ID'});
