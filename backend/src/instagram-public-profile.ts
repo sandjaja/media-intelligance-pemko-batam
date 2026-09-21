@@ -12,6 +12,7 @@ export type InstagramPublicProbeResult={
  title:string|null;
  description:string|null;
  publicMetrics:{followers:number|null;following:number|null;posts:number|null;source:string|null};
+ diagnostics:{jsonScriptCount:number;hasHandle:boolean;signals:Record<string,boolean>};
 };
 
 function decodeMeta(value:string|null|undefined){
@@ -35,6 +36,14 @@ function parsePublicMetrics(description:string|null){
  return{followers,following,posts,source:followers!=null||following!=null||posts!=null?'meta_description':null};
 }
 
+function inspectPublicHtml(html:string,handle:string){
+ const lower=html.toLowerCase();
+ const keys=['follower_count','following_count','media_count','edge_followed_by','edge_follow','edge_owner_to_timeline_media','profile_id','user_id','shortcode'];
+ const signals:Object=Object.fromEntries(keys.map(key=>[key,lower.includes(key)]));
+ const jsonScriptCount=(html.match(/<script[^>]+type=["']application\/(?:ld\+json|json)["'][^>]*>/gi)||[]).length;
+ return{jsonScriptCount,hasHandle:lower.includes(handle.toLowerCase()),signals:signals as Record<string,boolean>};
+}
+
 export async function probeInstagramPublicProfile(handleInput:string):Promise<InstagramPublicProbeResult>{
  const handle=String(handleInput||'').trim().replace(/^@/,'');
  if(!/^[A-Za-z0-9._]{1,30}$/.test(handle))throw new Error('INVALID_INSTAGRAM_HANDLE');
@@ -53,7 +62,8 @@ export async function probeInstagramPublicProfile(handleInput:string):Promise<In
  const description=decodeMeta(html.match(/<meta[^>]+(?:property|name)=["'](?:og:description|description)["'][^>]+content=["']([^"']*)/i)?.[1]);
  const title=decodeMeta(html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']*)/i)?.[1]);
  const publicMetrics=parsePublicMetrics(description);
+ const diagnostics=inspectPublicHtml(html,handle);
  const hasPublicMetrics=publicMetrics.followers!=null||publicMetrics.following!=null||publicMetrics.posts!=null;
  const status:InstagramPublicProbeStatus=blocked?'blocked':challenge?'challenge':loginWall&&!profileSignals?'login_wall':response.ok&&hasPublicMetrics?'public_metrics_available':response.ok&&profileSignals?'page_only':'unverified_html';
- return{status,httpStatus:response.status,finalUrl:response.url,htmlBytes:html.length,loginWall,challenge,blocked,profileSignals,title,description,publicMetrics};
+ return{status,httpStatus:response.status,finalUrl:response.url,htmlBytes:html.length,loginWall,challenge,blocked,profileSignals,title,description,publicMetrics,diagnostics};
 }
