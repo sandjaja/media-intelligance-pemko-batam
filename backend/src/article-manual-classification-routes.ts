@@ -70,7 +70,9 @@ export async function registerArticleManualClassificationRoutes(app:FastifyInsta
   if(p.data.action==='APPROVE'){
    if(article.news_classification!=='UTAMA'&&article.news_classification!=='PENDUKUNG')return reply.code(409).send({error:'ARTICLE_NOT_CLASSIFIED'});
    await audit(pool,actor.id,'ARTICLE_CLASSIFICATION_VERIFIED',{organizationId,articleId:String(articleId),title:article.title,before,after:before,reason:p.data.reason||null});
-   return{ok:true,data:{articleId:String(articleId),action:'APPROVE',classification:article.news_classification,source:article.news_classification_source}};
+   let issueMonitorMatches=0;
+   if(article.news_classification==='UTAMA'){try{const evidence=(await pool.query(`SELECT a.published_at,a.title,COALESCE(a.content,a.summary,'') content,(SELECT kt.category_id FROM article_manual_keywords amk JOIN keyword_taxonomy kt ON kt.keyword_id=amk.keyword_id AND kt.active=true WHERE amk.article_id=a.id AND amk.active=true ORDER BY kt.weight DESC LIMIT 1) taxonomy_id FROM articles a WHERE a.id=$1`,[articleId])).rows[0];if(evidence){issueMonitorMatches=(await linkEligibleOnline(pool,{articleId,publishedAt:evidence.published_at,title:evidence.title,content:evidence.content,taxonomyId:evidence.taxonomy_id?Number(evidence.taxonomy_id):null,evidenceId:articleId})).length;}}catch(e){request.log.warn({err:e,articleId},'Issue Monitor online linkage skipped');}}
+   return{ok:true,data:{articleId:String(articleId),action:'APPROVE',classification:article.news_classification,source:article.news_classification_source,issueMonitorMatches}};
   }
   if(p.data.action==='CORRECT_KEYWORD'){
    try{const out=await correctKeyword(articleId,organizationId,p.data.keywordIds,p.data.reason,actor,article);if('error' in out)return reply.code(400).send({error:out.error});return{ok:true,data:{...out.data,action:'CORRECT_KEYWORD'}};}catch(e){request.log.error({err:e,articleId},'classification keyword correction failed');return reply.code(409).send({error:'CLASSIFICATION_VERIFICATION_FAILED',message:e instanceof Error?e.message:String(e)});}
