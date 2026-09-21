@@ -17,7 +17,15 @@ export type YouTubeShortsCollectorOptions={
 function key(explicit?:string){const value=explicit||process.env.YOUTUBE_API_KEY;if(!value)throw new Error('YOUTUBE_API_KEY_NOT_CONFIGURED');return value;}
 async function getJson(path:string,params:Record<string,string|number|undefined>,apiKey:string){
  const url=new URL(API+path); for(const [k,v] of Object.entries(params))if(v!==undefined&&v!=='')url.searchParams.set(k,String(v)); url.searchParams.set('key',apiKey);
- const response=await fetch(url); if(!response.ok)throw new Error(`YOUTUBE_API_ERROR_${response.status}`);
+ const response=await fetch(url);
+ if(!response.ok){
+  const payload:any=await response.json().catch(()=>null);
+  const first=Array.isArray(payload?.error?.errors)?payload.error.errors[0]:null;
+  const reason=String(first?.reason||payload?.error?.status||'unknown').replace(/[^a-zA-Z0-9_.-]/g,'_').slice(0,80);
+  const message=String(first?.message||payload?.error?.message||'').replace(/\s+/g,' ').slice(0,240);
+  const endpoint=path.replace(/^\//,'')||'unknown';
+  throw new Error(['YOUTUBE_API_ERROR_'+response.status,endpoint,reason,message].filter(Boolean).join(' | '));
+ }
  return response.json() as Promise<any>;
 }
 function isoDurationSeconds(value:string){
