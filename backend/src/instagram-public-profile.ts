@@ -64,6 +64,10 @@ export async function probeInstagramPublicProfile(handleInput:string):Promise<In
  const title=decodeMeta(html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']*)/i)?.[1]);
  const publicMetrics=parsePublicMetrics(description);
  const diagnostics=inspectPublicHtml(html,handle);
+ if(publicMetrics.followers==null&&diagnostics.candidateValues.follower_count!=null){publicMetrics.followers=diagnostics.candidateValues.follower_count;publicMetrics.source='structured_html'}
+ if(publicMetrics.following==null&&diagnostics.candidateValues.following_count!=null){publicMetrics.following=diagnostics.candidateValues.following_count;publicMetrics.source='structured_html'}
+ if(publicMetrics.posts==null&&diagnostics.candidateValues.media_count!=null){publicMetrics.posts=diagnostics.candidateValues.media_count;publicMetrics.source='structured_html'}
+ const diagnostics=inspectPublicHtml(html,handle);
  const hasPublicMetrics=publicMetrics.followers!=null||publicMetrics.following!=null||publicMetrics.posts!=null;
  const status:InstagramPublicProbeStatus=blocked?'blocked':challenge?'challenge':loginWall&&!profileSignals?'login_wall':response.ok&&hasPublicMetrics?'public_metrics_available':response.ok&&profileSignals?'page_only':'unverified_html';
  return{status,httpStatus:response.status,finalUrl:response.url,htmlBytes:html.length,loginWall,challenge,blocked,profileSignals,title,description,publicMetrics,diagnostics};
