@@ -37,8 +37,10 @@ export async function registerArticleManualClassificationRoutes(app:FastifyInsta
    const result=await analyzeArticle(client as unknown as Pool,String(articleId));
    if(!result?.opdId)throw new Error('MANUAL_KEYWORD_DID_NOT_PRODUCE_PRIMARY_OPD');
    await audit(client,actor.id,'ARTICLE_CLASSIFICATION_KEYWORD_CORRECTED',{organizationId,articleId:String(articleId),title:article.title,before,after:{classification:'UTAMA',source:'MANUAL'},keywordIds:ids,keywords:valid.map((r:any)=>r.keyword),primaryOpdId:result.opdId,reason:reason||null});
+   await audit(client,actor.id,'ARTICLE_CLASSIFICATION_VERIFIED',{organizationId,articleId:String(articleId),title:article.title,before,after:{classification:'UTAMA',source:'MANUAL'},verificationSource:'MANUAL_KEYWORD_CORRECTION',keywordIds:ids,keywords:valid.map((r:any)=>r.keyword),primaryOpdId:result.opdId,reason:reason||null});
    await client.query('COMMIT');
-   return{data:{articleId:String(articleId),classification:'UTAMA',source:'MANUAL',keywordIds:ids,routing:result}};
+   let issueMonitorMatches=0;try{const evidence=(await pool.query(`SELECT a.published_at,a.title,COALESCE(a.content,a.summary,'') content,(SELECT kt.category_id FROM article_manual_keywords amk JOIN keyword_taxonomy kt ON kt.keyword_id=amk.keyword_id AND kt.active=true WHERE amk.article_id=a.id AND amk.active=true ORDER BY kt.weight DESC LIMIT 1) taxonomy_id FROM articles a WHERE a.id=$1`,[articleId])).rows[0];if(evidence)issueMonitorMatches=(await linkEligibleOnline(pool,{articleId,publishedAt:evidence.published_at,title:evidence.title,content:evidence.content,taxonomyId:evidence.taxonomy_id?Number(evidence.taxonomy_id):null})).length;}catch{}
+   return{data:{articleId:String(articleId),classification:'UTAMA',source:'MANUAL',verificationStatus:'LOCKED',keywordIds:ids,routing:result,issueMonitorMatches}};
   }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
  }
 
