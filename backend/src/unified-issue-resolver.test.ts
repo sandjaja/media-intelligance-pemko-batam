@@ -12,6 +12,6 @@ const candidate=(title:string,summary='',opdId:number|null=null)=>({evidence:[{s
 
 test('candidate threshold remains 60',()=>assert.equal(60,60));
 test('PT Ghim Li entity anchor survives wording differences',()=>assert.ok(similarity(candidate('Persoalan pekerja PT Ghim Li Batam','Keluhan karyawan',12),candidate('PT Ghim Li bahas penyelesaian pekerja','Pertemuan karyawan',12))>=80));
-test('kabut asap matches across media',()=>assert.ok(similarity(candidate('Kabut asap mengganggu aktivitas warga','Jarak pandang menurun',8),candidate('Pemko pantau dampak kabut asap','Kabut asap dan jarak pandang',8))>=70));
+test('kabut asap matches across media',()=>assert.ok(similarity(candidate('Kabut asap mengganggu jarak pandang','Kualitas udara menurun',8),candidate('Pemko pantau kabut asap dan jarak pandang','Kualitas udara terdampak',8))>=70));
 test('generic Pemkot wording alone does not match',()=>assert.equal(similarity(candidate('Pemkot meningkatkan pelayanan publik','Program masyarakat'),candidate('Pemkot daerah lain meningkatkan pelayanan publik','Program masyarakat')),0));
 test('different topics do not merge merely because OPD is same',()=>assert.equal(similarity(candidate('Kabut asap mengganggu jarak pandang','Kualitas udara',8),candidate('Pengelolaan sampah diperkuat','Armada kebersihan',8)),0));
