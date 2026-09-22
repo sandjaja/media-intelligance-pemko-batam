@@ -50,6 +50,21 @@ export async function registerArticleManualClassificationRoutes(app:FastifyInsta
  // It now has the same semantics as CORRECT_KEYWORD so a manual keyword can never leave an AUTO/PENDUKUNG article with an OPD.
  app.put('/api/admin/articles/:id/classification-keywords',{preHandler:manager},async(request,reply)=>{const organizationId=await org(request,reply);if(!organizationId)return;const articleId=Number((request.params as any).id);if(await isVerifiedLocked(articleId))return reply.code(423).send({error:'ARTICLE_CLASSIFICATION_LOCKED'});const p=z.object({keywordIds:z.array(z.number().int().positive()).min(1).max(8),reason:z.string().trim().max(1000).optional().default('')}).safeParse(request.body);if(!Number.isInteger(articleId)||articleId<=0||!p.success)return reply.code(400).send({error:'INVALID_REQUEST'});const article=(await pool.query(`SELECT a.id,a.title,a.news_classification,a.news_classification_source,ms.category media_category FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE a.id=$1`,[articleId])).rows[0];if(!article)return reply.code(404).send({error:'ARTICLE_NOT_FOUND'});if(String(article.media_category||'').toLowerCase()!=='online')return reply.code(409).send({error:'ONLINE_ARTICLE_REQUIRED'});try{const out=await correctKeyword(articleId,organizationId,p.data.keywordIds,p.data.reason,request.articleCorrectionAuth!,article);if('error' in out)return reply.code(400).send({error:out.error});return{ok:true,data:{...out.data,action:'CORRECT_KEYWORD'}};}catch(e){request.log.error({err:e,articleId},'legacy classification correction failed');return reply.code(409).send({error:'CLASSIFICATION_VERIFICATION_FAILED',message:e instanceof Error?e.message:String(e)});}});
 
+
+ app.post('/api/admin/articles/:id/issue-linkage-refresh',{preHandler:manager},async(request,reply)=>{
+  const organizationId=await org(request,reply);if(!organizationId)return;
+  const articleId=Number((request.params as any).id);
+  if(!Number.isInteger(articleId)||articleId<=0)return reply.code(400).send({error:'INVALID_REQUEST'});
+  const article=(await pool.query(`SELECT a.id,a.title,a.news_classification,ms.category media_category FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE a.id=$1`,[articleId])).rows[0];
+  if(!article)return reply.code(404).send({error:'ARTICLE_NOT_FOUND'});
+  if(String(article.media_category||'').toLowerCase()!=='online')return reply.code(409).send({error:'ONLINE_ARTICLE_REQUIRED'});
+  if(article.news_classification!=='UTAMA')return reply.code(409).send({error:'PRIMARY_ARTICLE_REQUIRED'});
+  const result=await refreshUnifiedIssueResolution(pool,organizationId,articleId,(o,m)=>request.log.warn(o,m));
+  await audit(pool,request.articleCorrectionAuth!.id,'ARTICLE_ISSUE_LINKAGE_REFRESHED',{organizationId,articleId:String(articleId),title:article.title,result});
+  if(!result.ok)return reply.code(409).send({error:'ISSUE_LINKAGE_REFRESH_FAILED',data:result});
+  return{ok:true,data:{articleId:String(articleId),action:'REFRESH_ISSUE_LINKAGE',unifiedIssue:result}};
+ });
+
  app.post('/api/admin/articles/:id/classification-verification',{preHandler:manager},async(request,reply)=>{
   const organizationId=await org(request,reply);if(!organizationId)return;
   const articleId=Number((request.params as any).id);
