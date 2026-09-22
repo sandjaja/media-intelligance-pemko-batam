@@ -6,10 +6,12 @@ import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { analyzeArticle } from './analyzer-v14.js';
 import { clearSupportingIntelligenceLinks } from './news-classification.js';
 import { linkEligibleOnline } from './issue-monitor-matcher.js';
+import { detectUnifiedIssueCandidates } from './unified-candidate-issues.js';
 
 declare module 'fastify' { interface FastifyRequest { articleCorrectionAuth?: AuthorizationContext } }
 const canManage=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
 async function audit(client:Pool|PoolClient,userId:string,action:string,metadata:any){await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,$2,$3)`,[userId,action,metadata]);}
+async function refreshUnifiedIssueResolution(pool:Pool,organizationId:number,articleId:number,log?:(o:any,m:string)=>void){try{const candidates=await detectUnifiedIssueCandidates(pool,organizationId);const matched=candidates.filter((candidate:any)=>(candidate.evidence||[]).some((e:any)=>e.sourceType==='online'&&Number(e.id)===articleId));return{ok:true,candidateCount:matched.length,candidateKeys:matched.map((x:any)=>x.candidateKey)};}catch(error){log?.({err:error,articleId},'Unified Issue resolution refresh skipped');return{ok:false,candidateCount:0,candidateKeys:[]};}}
 async function resolveOrganizationId(pool:Pool,ctx:AuthorizationContext){if(ctx.opdId){const r=await pool.query('SELECT organization_id FROM opd WHERE id=$1',[ctx.opdId]);if(r.rows[0]?.organization_id)return Number(r.rows[0].organization_id);}const r=await pool.query('SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 2');return r.rowCount===1?Number(r.rows[0].id):0;}
 
 export async function registerArticleManualClassificationRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
@@ -40,7 +42,7 @@ export async function registerArticleManualClassificationRoutes(app:FastifyInsta
    await audit(client,actor.id,'ARTICLE_CLASSIFICATION_VERIFIED',{organizationId,articleId:String(articleId),title:article.title,before,after:{classification:'UTAMA',source:'MANUAL'},verificationSource:'MANUAL_KEYWORD_CORRECTION',keywordIds:ids,keywords:valid.map((r:any)=>r.keyword),primaryOpdId:result.opdId,reason:reason||null});
    await client.query('COMMIT');
    let issueMonitorMatches=0;try{const evidence=(await pool.query(`SELECT a.published_at,a.title,COALESCE(a.content,a.summary,'') content,(SELECT kt.category_id FROM article_manual_keywords amk JOIN keyword_taxonomy kt ON kt.keyword_id=amk.keyword_id AND kt.active=true WHERE amk.article_id=a.id AND amk.active=true ORDER BY kt.weight DESC LIMIT 1) taxonomy_id FROM articles a WHERE a.id=$1`,[articleId])).rows[0];if(evidence)issueMonitorMatches=(await linkEligibleOnline(pool,{articleId,publishedAt:evidence.published_at,title:evidence.title,content:evidence.content,taxonomyId:evidence.taxonomy_id?Number(evidence.taxonomy_id):null})).length;}catch{}
-   return{data:{articleId:String(articleId),classification:'UTAMA',source:'MANUAL',verificationStatus:'LOCKED',keywordIds:ids,routing:result,issueMonitorMatches}};
+   const unifiedIssue=await refreshUnifiedIssueResolution(pool,organizationId,articleId); return{data:{articleId:String(articleId),classification:'UTAMA',source:'MANUAL',verificationStatus:'LOCKED',keywordIds:ids,routing:result,issueMonitorMatches,unifiedIssue}};
   }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
  }
 
@@ -75,7 +77,7 @@ export async function registerArticleManualClassificationRoutes(app:FastifyInsta
    await audit(pool,actor.id,'ARTICLE_CLASSIFICATION_VERIFIED',{organizationId,articleId:String(articleId),title:article.title,before,after:before,reason:p.data.reason||null});
    let issueMonitorMatches=0;
    if(article.news_classification==='UTAMA'){try{const evidence=(await pool.query(`SELECT a.published_at,a.title,COALESCE(a.content,a.summary,'') content,(SELECT kt.category_id FROM article_manual_keywords amk JOIN keyword_taxonomy kt ON kt.keyword_id=amk.keyword_id AND kt.active=true WHERE amk.article_id=a.id AND amk.active=true ORDER BY kt.weight DESC LIMIT 1) taxonomy_id FROM articles a WHERE a.id=$1`,[articleId])).rows[0];if(evidence){issueMonitorMatches=(await linkEligibleOnline(pool,{articleId,publishedAt:evidence.published_at,title:evidence.title,content:evidence.content,taxonomyId:evidence.taxonomy_id?Number(evidence.taxonomy_id):null})).length;}}catch(e){request.log.warn({err:e,articleId},'Issue Monitor online linkage skipped');}}
-   return{ok:true,data:{articleId:String(articleId),action:'APPROVE',classification:article.news_classification,source:article.news_classification_source,issueMonitorMatches}};
+   const unifiedIssue=article.news_classification==='UTAMA'?await refreshUnifiedIssueResolution(pool,organizationId,articleId,(o,m)=>request.log.warn(o,m)):{ok:true,candidateCount:0,candidateKeys:[]}; return{ok:true,data:{articleId:String(article.id),action:'APPROVE',classification:article.news_classification,source:article.news_classification_source,issueMonitorMatches,unifiedIssue}};
   }
   if(p.data.action==='CORRECT_KEYWORD'){
    try{const out=await correctKeyword(articleId,organizationId,p.data.keywordIds,p.data.reason,actor,article);if('error' in out)return reply.code(400).send({error:out.error});return{ok:true,data:{...out.data,action:'CORRECT_KEYWORD'}};}catch(e){request.log.error({err:e,articleId},'classification keyword correction failed');return reply.code(409).send({error:'CLASSIFICATION_VERIFICATION_FAILED',message:e instanceof Error?e.message:String(e)});}
