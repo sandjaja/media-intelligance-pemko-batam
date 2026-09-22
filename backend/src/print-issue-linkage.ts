@@ -4,6 +4,7 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { detectUnifiedIssueCandidates } from './unified-candidate-issues.js';
+import { matchExistingIssues } from './unified-existing-issue-matcher.js';
 
 declare module 'fastify' { interface FastifyRequest { printIssueAuth?: AuthorizationContext } }
 
@@ -22,14 +23,11 @@ async function resolveOrganizationId(client:PoolClient,article:any,analysis:Phas
 
 async function compute(client:PoolClient,article:any,analysis:Phase2EAnalysisLike):Promise<IssueLinkageResult>{
  const organizationId=await resolveOrganizationId(client,article,analysis);if(!organizationId)return{engine:ENGINE,generatedAt:new Date().toISOString(),candidateCount:0,linkedIssueId:null,candidates:[],degraded:true,note:'Organization clipping tidak dapat ditentukan secara aman; linkage dilewati tanpa memblokir analisis.'};
- const issues=await client.query(`SELECT i.id,i.title,i.description,i.status,COALESCE(array_agg(DISTINCT io.opd_id) FILTER (WHERE io.opd_id IS NOT NULL),'{}') AS opd_ids FROM issues i LEFT JOIN issue_opd io ON io.issue_id=i.id WHERE i.organization_id=$1 AND i.status IN ('active','watch') GROUP BY i.id ORDER BY i.updated_at DESC LIMIT 100`,[organizationId]);
- const articleText=norm(`${article.title||''} ${article.summary||''} ${article.body_text||''}`);const articleWords=tokens(articleText);const articleKeywords=new Set([...(analysis.officialKeywordMatches||[]),...(analysis.operatorKeywordMatches||[])].map(x=>norm(x.keyword)).filter(Boolean));const selectedOpd=Number(analysis.entityValidation?.selected?.opdId||analysis.entityValidation?.detected?.opd?.id||article.opd_id||0)||null;const category=norm(analysis.issueCategory);const candidates:IssueLinkageCandidate[]=[];
- for(const issue of issues.rows){let score=0;const evidence:string[]=[];const issueText=norm(`${issue.title||''} ${issue.description||''}`);const issueTitleWords=tokens(issue.title||'');const sharedSpecific=overlap(articleWords,tokens(issueText));const titleAnchors=[...issueTitleWords].filter(w=>articleWords.has(w));const specificKw=[...articleKeywords].filter(k=>specific(k)&&issueText.includes(k));const anchors=[...new Set([...titleAnchors,...specificKw,...sharedSpecific])];
-  if(category&&issueText.includes(category)){score+=20;evidence.push(`Taxonomy sama/tercantum: ${analysis.issueCategory}`);}if(selectedOpd&&(issue.opd_ids||[]).map(Number).includes(selectedOpd)){score+=15;evidence.push('OPD sama');}
-  if(specificKw.length){score+=Math.min(30,specificKw.length*15);evidence.push(`Keyword spesifik sama: ${specificKw.slice(0,4).join(', ')}`);}if(titleAnchors.length){score+=Math.min(30,titleAnchors.length*15);evidence.push(`Anchor issue/judul sama: ${titleAnchors.slice(0,4).join(', ')}`);}else if(sharedSpecific.length){score+=Math.min(20,sharedSpecific.length*5);evidence.push(`Topik spesifik serupa: ${sharedSpecific.slice(0,4).join(', ')}`);}score=Math.min(100,score);
-  const hasAnchor=anchors.length>0;if(hasAnchor&&score>=40)candidates.push({issueId:Number(issue.id),title:issue.title,status:issue.status,score,confidence:confidence(score),evidence:[...evidence,`Anchor issue terkonfirmasi: ${anchors.slice(0,4).join(', ')}`],linkageStatus:'candidate'});
- }
- candidates.sort((a,b)=>b.score-a.score);const top=candidates.slice(0,3);return{engine:ENGINE,generatedAt:new Date().toISOString(),candidateCount:top.length,linkedIssueId:null,candidates:top,note:top.length?'Kandidat memiliki issue-specific anchor dan evidence kontekstual. Anchor numerik/tahun tidak dihitung sebagai anchor mandiri. Keputusan akhir tetap Humas/Super Admin.':'Belum ada issue aktif/watch dengan anchor spesifik yang cukup relevan. Kesamaan taxonomy/OPD/tahun saja tidak membentuk kandidat.'};
+ const selectedOpd=Number(analysis.entityValidation?.selected?.opdId||analysis.entityValidation?.detected?.opd?.id||article.opd_id||0)||null;
+ const keywords=[...(analysis.officialKeywordMatches||[]),...(analysis.operatorKeywordMatches||[])].map(x=>String(x.keyword||'')).filter(Boolean);
+ const shared=await matchExistingIssues(client,organizationId,{title:article.title,summary:article.summary,content:article.body_text,opdId:selectedOpd,taxonomyName:analysis.issueCategory||null,keywords});
+ const top:IssueLinkageCandidate[]=shared.matches.map(x=>({...x,linkageStatus:'candidate'}));
+ return{engine:ENGINE,generatedAt:new Date().toISOString(),candidateCount:top.length,linkedIssueId:null,candidates:top,note:top.length?'Kandidat memiliki issue-specific anchor dan evidence kontekstual. Anchor numerik/tahun tidak dihitung sebagai anchor mandiri. Keputusan akhir tetap Humas/Super Admin.':'Belum ada issue aktif/watch dengan anchor spesifik yang cukup relevan. Kesamaan taxonomy/OPD/tahun saja tidak membentuk kandidat.'};
 }
 export async function evaluatePrintIssueLinkage(client:PoolClient,article:any,analysis:Phase2EAnalysisLike):Promise<IssueLinkageResult>{try{return await compute(client,article,analysis);}catch(e){console.error('print issue linkage degraded',e);return{engine:ENGINE,generatedAt:new Date().toISOString(),candidateCount:0,linkedIssueId:null,candidates:[],degraded:true,note:'Issue linkage gagal dihitung tetapi tidak memblokir proses analisis utama.'};}}
 
