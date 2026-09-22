@@ -1,4 +1,5 @@
-import type { PoolClient } from 'pg';
+import type { Pool, PoolClient } from 'pg';
+type Db=Pick<Pool,'query'>|Pick<PoolClient,'query'>;
 
 export type UnifiedIssueEvidence = {
   title?: string|null;
@@ -26,7 +27,7 @@ const tokens=(v:any)=>new Set(norm(v).split(' ').filter(specific));
 const overlap=(a:Set<string>,b:Set<string>)=>[...a].filter(x=>b.has(x));
 const confidence=(s:number):'LOW'|'MEDIUM'|'HIGH'=>s>=70?'HIGH':s>=40?'MEDIUM':'LOW';
 
-export async function matchExistingIssues(client:PoolClient,organizationId:number,e:UnifiedIssueEvidence){
+export async function matchExistingIssues(client:Db,organizationId:number,e:UnifiedIssueEvidence){
   const issues=await client.query(`SELECT i.id,i.title,i.description,i.status,COALESCE(array_agg(DISTINCT io.opd_id) FILTER (WHERE io.opd_id IS NOT NULL),'{}') AS opd_ids FROM issues i LEFT JOIN issue_opd io ON io.issue_id=i.id WHERE i.organization_id=$1 AND i.status IN ('active','watch') GROUP BY i.id ORDER BY i.updated_at DESC LIMIT 100`,[organizationId]);
   const articleWords=tokens(`${e.title||''} ${e.summary||''} ${e.content||''}`);
   const articleKeywords=new Set((e.keywords||[]).map(norm).filter(Boolean));
