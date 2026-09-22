@@ -7,7 +7,7 @@ import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { checkIssueEvidenceEligibility, type IssueEvidenceSource } from './issue-evidence-eligibility.js';
 import { matchExistingIssues } from './unified-existing-issue-matcher.js';
 
-const ENGINE='unified-issue-linkage-v2.1';
+const ENGINE='unified-issue-linkage-v2.2';
 export const CANDIDATE_THRESHOLD=60;
 const resolverFingerprint=(e:any)=>createHash('sha256').update(JSON.stringify([ENGINE,e.sourceType,e.id,e.title,e.summary,e.riskScore,e.importanceScore,e.opdId,e.category])).digest('hex');
 async function cachedTerminalResult(db:Pool|PoolClient,organizationId:number,key:string,fingerprint:string){const r=await db.query(`SELECT status,snapshot FROM unified_candidate_issues WHERE organization_id=$1 AND candidate_key=$2 AND status IN ('BELOW_THRESHOLD','MATCHED_ISSUE') LIMIT 1`,[organizationId,key]);const row=r.rows[0];return row&&row.snapshot?.engine===ENGINE&&row.snapshot?.fingerprint===fingerprint?row:null;}
