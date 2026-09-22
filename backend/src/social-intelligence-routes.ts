@@ -291,7 +291,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     const mention=(await pool.query(`SELECT sm.id,sm.opd_id,o.organization_id FROM social_mentions sm LEFT JOIN opd o ON o.id=sm.opd_id WHERE sm.id=$1 AND sm.source_kind='external'`,[id.data])).rows[0];if(!mention)return reply.code(404).send({error:'NOT_FOUND'});
     let organizationId=Number(mention.organization_id||0);if(!organizationId){const only=await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 2`);if(only.rowCount===1)organizationId=Number(only.rows[0].id);}if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
     const candidates=await detectUnifiedIssueCandidates(pool,organizationId);const unifiedCandidate=candidates.find((candidate:any)=>Array.isArray(candidate.evidence)&&candidate.evidence.some((e:any)=>e.sourceType==='social'&&Number(e.id)===id.data))||null;
-    const linked=(await pool.query(`SELECT smi.issue_id,smi.relevance_score,smi.linkage_source,i.title,i.status FROM social_mention_issues smi JOIN issues i ON i.id=smi.issue_id WHERE smi.mention_id=$1 ORDER BY smi.updated_at DESC`,[id.data])).rows;
+    const linked=(await pool.query(`SELECT smi.issue_id,smi.relevance_score,smi.linkage_source,i.title,i.status FROM social_mention_issues smi JOIN issues i ON i.id=smi.issue_id WHERE smi.mention_id=$1 ORDER BY i.updated_at DESC,smi.issue_id DESC`,[id.data])).rows;
     return{data:{engine:'unified-issue-linkage-v2.0',unifiedCandidate,linkedIssues:linked}};
   });
 
