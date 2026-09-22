@@ -290,9 +290,14 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     const id=z.coerce.number().int().positive().safeParse((request.params as any).id);if(!id.success)return reply.code(400).send({error:'INVALID_ID'});
     const mention=(await pool.query(`SELECT sm.id,sm.opd_id,o.organization_id FROM social_mentions sm LEFT JOIN opd o ON o.id=sm.opd_id WHERE sm.id=$1 AND sm.source_kind='external'`,[id.data])).rows[0];if(!mention)return reply.code(404).send({error:'NOT_FOUND'});
     let organizationId=Number(mention.organization_id||0);if(!organizationId){const only=await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 2`);if(only.rowCount===1)organizationId=Number(only.rows[0].id);}if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
-    const candidates=await detectUnifiedIssueCandidates(pool,organizationId);const unifiedCandidate=candidates.find((candidate:any)=>Array.isArray(candidate.evidence)&&candidate.evidence.some((e:any)=>e.sourceType==='social'&&Number(e.id)===id.data))||null;
-    const linked=(await pool.query(`SELECT smi.issue_id,smi.relevance_score,smi.linkage_source,i.title,i.status FROM social_mention_issues smi JOIN issues i ON i.id=smi.issue_id WHERE smi.mention_id=$1 ORDER BY i.updated_at DESC,smi.issue_id DESC`,[id.data])).rows;
-    return{data:{engine:'unified-issue-linkage-v2.0',unifiedCandidate,linkedIssues:linked}};
+    const [stored,linked,issues]=await Promise.all([
+      pool.query(`SELECT snapshot FROM unified_candidate_issues WHERE organization_id=$1 AND status='PENDING' AND snapshot->'evidence' @> $2::jsonb ORDER BY last_detected_at DESC LIMIT 1`,[organizationId,JSON.stringify([{sourceType:'social',id:id.data}])]),
+      pool.query(`SELECT smi.issue_id,smi.relevance_score,smi.linkage_source,i.title,i.status FROM social_mention_issues smi JOIN issues i ON i.id=smi.issue_id WHERE smi.mention_id=$1 ORDER BY i.updated_at DESC,smi.issue_id DESC`,[id.data]),
+      pool.query(`SELECT id AS "issueId",title,status FROM issues WHERE organization_id=$1 AND status IN ('ACTIVE','WATCH') ORDER BY updated_at DESC,id DESC`,[organizationId])
+    ]);
+    let unifiedCandidate=stored.rows[0]?.snapshot||null;
+    if(!unifiedCandidate){const candidates=await detectUnifiedIssueCandidates(pool,organizationId);unifiedCandidate=candidates.find((candidate:any)=>Array.isArray(candidate.evidence)&&candidate.evidence.some((e:any)=>e.sourceType==='social'&&Number(e.id)===id.data))||null;}
+    return{data:{engine:'unified-issue-linkage-v2.0',eligible:true,unifiedCandidate,newCandidate:unifiedCandidate?{suggestedTitle:unifiedCandidate.suggestedTitle,reason:`Kandidat lintas-media (${(unifiedCandidate.sourceTypes||[]).join(', ')}) dengan ${unifiedCandidate.evidenceCount||unifiedCandidate.evidence?.length||0} evidence.`,candidateKey:unifiedCandidate.candidateKey}:null,links:linked.rows,availableIssues:issues.rows,recommended:[]}};
   });
 
   app.post('/api/social/mentions/:id/issues', { preHandler: [auth, requireWrite] }, async (request, reply) => {
