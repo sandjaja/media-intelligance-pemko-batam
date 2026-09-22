@@ -30,6 +30,16 @@ export async function registerOnlineStoryClusterRoutes(app:FastifyInstance,pool:
     return{data:rows,totalCount:rows.length};
   });
 
+  app.get('/api/online/articles/:articleId/issue-linkage',{preHandler:auth},async(request,reply)=>{
+    const id=z.coerce.number().int().positive().safeParse((request.params as any).articleId);if(!id.success)return reply.code(400).send({error:'INVALID_ARTICLE_ID'});
+    const article=(await pool.query(`SELECT a.id,a.title,a.news_classification,a.opd_id,(SELECT al.action FROM audit_logs al WHERE al.action IN ('ARTICLE_CLASSIFICATION_VERIFIED','ARTICLE_CLASSIFICATION_REOPENED') AND al.metadata->>'articleId'=a.id::text ORDER BY al.created_at DESC,al.id DESC LIMIT 1) verification_action FROM articles a WHERE a.id=$1`,[id.data])).rows[0];if(!article)return reply.code(404).send({error:'ARTICLE_NOT_FOUND'});
+    const links=(await pool.query(`SELECT ia.issue_id,i.title,i.status,ia.relevance_score FROM issue_articles ia JOIN issues i ON i.id=ia.issue_id WHERE ia.article_id=$1 ORDER BY ia.relevance_score DESC NULLS LAST,i.updated_at DESC`,[id.data])).rows;
+    const issues=(await pool.query(`SELECT i.id,i.title,i.status,COALESCE(array_agg(DISTINCT io.opd_id) FILTER(WHERE io.opd_id IS NOT NULL),'{}') opd_ids FROM issues i LEFT JOIN issue_opd io ON io.issue_id=i.id WHERE i.status IN ('active','watch') GROUP BY i.id ORDER BY i.updated_at DESC LIMIT 100`)).rows;
+    const eligible=article.news_classification==='UTAMA'&&article.verification_action==='ARTICLE_CLASSIFICATION_VERIFIED';
+    const recommended=issues.map((i:any)=>({...i,score:article.opd_id&&i.opd_ids.map(Number).includes(Number(article.opd_id))?70:0})).filter((i:any)=>i.score>0).sort((a:any,b:any)=>b.score-a.score).slice(0,3);
+    return{data:{articleId:Number(article.id),eligible,eligibilityReason:eligible?'ONLINE_PRIMARY_VERIFIED':article.news_classification!=='UTAMA'?'ONLINE_REQUIRES_PRIMARY':'ONLINE_REQUIRES_VERIFICATION',links,recommended,availableIssues:issues.map((i:any)=>({issueId:Number(i.id),title:i.title,status:i.status}))}};
+  });
+
   app.get('/api/online/story-clusters/regression/:articleId',{preHandler:auth},async(request,reply)=>{
     const id=z.coerce.number().int().positive().safeParse((request.params as any).articleId);
     if(!id.success)return reply.code(400).send({error:'INVALID_ARTICLE_ID'});
