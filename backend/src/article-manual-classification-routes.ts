@@ -42,7 +42,7 @@ export async function registerArticleManualClassificationRoutes(app:FastifyInsta
    await audit(client,actor.id,'ARTICLE_CLASSIFICATION_VERIFIED',{organizationId,articleId:String(articleId),title:article.title,before,after:{classification:'UTAMA',source:'MANUAL'},verificationSource:'MANUAL_KEYWORD_CORRECTION',keywordIds:ids,keywords:valid.map((r:any)=>r.keyword),primaryOpdId:result.opdId,reason:reason||null});
    await client.query('COMMIT');
    let issueMonitorMatches=0;try{const evidence=(await pool.query(`SELECT a.published_at,a.title,COALESCE(a.content,a.summary,'') content,(SELECT kt.category_id FROM article_manual_keywords amk JOIN keyword_taxonomy kt ON kt.keyword_id=amk.keyword_id AND kt.active=true WHERE amk.article_id=a.id AND amk.active=true ORDER BY kt.weight DESC LIMIT 1) taxonomy_id FROM articles a WHERE a.id=$1`,[articleId])).rows[0];if(evidence)issueMonitorMatches=(await linkEligibleOnline(pool,{articleId,publishedAt:evidence.published_at,title:evidence.title,content:evidence.content,taxonomyId:evidence.taxonomy_id?Number(evidence.taxonomy_id):null})).length;}catch{}
-   void refreshUnifiedIssueResolution(pool,organizationId,articleId); return{data:{articleId:String(articleId),classification:'UTAMA',source:'MANUAL',verificationStatus:'LOCKED',keywordIds:ids,routing:result,issueMonitorMatches,unifiedIssue:{queued:true}}};
+   const unifiedIssue=await refreshUnifiedIssueResolution(pool,organizationId,articleId); return{data:{articleId:String(articleId),classification:'UTAMA',source:'MANUAL',verificationStatus:'LOCKED',keywordIds:ids,routing:result,issueMonitorMatches,unifiedIssue}};
   }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
  }
 
