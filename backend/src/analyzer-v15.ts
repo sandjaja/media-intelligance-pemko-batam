@@ -12,7 +12,7 @@ export type AnalysisOptions={onlineGateRole?:'UTAMA'|'PENDUKUNG'|null;onlineGate
 export async function analyzeArticle(pool:Pool,articleId:string,options:AnalysisOptions={}){
  const article=(await pool.query(`SELECT a.id,a.source_id,a.title,a.url,a.content,a.summary,a.published_at,ms.name source_name,ms.tier,ms.category media_kind FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE a.id=$1`,[articleId])).rows[0];
  if(!article)return null;
- let news=await getManualNewsClassification(pool,articleId);
+ let news=await getManualNewsClassification(pool,articleId); // Only MANUAL is authoritative; existing AUTO classification is recomputed on every analysis.
  let gateRole=article.media_kind==='online'?options.onlineGateRole??null:null;
  let gateReason=options.onlineGateReason??null;
  let gateSignals=options.onlineGateSignals??[];
