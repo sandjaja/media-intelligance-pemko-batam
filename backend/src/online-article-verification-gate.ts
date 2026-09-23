@@ -17,17 +17,20 @@ function trustedFallback(candidate:OnlineArticleCandidate):VerifiedOnlineArticle
   const excerpt=String(candidate.excerpt||'').trim();if(excerpt.length<FALLBACK_EXCERPT_MIN)return null;
   return{sourceId:candidate.sourceId,title:candidate.title.trim().slice(0,1000),url:candidate.url,publishedAt:candidate.publishedAt,excerpt,publishedAtEvidence:'GOOGLE_NEWS_RSS' as ArticleDateEvidence};
 }
-async function fetchOriginal(url:string,timeoutMs=8000){const response=await fetch(url,{headers:{'user-agent':USER_AGENT,accept:'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8','accept-language':'id-ID,id;q=0.9,en;q=0.7','cache-control':'no-cache',pragma:'no-cache',referer:'https://www.google.com/'},signal:AbortSignal.timeout(timeoutMs),redirect:'follow'});if(!response.ok)return null;const type=response.headers.get('content-type')?.toLowerCase()??'';if(!type.includes('text/html'))return null;return{html:await response.text(),url:response.url||url};}
+async function fetchOriginal(url:string,timeoutMs=8000){const response=await fetch(url,{headers:{'user-agent':USER_AGENT,accept:'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8','accept-language':'id-ID,id;q=0.9,en;q=0.7','cache-control':'no-cache',pragma:'no-cache',referer:'https://www.google.com/'},signal:AbortSignal.timeout(timeoutMs),redirect:'follow'});const type=response.headers.get('content-type')?.toLowerCase()??'';if(!response.ok)return{html:'',url:response.url||url,status:response.status,type};if(!type.includes('text/html'))return{html:'',url:response.url||url,status:response.status,type};return{html:await response.text(),url:response.url||url,status:response.status,type};}
 
 export async function verifyDiscoveredArticle(candidate:OnlineArticleCandidate):Promise<VerifiedOnlineArticleCandidate|null>{
   try{
     const fetched=await fetchOriginal(candidate.url);
     if(!fetched)return trustedFallback(candidate);
+    if(fetched.status!==200){console.info({stage:'article_verify_reject',sourceId:candidate.sourceId,reason:'HTTP_STATUS',status:fetched.status,url:candidate.url},'online article verifier diagnostic');return trustedFallback(candidate);}
+    if(!fetched.type.includes('text/html')){console.info({stage:'article_verify_reject',sourceId:candidate.sourceId,reason:'CONTENT_TYPE',type:fetched.type,url:candidate.url},'online article verifier diagnostic');return trustedFallback(candidate);}
     const verified=verifyOriginalArticleHtml(fetched.html,fetched.url,candidate.title);
-    if(!verified||!fresh(verified.publishedAt))return null;
-    if(!samePublisher(fetched.url,verified.url))return null;
+    if(!verified){console.info({stage:'article_verify_reject',sourceId:candidate.sourceId,reason:'PARSE_OR_REQUIRED_EVIDENCE',url:fetched.url,title:candidate.title.slice(0,120)},'online article verifier diagnostic');return null;}
+    if(!fresh(verified.publishedAt)){console.info({stage:'article_verify_reject',sourceId:candidate.sourceId,reason:'STALE_OR_FUTURE',publishedAt:verified.publishedAt.toISOString(),url:verified.url},'online article verifier diagnostic');return null;}
+    if(!samePublisher(fetched.url,verified.url)){console.info({stage:'article_verify_reject',sourceId:candidate.sourceId,reason:'PUBLISHER_MISMATCH',fetchedUrl:fetched.url,verifiedUrl:verified.url},'online article verifier diagnostic');return null;}
     return{sourceId:candidate.sourceId,title:verified.title,url:verified.url,publishedAt:verified.publishedAt,excerpt:verified.excerpt,publishedAtEvidence:verified.publishedAtEvidence};
-  }catch{return trustedFallback(candidate);}
+  }catch(error){console.info({stage:'article_verify_reject',sourceId:candidate.sourceId,reason:'FETCH_EXCEPTION',url:candidate.url,error:error instanceof Error?error.message:String(error)},'online article verifier diagnostic');return trustedFallback(candidate);}
 }
 
 export async function verifyDiscoveredArticles(candidates:OnlineArticleCandidate[],options?:{concurrency?:number;limit?:number}):Promise<VerifiedOnlineArticleCandidate[]>{
