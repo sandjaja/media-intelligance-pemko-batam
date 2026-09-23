@@ -252,15 +252,16 @@ function parseArticleHtml(html:string,url:string,linkText:string,source:OnlineSo
   return isFresh(article)&&scopeOnly([article],scope).length===1?article:null;
 }
 async function crawlHtml(source:OnlineSource,html:string,pageUrl:string,scope?:OrganizationMediaScope|null){
-  const settled=await Promise.allSettled(articleLinks(html,pageUrl,scope).map(async link=>{const {response,body}=await fetchText(link.url,6500);if(!response.ok)return null;const type=response.headers.get('content-type')?.toLowerCase()??'';if(!type.includes('text/html'))return null;return parseArticleHtml(body,response.url||link.url,link.text,source,scope)}));
-  const map=new Map<string,OnlineArticle>();for(const r of settled){if(r.status==='fulfilled'&&r.value&&!map.has(r.value.url.toLowerCase()))map.set(r.value.url.toLowerCase(),r.value)}
-  return scopeOnly(freshOnly(articleOnly([...map.values()])),scope).sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime()).slice(0,80);
+  const links=articleLinks(html,pageUrl,scope);
+  const verified=await verifyDiscoveredArticles(links.map(link=>({sourceId:source.id,title:link.text,url:link.url})),{concurrency:6,limit:80});
+  const articles:OnlineArticle[]=verified.map(v=>({sourceId:source.id,title:v.title,url:v.url,publishedAt:v.publishedAt,excerpt:v.excerpt}));
+  return scopeOnly(freshOnly(articleOnly(articles)),scope).sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime()).slice(0,80);
 }
 function nextPageUrl(html:string,currentUrl:string,visited:Set<string>){
   const rel=html.match(/<a\b[^>]*rel=["'][^"']*next[^"']*["'][^>]*href=["']([^"']+)["']/i)?.[1]??html.match(/<link\b[^>]*rel=["'][^"']*next[^"']*["'][^>]*href=["']([^"']+)["']/i)?.[1];
-  if(rel){try{const u=new URL(rel,currentUrl).toString();if(!visited.has(u))return u}catch{}}
+  if(rel){try{const u=new URL(decode(rel),currentUrl).toString();if(!visited.has(u))return u}catch{}}
   const candidates:Array<{url:string;n:number}>=[];const re=/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;let m:RegExpExecArray|null;
-  while((m=re.exec(html))){try{const u=new URL(m[1],currentUrl);const text=(stripHtml(m[2])||'').trim();const q=Number(u.searchParams.get('page')||u.searchParams.get('p')||0);const pathNum=Number(u.pathname.match(/\/page\/(\d+)/i)?.[1]||0);const n=q||pathNum||(/^\d+$/.test(text)?Number(text):0);if(n>1&&!visited.has(u.toString()))candidates.push({url:u.toString(),n});}catch{}}
+  while((m=re.exec(html))){try{const u=new URL(decode(m[1]),currentUrl);const text=(stripHtml(m[2])||'').trim();const q=Number(u.searchParams.get('page')||u.searchParams.get('p')||0);const pathNum=Number(u.pathname.match(/\/page\/(\d+)/i)?.[1]||0);const n=q||pathNum||(/^\d+$/.test(text)?Number(text):0);if(n>1&&!visited.has(u.toString()))candidates.push({url:u.toString(),n});}catch{}}
   return candidates.sort((a,b)=>a.n-b.n)[0]?.url??null;
 }
 async function crawlScopedPages(source:OnlineSource,firstHtml:string,firstUrl:string,scope?:OrganizationMediaScope|null){
