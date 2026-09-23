@@ -29,7 +29,8 @@ export async function runOnlineSourceCollection(pool:Pool,source:any,orgId:numbe
     // The collector already applies the shared organization-scope gate. Do not discard
     // collector-approved evidence here merely because a second pass returns REVIEW:
     // REVIEW belongs in the analysis/moderation workflow, while only OUT_OF_SCOPE is rejected.
-    const items=collectedItems.filter(item=>{const decision=classifyArticleOrganizationScope(item,scope);if(decision.status==='OUT_OF_SCOPE'){scopeRejected++;return false;}if(decision.status==='REVIEW')scopeReview++;return true;});
+    const scopeRejectedSamples:any[]=[];const scopeReviewSamples:any[]=[];
+    const items=collectedItems.filter(item=>{const decision=classifyArticleOrganizationScope(item,scope);if(decision.status==='OUT_OF_SCOPE'){scopeRejected++;if(scopeRejectedSamples.length<25)scopeRejectedSamples.push({title:item.title,url:item.url,reason:decision.reason,matchedTerms:decision.matchedTerms});return false;}if(decision.status==='REVIEW'){scopeReview++;if(scopeReviewSamples.length<15)scopeReviewSamples.push({title:item.title,url:item.url,reason:decision.reason,matchedTerms:decision.matchedTerms});}return true;});
     const existing=(await pool.query(`SELECT title,url FROM articles WHERE source_id=$1 AND COALESCE(published_at,created_at)>=NOW()-INTERVAL '30 days'`,[source.id])).rows;
     const seenTitles=existing.map(r=>String(r.title||'')),seenUrls=new Set(existing.map(r=>normalizedArticleUrl(String(r.url||''))).filter(Boolean));
     const accepted:any[]=[];let duplicateSkipped=0;
@@ -39,6 +40,8 @@ export async function runOnlineSourceCollection(pool:Pool,source:any,orgId:numbe
     await pool.query(`UPDATE media_sources SET last_checked_at=$2,last_success_at=$2,last_error=NULL,last_fetched_count=$3,last_inserted_count=$4 WHERE id=$1`,[source.id,checkedAt,items.length,inserted]);
     const result={source:source.name,sourceId:String(source.id),collector:'online-interactive-v13-shared-runner',classificationVersion:CLASSIFICATION_VERSION,windowDays:7,fetched:collectedItems.length,scopeAccepted:items.length,scopeReview,scopeRejected,duplicateSkipped,urlConflictSkipped,inserted,routed,analyzed,deferred:Math.max(0,accepted.length-safetyLimit),scope:{organizationId:scope.organizationId,cityName:scope.cityName,districtCount:scope.districts.length}};
     console.info({stage:'online_ingestion_summary',...result},'online ingestion summary');
+    if(scopeRejectedSamples.length)console.info({stage:'online_scope_rejected_samples',source:source.name,sourceId:String(source.id),total:scopeRejected,samples:scopeRejectedSamples},'online scope rejected samples');
+    if(scopeReviewSamples.length)console.info({stage:'online_scope_review_samples',source:source.name,sourceId:String(source.id),total:scopeReview,samples:scopeReviewSamples},'online scope review samples');
     return result;
   }catch(error){const message=error instanceof Error?error.message:String(error);await pool.query(`UPDATE media_sources SET last_checked_at=$2,last_error=$3 WHERE id=$1`,[source.id,checkedAt,message]).catch(()=>undefined);throw error;}
 }
