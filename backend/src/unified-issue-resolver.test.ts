@@ -30,3 +30,14 @@ test('weak evidence remains BELOW_THRESHOLD',()=>{const score=quality('Info sing
 test('normal Batam evidence can cross candidate threshold without high risk',()=>{const score=quality('Bapenda Batam terapkan e-BPHTB demi efisiensi layanan pajak','Pelayanan pajak digital untuk masyarakat Batam',31,10,'Pelayanan Publik');assert.ok(score>=60);});
 test('terminal resolver cache requires same engine and fingerprint',()=>{const row={status:'BELOW_THRESHOLD',snapshot:{engine:'unified-issue-linkage-v2.7',fingerprint:'abc'}};assert.equal(terminalCacheHit(row,'unified-issue-linkage-v2.7','abc'),true);assert.equal(terminalCacheHit(row,'unified-issue-linkage-v2.7','changed'),false);assert.equal(terminalCacheHit(row,'unified-issue-linkage-v2.8','abc'),false);});
 test('PENDING is never treated as terminal cache hit',()=>{const row={status:'PENDING',snapshot:{engine:'unified-issue-linkage-v2.7',fingerprint:'abc'}};assert.equal(terminalCacheHit(row,'unified-issue-linkage-v2.7','abc'),false);});
+
+
+const mergeFreshEvidence=(fresh:any[],persisted:any[])=>[...fresh,...persisted].filter((e:any,i:number,a:any[])=>a.findIndex((x:any)=>x.sourceType===e.sourceType&&Number(x.id)===Number(e.id))===i);
+const canAutoUpdatePrint=(row:any)=>row.decided_by==null&&row.linkage_status!=='rejected';
+const canAutoUpdateOnline=(row:any)=>row.assignment_source!=='MANUAL';
+const canAutoUpdateSocial=(row:any)=>row.linkage_source!=='manual';
+
+test('fresh evidence wins over persisted snapshot for taxonomy',()=>{const fresh=[{sourceType:'online',id:625,taxonomyCategoryId:36}];const persisted=[{sourceType:'online',id:625,taxonomyCategoryId:null}];assert.equal(mergeFreshEvidence(fresh,persisted)[0].taxonomyCategoryId,36);});
+test('manual and rejected print linkage cannot be overwritten by auto match',()=>{assert.equal(canAutoUpdatePrint({decided_by:7,linkage_status:'linked'}),false);assert.equal(canAutoUpdatePrint({decided_by:7,linkage_status:'rejected'}),false);assert.equal(canAutoUpdatePrint({decided_by:null,linkage_status:'rejected'}),false);assert.equal(canAutoUpdatePrint({decided_by:null,linkage_status:'candidate'}),true);});
+test('manual online linkage score cannot be overwritten by auto match',()=>{assert.equal(canAutoUpdateOnline({assignment_source:'MANUAL'}),false);assert.equal(canAutoUpdateOnline({assignment_source:'AUTO'}),true);assert.equal(canAutoUpdateOnline({assignment_source:'ISSUE_MONITOR'}),true);});
+test('manual social or owned linkage cannot be overwritten by auto match',()=>{assert.equal(canAutoUpdateSocial({linkage_source:'manual'}),false);assert.equal(canAutoUpdateSocial({linkage_source:'ai'}),true);assert.equal(canAutoUpdateSocial({linkage_source:'rule'}),true);});
