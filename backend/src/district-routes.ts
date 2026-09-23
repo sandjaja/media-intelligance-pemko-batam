@@ -35,6 +35,13 @@ export async function registerDistrictRoutes(app: FastifyInstance, pool: Pool, j
     active: z.boolean().default(true),
   });
 
+
+  const villageInput = z.object({
+    name: z.string().trim().min(2).max(150),
+    code: z.string().trim().max(50).optional().or(z.literal('')),
+    active: z.boolean().default(true),
+  });
+
   const getOrganizationId = async (ctx: AuthorizationContext) => {
     if (ctx.opdId) {
       const row = (await pool.query(`SELECT organization_id FROM opd WHERE id=$1`, [ctx.opdId])).rows[0];
@@ -110,6 +117,72 @@ export async function registerDistrictRoutes(app: FastifyInstance, pool: Pool, j
       if (error?.code === '23505') return reply.code(409).send({ error: 'DISTRICT_ALREADY_EXISTS' });
       throw error;
     }
+  });
+
+  app.get('/api/admin/districts/:id/villages', { preHandler: authz }, async (request, reply) => {
+    const id = idParam.safeParse(request.params);
+    if (!id.success) return reply.code(400).send({ error: 'INVALID_DISTRICT' });
+    const organizationId = await getOrganizationId(request.districtAuthz!);
+    const district = (await pool.query(`SELECT id FROM districts WHERE id=$1 AND organization_id=$2`, [id.data.id, organizationId])).rows[0];
+    if (!district) return reply.code(404).send({ error: 'DISTRICT_NOT_FOUND' });
+    const { rows } = await pool.query(
+      `SELECT id,organization_id,district_id,name,code,active,created_at,updated_at
+         FROM villages WHERE organization_id=$1 AND district_id=$2
+        ORDER BY active DESC,name ASC`, [organizationId, id.data.id]);
+    return { data: rows };
+  });
+
+  app.post('/api/admin/districts/:id/villages', { preHandler: authz }, async (request, reply) => {
+    const id = idParam.safeParse(request.params);
+    const parsed = villageInput.safeParse(request.body);
+    if (!id.success || !parsed.success) return reply.code(400).send({ error: 'INVALID_VILLAGE' });
+    const organizationId = await getOrganizationId(request.districtAuthz!);
+    const district = (await pool.query(`SELECT id FROM districts WHERE id=$1 AND organization_id=$2 AND active=true`, [id.data.id, organizationId])).rows[0];
+    if (!district) return reply.code(404).send({ error: 'DISTRICT_NOT_FOUND_OR_INACTIVE' });
+    try {
+      const { rows } = await pool.query(
+        `INSERT INTO villages(organization_id,district_id,name,code,active) VALUES($1,$2,$3,$4,$5)
+         RETURNING id,organization_id,district_id,name,code,active,created_at,updated_at`,
+        [organizationId,id.data.id,parsed.data.name,parsed.data.code?parsed.data.code.toUpperCase():null,parsed.data.active]);
+      await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'VILLAGE_CREATED',$2)`,
+        [request.districtAuthz!.id,{organizationId,districtId:id.data.id,villageId:rows[0].id,name:rows[0].name}]);
+      return reply.code(201).send({data:rows[0]});
+    } catch(error:any) {
+      if(error?.code==='23505') return reply.code(409).send({error:'VILLAGE_ALREADY_EXISTS'});
+      throw error;
+    }
+  });
+
+  app.patch('/api/admin/districts/:districtId/villages/:id', { preHandler: authz }, async (request, reply) => {
+    const params=z.object({districtId:z.string().regex(/^\d+$/),id:z.string().regex(/^\d+$/)}).safeParse(request.params);
+    const parsed=villageInput.partial().safeParse(request.body);
+    if(!params.success||!parsed.success)return reply.code(400).send({error:'INVALID_VILLAGE'});
+    const organizationId=await getOrganizationId(request.districtAuthz!);
+    const current=(await pool.query(`SELECT * FROM villages WHERE id=$1 AND district_id=$2 AND organization_id=$3`,
+      [params.data.id,params.data.districtId,organizationId])).rows[0];
+    if(!current)return reply.code(404).send({error:'VILLAGE_NOT_FOUND'});
+    const next={name:parsed.data.name??current.name,code:parsed.data.code===''?null:(parsed.data.code?.toUpperCase()??current.code),active:parsed.data.active??current.active};
+    try{
+      const {rows}=await pool.query(`UPDATE villages SET name=$1,code=$2,active=$3,updated_at=NOW()
+        WHERE id=$4 AND district_id=$5 AND organization_id=$6 RETURNING id,organization_id,district_id,name,code,active,created_at,updated_at`,
+        [next.name,next.code,next.active,params.data.id,params.data.districtId,organizationId]);
+      await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'VILLAGE_UPDATED',$2)`,
+        [request.districtAuthz!.id,{organizationId,districtId:params.data.districtId,villageId:params.data.id,changes:next}]);
+      return{data:rows[0]};
+    }catch(error:any){if(error?.code==='23505')return reply.code(409).send({error:'VILLAGE_ALREADY_EXISTS'});throw error;}
+  });
+
+  app.delete('/api/admin/districts/:districtId/villages/:id', { preHandler: authz }, async (request, reply) => {
+    const params=z.object({districtId:z.string().regex(/^\d+$/),id:z.string().regex(/^\d+$/)}).safeParse(request.params);
+    if(!params.success)return reply.code(400).send({error:'INVALID_VILLAGE'});
+    const organizationId=await getOrganizationId(request.districtAuthz!);
+    const {rows}=await pool.query(`UPDATE villages SET active=false,updated_at=NOW()
+      WHERE id=$1 AND district_id=$2 AND organization_id=$3 RETURNING id,name,active`,
+      [params.data.id,params.data.districtId,organizationId]);
+    if(!rows[0])return reply.code(404).send({error:'VILLAGE_NOT_FOUND'});
+    await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'VILLAGE_DEACTIVATED',$2)`,
+      [request.districtAuthz!.id,{organizationId,districtId:params.data.districtId,villageId:params.data.id}]);
+    return{data:rows[0]};
   });
 
   app.delete('/api/admin/districts/:id', { preHandler: authz }, async (request, reply) => {
