@@ -1,4 +1,4 @@
-import { verifyOriginalArticleHtml, type ArticleDateEvidence } from './online-article-verification.js';
+import { diagnoseOriginalArticleHtml, verifyOriginalArticleHtml, type ArticleDateEvidence } from './online-article-verification.js';
 
 export type OnlineArticleCandidate={sourceId:string;title:string;url:string;publishedAt?:Date;excerpt?:string;fallbackEvidence?:'GOOGLE_NEWS_RSS';expectedPublisherUrl?:string};
 export type VerifiedOnlineArticleCandidate={sourceId:string;title:string;url:string;publishedAt:Date;excerpt:string;publishedAtEvidence:ArticleDateEvidence};
@@ -26,7 +26,7 @@ export async function verifyDiscoveredArticle(candidate:OnlineArticleCandidate):
     if(fetched.status!==200){console.info({stage:'article_verify_reject',sourceId:candidate.sourceId,reason:'HTTP_STATUS',status:fetched.status,url:candidate.url},'online article verifier diagnostic');return trustedFallback(candidate);}
     if(!fetched.type.includes('text/html')){console.info({stage:'article_verify_reject',sourceId:candidate.sourceId,reason:'CONTENT_TYPE',type:fetched.type,url:candidate.url},'online article verifier diagnostic');return trustedFallback(candidate);}
     const verified=verifyOriginalArticleHtml(fetched.html,fetched.url,candidate.title);
-    if(!verified){console.info({stage:'article_verify_reject',sourceId:candidate.sourceId,reason:'PARSE_OR_REQUIRED_EVIDENCE',url:fetched.url,title:candidate.title.slice(0,120)},'online article verifier diagnostic');return null;}
+    if(!verified){const detail=diagnoseOriginalArticleHtml(fetched.html,fetched.url,candidate.title);console.info({stage:'article_verify_reject',sourceId:candidate.sourceId,reason:'PARSE_OR_REQUIRED_EVIDENCE',detail,url:fetched.url,title:candidate.title.slice(0,120)},'online article verifier diagnostic');return null;}
     if(!fresh(verified.publishedAt)){console.info({stage:'article_verify_reject',sourceId:candidate.sourceId,reason:'STALE_OR_FUTURE',publishedAt:verified.publishedAt.toISOString(),url:verified.url},'online article verifier diagnostic');return null;}
     if(!samePublisher(fetched.url,verified.url)){console.info({stage:'article_verify_reject',sourceId:candidate.sourceId,reason:'PUBLISHER_MISMATCH',fetchedUrl:fetched.url,verifiedUrl:verified.url},'online article verifier diagnostic');return null;}
     return{sourceId:candidate.sourceId,title:verified.title,url:verified.url,publishedAt:verified.publishedAt,excerpt:verified.excerpt,publishedAtEvidence:verified.publishedAtEvidence};
