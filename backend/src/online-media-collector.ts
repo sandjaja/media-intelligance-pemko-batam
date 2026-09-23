@@ -68,10 +68,9 @@ function likelyArticlePath(url:string){
     const u=new URL(url),path=u.pathname.toLowerCase().replace(/\/+$/,'');
     if(!path||path==='/')return false;
     if(isNonArticlePath(path))return false;
-    if(/antaranews\.com$/i.test(domain))return /\/berita\/\d+(?:\/|$)/.test(path);
-    if(/tribunnews\.com$/i.test(domain))return /^\/(?:[^/]+)\/\d{4,}\/[^/]+/.test(path);
-    if(/jawapos\.com$/i.test(domain))return /\/berita\//.test(path)||/\/20\d{2}\//.test(path)||path.split('/').filter(Boolean).length>=3;
-    return /\/20\d{2}\//.test(path)||/\/(?:berita|news|artikel|post|read)\//.test(path)||path.split('/').filter(Boolean).length>=2;
+    const segments=path.split('/').filter(Boolean);
+    const articleSignals=/\/20\d{2}\//.test(path)||/\/(?:berita|news|artikel|post|read)\//.test(path)||segments.some(segment=>/^\d{4,}$/.test(segment));
+    return articleSignals||segments.length>=2;
   }catch{return false}
 }
 function validArticleItem(item:OnlineArticle){return likelyArticlePath(item.url)}
