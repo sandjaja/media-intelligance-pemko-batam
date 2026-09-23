@@ -1,3 +1,4 @@
+import { calculateRisk } from './risk.js';
 export type MediaKind = 'online' | 'print' | 'social';
 export type Sentiment = 'positive' | 'neutral' | 'negative';
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
@@ -58,7 +59,7 @@ export function fingerprintArticle(article: IntelligenceArticle) {
 }
 
 export function analyzeArticle(article: IntelligenceArticle, query: KeywordQuery = { and: [], or: [], not: [], exact: [] }, peerCount = scoringPeerCount()): ArticleAnalysis {
-  peerCount=scoringPeerCount();
+  peerCount=normalizedPeerCount(peerCount);
   const text = normalize([article.title, article.summary ?? '', article.content ?? ''].join(' '));
   let positive = 0; let negative = 0;
   for (const [term, weight] of POSITIVE) if (containsTerm(text, term)) positive += weight;
@@ -73,8 +74,9 @@ export function analyzeArticle(article: IntelligenceArticle, query: KeywordQuery
   const importanceBase = clamp(20 + negative * 0.9 + titleBoost * 0.6 + spreadBoost * 0.7);
   const importanceScore = clamp(importanceBase * 0.45 + impactScore * 0.4);
   const velocityScore = clamp(Math.min(100, 20 + peerCount * 10));
-  const riskScore = 0;
-  const riskLevel: RiskLevel = 'low';
+  const risk = calculateRisk({ importance: importanceScore, impact: impactScore, velocity: velocityScore, sentiment });
+  const riskScore = risk.score;
+  const riskLevel: RiskLevel = risk.level;
   return { sentiment, sentimentScore, impactScore, riskScore, riskLevel, importanceScore, velocityScore, matchedKeywords: matchedKeywords(article, query), entities: extractEntities(article), duplicateFingerprint: fingerprintArticle(article) };
 }
 
