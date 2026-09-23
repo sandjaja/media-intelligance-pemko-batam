@@ -1,5 +1,5 @@
 import { XMLParser } from 'fast-xml-parser';
-import { filterArticlesByOrganizationScope, organizationScopeTerms, type OrganizationMediaScope } from './organization-media-scope.js';
+import { organizationScopeTerms, type OrganizationMediaScope } from './organization-media-scope.js';
 import { verifyDiscoveredArticles } from './online-article-verification-gate.js';
 
 export type OnlineSource = { id:string; name:string; url:string; active?:boolean };
@@ -29,8 +29,8 @@ function parseDate(value?:string):Date|null{
 }
 function isFresh(article:OnlineArticle,now=Date.now()){const t=article.publishedAt.getTime();return Number.isFinite(t)&&t>=now-MAX_ARTICLE_AGE_MS&&t<=now+FUTURE_TOLERANCE_MS}
 function freshOnly(items:OnlineArticle[]){const now=Date.now();return items.filter(item=>isFresh(item,now))}
-function scopeOnly(items:OnlineArticle[],scope:OrganizationMediaScope|null|undefined){return scope?filterArticlesByOrganizationScope(items,scope):items}
-async function verifyCandidates(items:OnlineArticle[],scope?:OrganizationMediaScope|null){const verified=await verifyDiscoveredArticles(items,{concurrency:4,limit:120});return scopeOnly(verified.map(({publishedAtEvidence:_,...item})=>item),scope);}
+// Collection verifies publisher evidence and freshness; organization relevance is decided once at ingestion.
+async function verifyCandidates(items:OnlineArticle[],_scope?:OrganizationMediaScope|null){const verified=await verifyDiscoveredArticles(items,{concurrency:4,limit:120});return verified.map(({publishedAtEvidence:_,...item})=>item);}
 
 function normalizeSourceUrl(source:OnlineSource){try{return new URL(source.url).toString()}catch{return source.url}}
 function sourceDomain(url:string){try{return new URL(url).hostname.replace(/^www\./i,'')}catch{return''}}
@@ -96,7 +96,7 @@ function parseFeed(xml:string,source:OnlineSource,scope?:OrganizationMediaScope|
     const article={sourceId:source.id,title:title.trim(),url:url.trim(),publishedAt,excerpt:stripHtml(firstString(item['content:encoded'],item.content,item.description,item.summary))?.slice(0,100000)};
     if(validArticleItem(article))out.push(article);
   }
-  return scopeOnly(freshOnly(out),scope).slice(0,80);
+  return freshOnly(out).slice(0,80);
 }
 function googleNewsArticleId(url:string){try{const u=new URL(url);if(u.hostname!=='news.google.com')return null;const parts=u.pathname.split('/').filter(Boolean);const i=parts.indexOf('articles');return i>=0&&parts[i+1]?parts[i+1]:null}catch{return null}}
 async function resolveGoogleNewsPublisherUrl(url:string){
@@ -155,7 +155,7 @@ function parseGoogleNewsFeed(xml:string,source:OnlineSource,scope?:OrganizationM
     const publisherUrl=descriptionHrefs.find(href=>publisherDomain(href)===domain);
     out.push({sourceId:source.id,title,url:publisherUrl||url,publishedAt,excerpt});
   }
-  return scopeOnly(freshOnly(out),scope).filter(item=>item.title.length>=5).slice(0,50);
+  return freshOnly(out).filter(item=>item.title.length>=5).slice(0,50);
 }
 function discoverFeed(html:string,baseUrl:string){
   for(const tag of html.match(/<link\b[^>]*>/gi)??[]){
@@ -249,15 +249,15 @@ function parseArticleHtml(html:string,url:string,linkText:string,source:OnlineSo
   const excerpt=(stripHtml(articleHtml)??meta(html,'description')??meta(html,'og:description')??'').slice(0,100000);
   if(excerpt.length<40)return null;
   const article={sourceId:source.id,title:title.slice(0,1000),url:finalUrl,publishedAt,excerpt};
-  return isFresh(article)&&scopeOnly([article],scope).length===1?article:null;
+  return isFresh(article)?article:null;
 }
 async function crawlHtml(source:OnlineSource,html:string,pageUrl:string,scope?:OrganizationMediaScope|null){
   const links=articleLinks(html,pageUrl,scope);
   const verified=await verifyDiscoveredArticles(links.map(link=>({sourceId:source.id,title:link.text,url:link.url})),{concurrency:6,limit:80});
   const articles:OnlineArticle[]=verified.map(v=>({sourceId:source.id,title:v.title,url:v.url,publishedAt:v.publishedAt,excerpt:v.excerpt}));
-  const afterArticle=articleOnly(articles);const afterFresh=freshOnly(afterArticle);const afterScope=scopeOnly(afterFresh,scope);
-  if(verified.length!==afterScope.length)console.info({sourceId:source.id,stage:'post_verify_filter',verified:verified.length,afterArticle:afterArticle.length,afterFresh:afterFresh.length,afterScope:afterScope.length,rejectedByScope:afterFresh.filter(x=>!afterScope.some(y=>y.url===x.url)).slice(0,12).map(x=>({title:x.title.slice(0,120),url:x.url}))},'online collector post verify diagnostic');
-  return afterScope.sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime()).slice(0,80);
+  const afterArticle=articleOnly(articles);const afterFresh=freshOnly(afterArticle);
+  if(verified.length!==afterFresh.length)console.info({sourceId:source.id,stage:'post_verify_filter',verified:verified.length,afterArticle:afterArticle.length,afterFresh:afterFresh.length},'online collector post verify diagnostic');
+  return afterFresh.sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime()).slice(0,80);
 }
 function normalizedPageUrl(value:string,base?:string){try{const u=new URL(decodeHtmlEntities(value),base);u.hash='';for(const key of [...u.searchParams.keys()])if(!u.searchParams.get(key))u.searchParams.delete(key);u.searchParams.sort();return u.toString()}catch{return''}}
 function pageNumber(value:string){try{const u=new URL(value);const q=Number(u.searchParams.get('page')||u.searchParams.get('p')||0);const path=Number(u.pathname.match(/\/(?:page\/)?(\d+)\/?$/i)?.[1]||0);return q||path||0}catch{return 0}}
@@ -280,7 +280,7 @@ async function crawlScopedPages(source:OnlineSource,firstHtml:string,firstUrl:st
     const next=nextPageUrl(html,current,visited);if(!next)break;
     try{const fetched=await fetchText(next,8000);if(!fetched.response.ok)break;const finalUrl=normalizedPageUrl(fetched.response.url||next)||next;if(visited.has(finalUrl))break;html=fetched.body;url=finalUrl;}catch{break}
   }
-  return scopeOnly([...merged.values()],scope).sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime()).slice(0,120);
+  return [...merged.values()].sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime()).slice(0,120);
 }
 function isScopedPage(url:string){try{const path=new URL(url).pathname.replace(/\/+$/,'');return path.length>0&&path!=='/'}catch{return false}}
 export async function collectOnlineSource(source:OnlineSource,scope?:OrganizationMediaScope|null):Promise<OnlineArticle[]>{
