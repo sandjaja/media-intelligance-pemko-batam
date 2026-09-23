@@ -26,7 +26,10 @@ export async function runOnlineSourceCollection(pool:Pool,source:any,orgId:numbe
     const scope=await loadOrganizationMediaScope(pool,orgId);if(!scope)throw new Error('ACTIVE_ORGANIZATION_SCOPE_UNRESOLVED');
     const collectedItems=await collectOnlineSource({id:String(source.id),name:source.name,url:source.url,active:true},scope);
     let scopeRejected=0,scopeReview=0;
-    const items=collectedItems.filter(item=>{const decision=classifyArticleOrganizationScope(item,scope);if(decision.status==='RELEVANT')return true;if(decision.status==='REVIEW')scopeReview++;else scopeRejected++;return false;});
+    // The collector already applies the shared organization-scope gate. Do not discard
+    // collector-approved evidence here merely because a second pass returns REVIEW:
+    // REVIEW belongs in the analysis/moderation workflow, while only OUT_OF_SCOPE is rejected.
+    const items=collectedItems.filter(item=>{const decision=classifyArticleOrganizationScope(item,scope);if(decision.status==='OUT_OF_SCOPE'){scopeRejected++;return false;}if(decision.status==='REVIEW')scopeReview++;return true;});
     const existing=(await pool.query(`SELECT title,url FROM articles WHERE source_id=$1 AND COALESCE(published_at,created_at)>=NOW()-INTERVAL '30 days'`,[source.id])).rows;
     const seenTitles=existing.map(r=>String(r.title||'')),seenUrls=new Set(existing.map(r=>normalizedArticleUrl(String(r.url||''))).filter(Boolean));
     const accepted:any[]=[];let duplicateSkipped=0;
