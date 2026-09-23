@@ -2,7 +2,7 @@ import { Pool } from 'pg';
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 
-export function calculateRisk(input: { importance: number; impact: number; velocity: number; sentiment: string | null; tier?: number | null }): { score: number; level: RiskLevel; reasons: string[]; alertType: string | null } {
+export function calculateRisk(input: { importance: number; impact: number; velocity: number; sentiment: string | null }): { score: number; level: RiskLevel; reasons: string[]; alertType: string | null } {
   let score = 0;
   const reasons: string[] = [];
   if (input.sentiment === 'negative') { score += 30; reasons.push('Sentimen negatif'); }
@@ -19,9 +19,9 @@ export function calculateRisk(input: { importance: number; impact: number; veloc
 }
 
 export async function applyRisk(pool: Pool, articleId: string) {
-  const row = (await pool.query(`SELECT a.id,a.importance_score,a.impact_score,a.velocity_score,a.sentiment,COALESCE(ms.tier,2) tier FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE a.id=$1`, [articleId])).rows[0];
+  const row = (await pool.query(`SELECT a.id,a.importance_score,a.impact_score,a.velocity_score,a.sentiment FROM articles a WHERE a.id=$1`, [articleId])).rows[0];
   if (!row) return null;
-  const result = calculateRisk({ importance: Number(row.importance_score), impact: Number(row.impact_score), velocity: Number(row.velocity_score), sentiment: row.sentiment, tier: Number(row.tier) });
+  const result = calculateRisk({ importance: Number(row.importance_score), impact: Number(row.impact_score), velocity: Number(row.velocity_score), sentiment: row.sentiment });
   await pool.query(`UPDATE articles SET risk_score=$2,risk_level=$3 WHERE id=$1`, [articleId, result.score, result.level]);
   if (result.alertType) {
     await pool.query(`INSERT INTO article_alerts(article_id,alert_type,severity,reason,status) VALUES($1,$2,$3,$4,'open') ON CONFLICT(article_id,alert_type) DO UPDATE SET severity=EXCLUDED.severity,reason=EXCLUDED.reason,status='open'`, [articleId, result.alertType, result.level, result.reasons.join(' · ')]);
