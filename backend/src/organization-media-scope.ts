@@ -56,8 +56,7 @@ export function organizationScopeTerms(scope:OrganizationMediaScope){
   const aliases=uniqueTerms(scope.governmentAliases);
   // Geographic identity is first-class scope evidence. Keep generic government aliases
   // (for example "pemkot") supporting-only so they cannot pull another city's news in.
-  const geographic=uniqueTerms([scope.cityName]);
-  const strong=uniqueTerms([...formal,...geographic,...aliases.filter(term=>isSpecificOrganizationAlias(term,scope))]);
+  const strong=uniqueTerms([...formal,...aliases.filter(term=>isSpecificOrganizationAlias(term,scope))]);
   const supporting=uniqueTerms([scope.tagline,scope.organizationCode?.replace(/_/g,' '),...aliases.filter(term=>!isSpecificOrganizationAlias(term,scope))]);
   return{strong,supporting};
 }
@@ -93,4 +92,4 @@ export function classifyTextOrganizationScope(input:OrganizationScopeTextInput,s
 }
 
 export function isArticleInOrganizationScope(article:OnlineArticle,scope:OrganizationMediaScope):boolean{return classifyArticleOrganizationScope(article,scope).status!=='OUT_OF_SCOPE';}
-export function filterArticlesByOrganizationScope(articles:OnlineArticle[],scope:OrganizationMediaScope|null):OnlineArticle[]{if(!scope)return[];return articles.filter(article=>classifyArticleOrganizationScope(article,scope).status==='RELEVANT');}
+export function filterArticlesByOrganizationScope(articles:OnlineArticle[],scope:OrganizationMediaScope|null):OnlineArticle[]{if(!scope)return[];const city=normalize(scope.cityName);return articles.filter(article=>{const decision=classifyArticleOrganizationScope(article,scope);if(decision.status==='RELEVANT')return true;/* Media Online is publisher/editorial content: an explicit configured city in the headline is sufficient geographic scope. Social keeps the stricter REVIEW behavior through classifyTextOrganizationScope. */return !!city&&containsTerm(normalize(article.title),city);});}
