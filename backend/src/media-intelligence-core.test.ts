@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { analyzeArticle, detectDuplicates, matchesKeywordQuery, parseKeywordQuery, rankDailyHighlights, topNarrativeTerms } from './media-intelligence-core.js';
+import { calculateRisk } from './risk.js';
 
 test('keyword query supports AND OR NOT and exact phrase', () => {
   const query = parseKeywordQuery('banjir Metro "Pemerintah Kota Metro" macet|protes -hoaks');
@@ -12,12 +13,13 @@ test('keyword query supports AND OR NOT and exact phrase', () => {
   assert.equal(matchesKeywordQuery({ id: 2, title: 'Pemerintah Kota Metro tangani banjir Metro', content: 'hoaks protes warga' }, query), false);
 });
 
-test('analysis produces sentiment, risk, impact and duplicate fingerprint', () => {
+test('analysis produces sentiment, impact and duplicate fingerprint; shared engine produces final risk', () => {
   const article = { id: 1, title: 'Korupsi dan sengketa proyek pemerintah kota', summary: 'Keluhan warga meningkat dan terjadi keterlambatan.', sourceName: 'Media A', sourceTier: 1, mediaKind: 'online' as const };
   const analysis = analyzeArticle(article, parseKeywordQuery('korupsi Metro'), 5);
   assert.equal(analysis.sentiment, 'negative');
-  assert.ok(analysis.riskScore >= 35);
   assert.ok(analysis.impactScore > 0);
+  const risk=calculateRisk({sentiment:analysis.sentiment,importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore});
+  assert.ok(risk.score >= 35);
   assert.equal(analysis.matchedKeywords.includes('korupsi'), true);
   assert.ok(analysis.duplicateFingerprint.length > 0);
 });
