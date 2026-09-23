@@ -46,7 +46,7 @@ test('YouTube runner sends relevant and review contextual comments through inges
  const relevant=result.results.find((r:any)=>r.externalId==='relevant'||r.external_id==='relevant') as any;
  assert.ok(relevant,JSON.stringify(result.results));
  assert.equal(relevant.ok,true,JSON.stringify(relevant));
- assert.deepEqual(inserted,['relevant','review']);
+ assert.deepEqual(inserted,['vid1','relevant','review']);
  assert.equal(result.succeeded,3);
 });
 
