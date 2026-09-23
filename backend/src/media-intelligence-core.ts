@@ -17,6 +17,8 @@ export type IntelligenceArticle = {
 export type KeywordQuery = { and: string[]; or: string[]; not: string[]; exact: string[] };
 export type ArticleAnalysis = { sentiment: Sentiment; sentimentScore: number; impactScore: number; riskScore: number; riskLevel: RiskLevel; importanceScore: number; velocityScore: number; matchedKeywords: string[]; entities: string[]; duplicateFingerprint: string };
 
+export function normalizedPeerCount(value: unknown): number { const n=Number(value); return Number.isFinite(n)&&n>0?Math.max(1,Math.round(n)):1; }
+
 const STOPWORDS = new Set(['yang','dan','atau','dengan','untuk','dari','pada','dalam','ini','itu','akan','telah','oleh','karena','sebagai','tidak','ada','lebih','juga','sudah','agar','jadi','kepada','bagi','dapat','bisa','sebuah','para','kami','kita','mereka','menjadi','tentang','setelah','sebelum','saat','hari','di','ke','the','of','and','to','in','on','a','an']);
 const NEGATIVE = new Map([['korupsi',18],['suap',20],['gagal',12],['kriminal',16],['kecelakaan',14],['banjir',14],['macet',10],['protes',14],['keluhan',10],['kritik',8],['masalah',8],['terlambat',9],['lambat',7],['kebakaran',15],['ancaman',15],['sengketa',13],['krisis',18],['darurat',18],['kerugian',14],['cacat',10],['polemik',11]]);
 const POSITIVE = new Map([['berhasil',12],['sukses',12],['prestasi',12],['penghargaan',10],['meningkat',8],['investasi',12],['terobosan',10],['apresiasi',10],['aman',7],['lancar',7],['kolaborasi',8],['pertumbuhan',10],['inovasi',9],['pelayanan',5],['perbaikan',7]]);
@@ -54,6 +56,7 @@ export function fingerprintArticle(article: IntelligenceArticle) {
 }
 
 export function analyzeArticle(article: IntelligenceArticle, query: KeywordQuery = { and: [], or: [], not: [], exact: [] }, peerCount = 1): ArticleAnalysis {
+  peerCount=normalizedPeerCount(peerCount);
   const text = normalize([article.title, article.summary ?? '', article.content ?? ''].join(' '));
   let positive = 0; let negative = 0;
   for (const [term, weight] of POSITIVE) if (containsTerm(text, term)) positive += weight;
