@@ -6,7 +6,7 @@ import { getManualNewsClassification, clearSupportingIntelligenceLinks } from '.
 import { loadOrganizationMediaScope } from './organization-media-scope.js';
 import { classifyOnlineArticleRole } from './organization-actor-gate.js';
 
-export const CLASSIFICATION_VERSION='article-opd-v16.5-20260916';
+export const CLASSIFICATION_VERSION='article-opd-v16.5-20260923-actor-gate';
 export type AnalysisOptions={onlineGateRole?:'UTAMA'|'PENDUKUNG'|null;onlineGateReason?:string|null;onlineGateSignals?:string[]};
 
 export async function analyzeArticle(pool:Pool,articleId:string,options:AnalysisOptions={}){
