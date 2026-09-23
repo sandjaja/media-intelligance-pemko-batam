@@ -63,7 +63,7 @@ function isNonArticlePath(path:string){
   return /\/(?:tag|topic|topics|author|penulis|search|cari|wp-admin|wp-content|feed|category|kategori|kanal|channel|foto|photo|video)(?:\/|$)/i.test(path)
     || /\/(?:index|home)(?:\.html?)?(?:\/|$)/i.test(path);
 }
-function likelyArticlePath(url:string,domain=sourceDomain(url)){
+function likelyArticlePath(url:string){
   try{
     const u=new URL(url),path=u.pathname.toLowerCase().replace(/\/+$/,'');
     if(!path||path==='/')return false;
@@ -229,7 +229,7 @@ function articleLinks(html:string,baseUrl:string,scope?:OrganizationMediaScope|n
       const u=new URL(m[1],baseUrl);if(u.hostname!==base.hostname||!/^https?:$/.test(u.protocol))continue;u.hash='';
       const text=stripHtml(m[2])??'';if(text.length<12)continue;
       const path=u.pathname.toLowerCase();
-      if(path==='/'||/\.(jpg|jpeg|png|gif|webp|svg|pdf|zip|mp4|mp3)$/i.test(path)||!likelyArticlePath(u.toString(),domain))continue;
+      if(path==='/'||/\.(jpg|jpeg|png|gif|webp|svg|pdf|zip|mp4|mp3)$/i.test(path)||!likelyArticlePath(u.toString()))continue;
       const url=u.toString();if(seen.has(url))continue;seen.add(url);
       let score=0;if(/\/20\d{2}\//.test(path))score+=8;if(/\/berita\/\d+/.test(path))score+=10;if(/\/\d{4,}\//.test(path))score+=8;if(/berita|news|artikel|post/.test(path))score+=4;score+=pathScopeScore(path,scope);if(path.split('/').filter(Boolean).length>=3)score+=2;if(text.length>=30)score+=2;
       out.push({url,text,score});
