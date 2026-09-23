@@ -64,11 +64,12 @@ export function analyzeArticle(article: IntelligenceArticle, query: KeywordQuery
   const titleBoost = Math.min(20, tokens(article.title).length * 1.5);
   const sourceBoost = 4;
   const spreadBoost = Math.min(25, Math.log2(Math.max(1, peerCount)) * 8);
-  const riskScore = clamp(20 + negative * 0.9 + titleBoost * 0.6 + spreadBoost * 0.7);
   const impactScore = clamp(25 + titleBoost + sourceBoost + spreadBoost);
-  const importanceScore = clamp(riskScore * 0.45 + impactScore * 0.4);
+  const importanceBase = clamp(20 + negative * 0.9 + titleBoost * 0.6 + spreadBoost * 0.7);
+  const importanceScore = clamp(importanceBase * 0.45 + impactScore * 0.4);
   const velocityScore = clamp(Math.min(100, 20 + peerCount * 10));
-  const riskLevel: RiskLevel = riskScore >= 80 ? 'critical' : riskScore >= 60 ? 'high' : riskScore >= 35 ? 'medium' : 'low';
+  const riskScore = 0;
+  const riskLevel: RiskLevel = 'low';
   return { sentiment, sentimentScore, impactScore, riskScore, riskLevel, importanceScore, velocityScore, matchedKeywords: matchedKeywords(article, query), entities: extractEntities(article), duplicateFingerprint: fingerprintArticle(article) };
 }
 
