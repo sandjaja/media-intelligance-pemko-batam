@@ -62,11 +62,11 @@ export function analyzeArticle(article: IntelligenceArticle, query: KeywordQuery
   const sentimentScore = clamp(total === 0 ? 0 : ((positive - negative) / total) * 100);
   const sentiment: Sentiment = negative > positive * 1.15 ? 'negative' : positive > negative * 1.15 ? 'positive' : 'neutral';
   const titleBoost = Math.min(20, tokens(article.title).length * 1.5);
-  const sourceBoost = article.sourceTier ? Math.max(0, 15 - article.sourceTier * 4) : 4;
+  const sourceBoost = 4;
   const spreadBoost = Math.min(25, Math.log2(Math.max(1, peerCount)) * 8);
   const riskScore = clamp(20 + negative * 0.9 + titleBoost * 0.6 + spreadBoost * 0.7);
   const impactScore = clamp(25 + titleBoost + sourceBoost + spreadBoost);
-  const importanceScore = clamp(riskScore * 0.45 + impactScore * 0.4 + (article.mediaKind === 'print' ? 8 : 0));
+  const importanceScore = clamp(riskScore * 0.45 + impactScore * 0.4);
   const velocityScore = clamp(Math.min(100, 20 + peerCount * 10));
   const riskLevel: RiskLevel = riskScore >= 80 ? 'critical' : riskScore >= 60 ? 'high' : riskScore >= 35 ? 'medium' : 'low';
   return { sentiment, sentimentScore, impactScore, riskScore, riskLevel, importanceScore, velocityScore, matchedKeywords: matchedKeywords(article, query), entities: extractEntities(article), duplicateFingerprint: fingerprintArticle(article) };
