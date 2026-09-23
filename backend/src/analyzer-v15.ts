@@ -16,7 +16,7 @@ export async function analyzeArticle(pool:Pool,articleId:string,options:Analysis
  let gateRole=article.media_kind==='online'?options.onlineGateRole??null:null;
  let gateReason=options.onlineGateReason??null;
  let gateSignals=options.onlineGateSignals??[];
- if(!news&&article.media_kind==='online'&&!gateRole){
+ if(article.media_kind==='online'&&!gateRole){
   const scope=await loadOrganizationMediaScope(pool);
   if(scope){
    const decision=classifyOnlineArticleRole({sourceId:String(article.source_id||''),title:String(article.title||''),url:String(article.url||''),publishedAt:article.published_at?new Date(article.published_at):new Date(),excerpt:String(article.summary||article.content||'')},scope);
