@@ -54,7 +54,10 @@ function isSpecificOrganizationAlias(term:string,scope:OrganizationMediaScope){
 export function organizationScopeTerms(scope:OrganizationMediaScope){
   const formal=uniqueTerms([scope.organizationName,scope.governmentName,scope.shortName]);
   const aliases=uniqueTerms(scope.governmentAliases);
-  const strong=uniqueTerms([...formal,...aliases.filter(term=>isSpecificOrganizationAlias(term,scope))]);
+  // Geographic identity is first-class scope evidence. Keep generic government aliases
+  // (for example "pemkot") supporting-only so they cannot pull another city's news in.
+  const geographic=uniqueTerms([scope.cityName]);
+  const strong=uniqueTerms([...formal,...geographic,...aliases.filter(term=>isSpecificOrganizationAlias(term,scope))]);
   const supporting=uniqueTerms([scope.tagline,scope.organizationCode?.replace(/_/g,' '),...aliases.filter(term=>!isSpecificOrganizationAlias(term,scope))]);
   return{strong,supporting};
 }
