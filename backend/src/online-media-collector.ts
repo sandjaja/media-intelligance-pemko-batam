@@ -260,23 +260,26 @@ async function crawlHtml(source:OnlineSource,html:string,pageUrl:string,scope?:O
   if(verified.length!==afterScope.length)console.info({sourceId:source.id,stage:'post_verify_filter',verified:verified.length,afterArticle:afterArticle.length,afterFresh:afterFresh.length,afterScope:afterScope.length,rejectedByScope:afterFresh.filter(x=>!afterScope.some(y=>y.url===x.url)).slice(0,12).map(x=>({title:x.title.slice(0,120),url:x.url}))},'online collector post verify diagnostic');
   return afterScope.sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime()).slice(0,80);
 }
+function normalizedPageUrl(value:string,base?:string){try{const u=new URL(decodeHtmlEntities(value),base);u.hash='';for(const key of [...u.searchParams.keys()])if(!u.searchParams.get(key))u.searchParams.delete(key);u.searchParams.sort();return u.toString()}catch{return''}}
+function pageNumber(value:string){try{const u=new URL(value);const q=Number(u.searchParams.get('page')||u.searchParams.get('p')||0);const path=Number(u.pathname.match(/\/(?:page\/)?(\d+)\/?$/i)?.[1]||0);return q||path||0}catch{return 0}}
 function nextPageUrl(html:string,currentUrl:string,visited:Set<string>){
+  const current=pageNumber(currentUrl);
+  const candidates=new Map<string,number>();
+  const add=(href:string,label='')=>{const url=normalizedPageUrl(href,currentUrl);if(!url||visited.has(url))return;const n=pageNumber(url)||(/^\d+$/.test(label.trim())?Number(label.trim()):0);if(n>Math.max(1,current))candidates.set(url,n)};
   const rel=html.match(/<a\b[^>]*rel=["'][^"']*next[^"']*["'][^>]*href=["']([^"']+)["']/i)?.[1]??html.match(/<link\b[^>]*rel=["'][^"']*next[^"']*["'][^>]*href=["']([^"']+)["']/i)?.[1];
-  if(rel){try{const u=new URL(decodeHtmlEntities(rel),currentUrl).toString();if(!visited.has(u))return u}catch{}}
-  const candidates:Array<{url:string;n:number}>=[];const re=/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;let m:RegExpExecArray|null;
-  while((m=re.exec(html))){try{const u=new URL(decodeHtmlEntities(m[1]),currentUrl);const text=(stripHtml(m[2])||'').trim();const q=Number(u.searchParams.get('page')||u.searchParams.get('p')||0);const pathNum=Number(u.pathname.match(/\/page\/(\d+)/i)?.[1]||0);const n=q||pathNum||(/^\d+$/.test(text)?Number(text):0);if(n>1&&!visited.has(u.toString()))candidates.push({url:u.toString(),n});}catch{}}
-  return candidates.sort((a,b)=>a.n-b.n)[0]?.url??null;
+  if(rel)add(rel);
+  const re=/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;let m:RegExpExecArray|null;
+  while((m=re.exec(html)))add(m[1],(stripHtml(m[2])||'').trim());
+  return [...candidates.entries()].sort((a,b)=>a[1]-b[1])[0]?.[0]??null;
 }
 async function crawlScopedPages(source:OnlineSource,firstHtml:string,firstUrl:string,scope?:OrganizationMediaScope|null){
-  const visited=new Set<string>();const merged=new Map<string,OnlineArticle>();let html=firstHtml,url=firstUrl;
+  const visited=new Set<string>();const merged=new Map<string,OnlineArticle>();let html=firstHtml,url=normalizedPageUrl(firstUrl)||firstUrl;
   for(let page=0;page<8;page++){
-    visited.add(url);
-    const links=articleLinks(html,url,scope);
-    const crawled=await crawlHtml(source,html,url,scope);
-    console.info({sourceId:source.id,source:source.name,stage:'scoped_page_discovery',page:page+1,pageUrl:url,articleLinks:links.length,verifiedHtml:crawled.length},'online collector scoped diagnostic');
+    const current=normalizedPageUrl(url)||url;if(visited.has(current))break;visited.add(current);
+    const crawled=await crawlHtml(source,html,current,scope);
     for(const item of crawled)if(!merged.has(item.url.toLowerCase()))merged.set(item.url.toLowerCase(),item);
-    const next=nextPageUrl(html,url,visited);if(!next)break;
-    try{const fetched=await fetchText(next,8000);if(!fetched.response.ok)break;html=fetched.body;url=fetched.response.url||next;}catch{break}
+    const next=nextPageUrl(html,current,visited);if(!next)break;
+    try{const fetched=await fetchText(next,8000);if(!fetched.response.ok)break;const finalUrl=normalizedPageUrl(fetched.response.url||next)||next;if(visited.has(finalUrl))break;html=fetched.body;url=finalUrl;}catch{break}
   }
   return scopeOnly([...merged.values()],scope).sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime()).slice(0,120);
 }
