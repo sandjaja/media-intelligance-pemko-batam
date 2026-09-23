@@ -71,7 +71,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
       if (mention.metadata?.manualClassification?.locked===true || mention.metadata?.socialVerification?.status==='LOCKED') { manualLocked++; continue; }
       try {
         const scopeDecision=classifySocialOrganizationScope({title:mention.title,content:mention.content},scope);
-        if(scopeDecision.status!=='RELEVANT'){
+        if(scopeDecision.status==='OUT_OF_SCOPE'){
           const client=await pool.connect();
           try{
             await client.query('BEGIN');
