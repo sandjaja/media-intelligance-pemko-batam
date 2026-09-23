@@ -177,7 +177,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
       sourceKind: z.enum(['external','owned']).default('external'),
       from: z.string().optional(),
       to: z.string().optional(),
-      days: z.coerce.number().int().refine(v => [7,14,30].includes(v)).default(7),
+      days: z.coerce.number().int().refine(v => [1,7,14,30].includes(v)).default(7),
       page: z.coerce.number().int().min(1).default(1),
       limit: z.coerce.number().int().min(1).max(50).default(10),
     }).safeParse(request.query);
@@ -195,6 +195,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     if (parsed.data.riskLevel) where.push(`sm.risk_level=${bind(parsed.data.riskLevel)}`);
     if (parsed.data.classification) { const cp=bind(parsed.data.classification); where.push(`CASE WHEN COALESCE(sm.metadata->'manualClassification'->>'locked','false')='true' THEN 'MANUAL' WHEN COALESCE(sm.metadata->'v16Routing'->>'routingStatus','UNROUTED')='AMBIGUOUS' THEN 'AMBIGU' ELSE COALESCE(sm.metadata->'v16Routing'->>'newsClassification',CASE WHEN COALESCE(sm.metadata->'v16Routing'->>'routingStatus','UNROUTED')='ROUTED' THEN 'UTAMA' ELSE 'PENDUKUNG' END) END=${cp}`); }
     if (parsed.data.from) where.push(`sm.published_at >= ${bind(parsed.data.from)}`);
+    else if(parsed.data.days===1) where.push(`COALESCE(sm.published_at,sm.captured_at) >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Jakarta') AT TIME ZONE 'Asia/Jakarta'`);
     else where.push(`COALESCE(sm.published_at,sm.captured_at) >= NOW() - (${bind(parsed.data.days)}::int * INTERVAL '1 day')`);
     if (parsed.data.to) where.push(`sm.published_at < ${bind(parsed.data.to)}`);
     if (parsed.data.keywordId) {
