@@ -2,7 +2,7 @@ import { Pool } from 'pg';
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 
-export function calculateRisk(input: { importance: number; impact: number; velocity: number; sentiment: string | null; tier: number }): { score: number; level: RiskLevel; reasons: string[]; alertType: string | null } {
+export function calculateRisk(input: { importance: number; impact: number; velocity: number; sentiment: string | null; tier?: number | null }): { score: number; level: RiskLevel; reasons: string[]; alertType: string | null } {
   let score = 0;
   const reasons: string[] = [];
   if (input.sentiment === 'negative') { score += 30; reasons.push('Sentimen negatif'); }
@@ -12,7 +12,6 @@ export function calculateRisk(input: { importance: number; impact: number; veloc
   else if (input.impact >= 55) { score += 15; reasons.push('Dampak publik signifikan'); }
   if (input.velocity >= 75) { score += 20; reasons.push('Momentum pemberitaan tinggi'); }
   else if (input.velocity >= 50) { score += 10; reasons.push('Momentum pemberitaan meningkat'); }
-  if (input.tier === 1) { score += 10; reasons.push('Sumber media Tier 1'); }
   score = Math.min(100, score);
   const level: RiskLevel = score >= 80 ? 'critical' : score >= 60 ? 'high' : score >= 35 ? 'medium' : 'low';
   const alertType = level === 'critical' ? 'CRITICAL_MEDIA_RISK' : level === 'high' ? 'HIGH_MEDIA_RISK' : null;
