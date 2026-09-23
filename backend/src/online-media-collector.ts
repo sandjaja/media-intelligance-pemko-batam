@@ -267,7 +267,10 @@ async function crawlScopedPages(source:OnlineSource,firstHtml:string,firstUrl:st
   const visited=new Set<string>();const merged=new Map<string,OnlineArticle>();let html=firstHtml,url=firstUrl;
   for(let page=0;page<8;page++){
     visited.add(url);
-    for(const item of await crawlHtml(source,html,url,scope))if(!merged.has(item.url.toLowerCase()))merged.set(item.url.toLowerCase(),item);
+    const links=articleLinks(html,url,scope);
+    const crawled=await crawlHtml(source,html,url,scope);
+    console.info({sourceId:source.id,source:source.name,stage:'scoped_page_discovery',page:page+1,pageUrl:url,articleLinks:links.length,verifiedHtml:crawled.length},'online collector scoped diagnostic');
+    for(const item of crawled)if(!merged.has(item.url.toLowerCase()))merged.set(item.url.toLowerCase(),item);
     const next=nextPageUrl(html,url,visited);if(!next)break;
     try{const fetched=await fetchText(next,8000);if(!fetched.response.ok)break;html=fetched.body;url=fetched.response.url||next;}catch{break}
   }
