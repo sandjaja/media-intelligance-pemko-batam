@@ -4,8 +4,6 @@ import { buildSocialScopeText, type SocialConversationContext } from './social-c
 function normalize(value:unknown){return String(value??'').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu,' ').replace(/\s+/g,' ').trim();}
 function terms(values:Array<string|null|undefined>){return [...new Set(values.map(normalize).filter(v=>v.length>=3))];}
 function has(text:string,term:string){return !!text&&!!term&&(` ${text} `).includes(` ${term} `);}
-function conflictingCity(text:string,scope:OrganizationMediaScope){const active=normalize(scope.cityName);if(!text||!active)return null;const patterns=[...text.matchAll(/\b(?:pemkot|pemerintah kota|kota)\s+([\p{L}][\p{L}\s-]{2,40}?)(?=\s+(?:dan|dengan|sebut|dinilai|diminta|bahas|evaluasi|soal|terkait|tentang|untuk|tak|tidak|di|ke|dari|:|,)|$)/gu)];for(const m of patterns){const named=normalize(m[1]);if(named&&named!==active&&!has(named,active))return named;}return null;}
-function actorTerms(scope:OrganizationMediaScope){return terms(scope.actors.flatMap(actor=>actor.aliases));}
 function organizationTerms(scope:OrganizationMediaScope){return organizationScopeTerms(scope);}
 function areaTerms(scope:OrganizationMediaScope){return terms([scope.cityName,...scope.districts,...(scope.villages??[]),...(scope.areaAliases??[])]);}
 
@@ -28,8 +26,6 @@ export function classifySocialOrganizationScope(input:SocialOrganizationScopeInp
  const current=normalize(envelope.currentText);
  const context=normalize([envelope.currentText,envelope.parentCommentText,envelope.parentText].filter(Boolean).join(' '));
  const org=organizationTerms(scope),areas=areaTerms(scope),actors=actorTerms(scope);
- const conflict=conflictingCity(context,scope);
- if(conflict)return{status:'OUT_OF_SCOPE',reason:'social conversation explicitly identifies another city government/area',matchedTerms:[conflict]};
  const currentOrg=org.strong.filter(t=>has(current,t)),currentSupportingOrg=org.supporting.filter(t=>has(current,t)),currentArea=areas.filter(t=>has(current,t)),currentActors=actors.filter(t=>has(current,t));
  const contextOrg=org.strong.filter(t=>has(context,t)),contextArea=areas.filter(t=>has(context,t));
  const contextEvidence=[...new Set([...contextOrg,...contextArea])];
