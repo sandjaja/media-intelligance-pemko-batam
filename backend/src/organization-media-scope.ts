@@ -13,6 +13,7 @@ export type OrganizationMediaScope = {
   tagline?: string | null;
   districts: string[];
   villages?: string[];
+  areaAliases?: string[];
   actors: OrganizationUnitActor[];
 };
 
@@ -36,13 +37,14 @@ export async function loadOrganizationMediaScope(pool: Pool, organizationId?: nu
   const governmentAliases=uniqueTerms(Array.isArray(branding.aliases)?branding.aliases:[]);
   const districts=(await pool.query(`SELECT name FROM districts WHERE organization_id=$1 AND active=true ORDER BY name`,[org.id])).rows.map(r=>String(r.name||'').trim()).filter(Boolean);
   const villages=(await pool.query(`SELECT v.name FROM villages v JOIN districts d ON d.id=v.district_id WHERE v.organization_id=$1 AND v.active=true AND d.active=true ORDER BY v.name`,[org.id])).rows.map(r=>String(r.name||'').trim()).filter(Boolean);
+  const areaAliases=(await pool.query(`SELECT name FROM organization_area_aliases WHERE organization_id=$1 AND active=true ORDER BY name`,[org.id])).rows.map(r=>String(r.name||'').trim()).filter(Boolean);
   const opdRows=(await pool.query(`SELECT id,name,code FROM opd WHERE organization_id=$1 AND active=true ORDER BY name`,[org.id])).rows;
   const uptdRows=(await pool.query(`SELECT id,opd_id,name,code,aliases FROM uptd WHERE organization_id=$1 AND active=true ORDER BY name`,[org.id])).rows;
   const actors:OrganizationUnitActor[]=[
     ...opdRows.map(r=>({kind:'OPD' as const,id:Number(r.id),name:String(r.name||''),code:r.code??null,aliases:uniqueTerms([r.name,r.code])})),
     ...uptdRows.map(r=>({kind:'UPTD' as const,id:Number(r.id),name:String(r.name||''),code:r.code??null,aliases:uniqueTerms([r.name,r.code,...(Array.isArray(r.aliases)?r.aliases:[])]),opdId:r.opd_id==null?null:Number(r.opd_id)}))
   ];
-  return {organizationId:Number(org.id),organizationName:String(org.name||''),organizationCode:org.code??null,governmentName:branding.government_name??null,shortName:branding.short_name??null,governmentAliases,cityName:branding.city_name??null,tagline:branding.tagline??null,districts,villages,actors};
+  return {organizationId:Number(org.id),organizationName:String(org.name||''),organizationCode:org.code??null,governmentName:branding.government_name??null,shortName:branding.short_name??null,governmentAliases,cityName:branding.city_name??null,tagline:branding.tagline??null,districts,villages,areaAliases,actors};
 }
 
 function isSpecificOrganizationAlias(term:string,scope:OrganizationMediaScope){
@@ -94,4 +96,4 @@ export function classifyTextOrganizationScope(input:OrganizationScopeTextInput,s
 }
 
 export function isArticleInOrganizationScope(article:OnlineArticle,scope:OrganizationMediaScope):boolean{return classifyArticleOrganizationScope(article,scope).status!=='OUT_OF_SCOPE';}
-export function filterArticlesByOrganizationScope(articles:OnlineArticle[],scope:OrganizationMediaScope|null):OnlineArticle[]{if(!scope)return[];const city=normalize(scope.cityName);const districts=uniqueTerms(scope.districts);const villages=uniqueTerms(scope.villages??[]);return articles.filter(article=>{const decision=classifyArticleOrganizationScope(article,scope);if(decision.status==='RELEVANT')return true;const title=normalize(article.title);/* Media Online may use configured geographic identity as editorial scope evidence. Social remains stricter because classifyTextOrganizationScope does not use this article-only fallback. */if(city&&containsTerm(title,city))return true;if(districts.some(d=>containsTerm(title,d)||containsTerm(title,`kecamatan ${d}`)))return true;return villages.some(v=>containsTerm(title,v)||containsTerm(title,`kelurahan ${v}`));});}
+export function filterArticlesByOrganizationScope(articles:OnlineArticle[],scope:OrganizationMediaScope|null):OnlineArticle[]{if(!scope)return[];const city=normalize(scope.cityName);const districts=uniqueTerms(scope.districts);const villages=uniqueTerms(scope.villages??[]);const areaAliases=uniqueTerms(scope.areaAliases??[]);return articles.filter(article=>{const decision=classifyArticleOrganizationScope(article,scope);if(decision.status==='RELEVANT')return true;const title=normalize(article.title);/* Media Online may use configured geographic identity as editorial scope evidence. Social remains stricter because classifyTextOrganizationScope does not use this article-only fallback. */if(city&&containsTerm(title,city))return true;if(districts.some(d=>containsTerm(title,d)||containsTerm(title,`kecamatan ${d}`)))return true;if(villages.some(v=>containsTerm(title,v)||containsTerm(title,`kelurahan ${v}`)))return true;return areaAliases.some(v=>containsTerm(title,v));});}
