@@ -13,6 +13,7 @@ const asArray=<T>(v:T|T[]|undefined):T[]=>v==null?[]:Array.isArray(v)?v:[v];
 const firstString=(...values:unknown[]):string|undefined=>values.find(v=>typeof v==='string'&&v.trim()) as string|undefined;
 const stripHtml=(value?:string)=>value?value.replace(/<script[\s\S]*?<\/script>/gi,' ').replace(/<style[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/&quot;/gi,'"').replace(/&#39;/gi,"'").replace(/\s+/g,' ').trim():undefined;
 const escapeRegExp=(value:string)=>value.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');
+const decodeHtmlEntities=(value:string)=>value.replace(/&amp;/gi,'&').replace(/&quot;/gi,'"').replace(/&#39;/gi,"'").replace(/&#x27;/gi,"'").replace(/&lt;/gi,'<').replace(/&gt;/gi,'>');
 
 const ID_MONTHS:Record<string,number>={januari:0,februari:1,maret:2,april:3,mei:4,juni:5,juli:6,agustus:7,september:8,oktober:9,november:10,desember:11};
 function parseDate(value?:string):Date|null{
@@ -259,9 +260,9 @@ async function crawlHtml(source:OnlineSource,html:string,pageUrl:string,scope?:O
 }
 function nextPageUrl(html:string,currentUrl:string,visited:Set<string>){
   const rel=html.match(/<a\b[^>]*rel=["'][^"']*next[^"']*["'][^>]*href=["']([^"']+)["']/i)?.[1]??html.match(/<link\b[^>]*rel=["'][^"']*next[^"']*["'][^>]*href=["']([^"']+)["']/i)?.[1];
-  if(rel){try{const u=new URL(decodeEntities(rel),currentUrl).toString();if(!visited.has(u))return u}catch{}}
+  if(rel){try{const u=new URL(decodeHtmlEntities(rel),currentUrl).toString();if(!visited.has(u))return u}catch{}}
   const candidates:Array<{url:string;n:number}>=[];const re=/<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;let m:RegExpExecArray|null;
-  while((m=re.exec(html))){try{const u=new URL(decodeEntities(m[1]),currentUrl);const text=(stripHtml(m[2])||'').trim();const q=Number(u.searchParams.get('page')||u.searchParams.get('p')||0);const pathNum=Number(u.pathname.match(/\/page\/(\d+)/i)?.[1]||0);const n=q||pathNum||(/^\d+$/.test(text)?Number(text):0);if(n>1&&!visited.has(u.toString()))candidates.push({url:u.toString(),n});}catch{}}
+  while((m=re.exec(html))){try{const u=new URL(decodeHtmlEntities(m[1]),currentUrl);const text=(stripHtml(m[2])||'').trim();const q=Number(u.searchParams.get('page')||u.searchParams.get('p')||0);const pathNum=Number(u.pathname.match(/\/page\/(\d+)/i)?.[1]||0);const n=q||pathNum||(/^\d+$/.test(text)?Number(text):0);if(n>1&&!visited.has(u.toString()))candidates.push({url:u.toString(),n});}catch{}}
   return candidates.sort((a,b)=>a.n-b.n)[0]?.url??null;
 }
 async function crawlScopedPages(source:OnlineSource,firstHtml:string,firstUrl:string,scope?:OrganizationMediaScope|null){
