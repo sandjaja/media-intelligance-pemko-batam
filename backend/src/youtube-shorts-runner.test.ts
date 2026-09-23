@@ -10,6 +10,7 @@ function dbFixture(){
   if(sql.includes('FROM organizations WHERE active=true'))return{rows:[{id:'1',name:'Pemerintah Kota Contoh',code:'PKC'}]};
   if(sql.includes('FROM government_branding WHERE is_active=true')||sql.includes('FROM government_branding WHERE active=true'))return{rows:[{government_name:'Pemerintah Kota Contoh',short_name:'Pemko Contoh',aliases:['Pemkot Contoh'],city_name:'Kota Contoh',tagline:null}]};
   if(sql.includes('FROM districts WHERE organization_id='))return{rows:[{name:'Utara'}]};
+ if(sql.includes('FROM villages v JOIN districts d'))return{rows:[]};
   if(sql.includes('FROM opd WHERE organization_id='))return{rows:[{id:'20',name:'Dinas Perhubungan',code:'DISHUB'}]};
   if(sql.includes('FROM uptd WHERE organization_id='))return{rows:[]};
   if(sql.includes('FROM taxonomy_categories tc JOIN classification_sectors cs'))return{rows:[]};
