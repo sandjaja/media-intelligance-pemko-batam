@@ -42,11 +42,12 @@ test('YouTube runner sends relevant and review contextual comments through inges
  const {pool,inserted}=dbFixture();
  const result=await runYouTubeShortsCollection(pool,{apiKey:'fixture-key',query:'parkir Kota Contoh'});
  assert.equal(result.received,3);
- assert.equal(result.skipped,1);
+ assert.equal(result.skipped,0);
  const relevant=result.results.find((r:any)=>r.externalId==='relevant'||r.external_id==='relevant') as any;
  assert.ok(relevant,JSON.stringify(result.results));
  assert.equal(relevant.ok,true,JSON.stringify(relevant));
  assert.deepEqual(inserted,['relevant','review']);
+ assert.equal(result.succeeded,3);
 });
 
 test('YouTube runner returns empty summary when provider finds no candidates',async(t)=>{
