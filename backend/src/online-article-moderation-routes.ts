@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { collectOnlineSource } from './online-media-collector.js';
-import { classifyArticleOrganizationScope, loadOrganizationMediaScope } from './organization-media-scope.js';
+import { classifyArticleOrganizationScope, filterArticlesByOrganizationScope, loadOrganizationMediaScope } from './organization-media-scope.js';
 import { analyzeArticle, CLASSIFICATION_VERSION } from './analyzer-v14.js';
 
 declare module 'fastify' { interface FastifyRequest { onlineModerationAuth?: AuthorizationContext } }
@@ -30,7 +30,7 @@ export async function runOnlineSourceCollection(pool:Pool,source:any,orgId:numbe
     // collector-approved evidence here merely because a second pass returns REVIEW:
     // REVIEW belongs in the analysis/moderation workflow, while only OUT_OF_SCOPE is rejected.
     const scopeRejectedSamples:any[]=[];const scopeReviewSamples:any[]=[];
-    const items=collectedItems.filter(item=>{const decision=classifyArticleOrganizationScope(item,scope);if(decision.status==='OUT_OF_SCOPE'){scopeRejected++;if(scopeRejectedSamples.length<25)scopeRejectedSamples.push({title:item.title,url:item.url,reason:decision.reason,matchedTerms:decision.matchedTerms});return false;}if(decision.status==='REVIEW'){scopeReview++;if(scopeReviewSamples.length<15)scopeReviewSamples.push({title:item.title,url:item.url,reason:decision.reason,matchedTerms:decision.matchedTerms});}return true;});
+    const items=collectedItems.filter(item=>{let decision=classifyArticleOrganizationScope(item,scope);if(decision.status==='OUT_OF_SCOPE'&&filterArticlesByOrganizationScope([item],scope).length===1)decision={status:'RELEVANT',reason:'online headline contains configured geographic identity',matchedTerms:[scope.cityName||''].filter(Boolean)};if(decision.status==='OUT_OF_SCOPE'){scopeRejected++;if(scopeRejectedSamples.length<25)scopeRejectedSamples.push({title:item.title,url:item.url,reason:decision.reason,matchedTerms:decision.matchedTerms});return false;}if(decision.status==='REVIEW'){scopeReview++;if(scopeReviewSamples.length<15)scopeReviewSamples.push({title:item.title,url:item.url,reason:decision.reason,matchedTerms:decision.matchedTerms});}return true;});
     const existing=(await pool.query(`SELECT title,url FROM articles WHERE source_id=$1 AND COALESCE(published_at,created_at)>=NOW()-INTERVAL '30 days'`,[source.id])).rows;
     const seenTitles=existing.map(r=>String(r.title||'')),seenUrls=new Set(existing.map(r=>normalizedArticleUrl(String(r.url||''))).filter(Boolean));
     const accepted:any[]=[];let duplicateSkipped=0;
