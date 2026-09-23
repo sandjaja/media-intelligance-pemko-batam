@@ -13,6 +13,7 @@ const scope:OrganizationMediaScope={
  cityName:'Kota Contoh',
  tagline:null,
  districts:['Utara'],
+ villages:[],
  actors:[{kind:'OPD',id:20,name:'Dinas Perhubungan',code:'DISHUB',aliases:['dinas perhubungan','dishub']}]
 };
 
