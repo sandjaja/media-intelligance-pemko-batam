@@ -12,7 +12,7 @@ export type OrganizationMediaScope = {
   cityName?: string | null;
   tagline?: string | null;
   districts: string[];
-  villages: string[];
+  villages?: string[];
   actors: OrganizationUnitActor[];
 };
 
@@ -94,4 +94,4 @@ export function classifyTextOrganizationScope(input:OrganizationScopeTextInput,s
 }
 
 export function isArticleInOrganizationScope(article:OnlineArticle,scope:OrganizationMediaScope):boolean{return classifyArticleOrganizationScope(article,scope).status!=='OUT_OF_SCOPE';}
-export function filterArticlesByOrganizationScope(articles:OnlineArticle[],scope:OrganizationMediaScope|null):OnlineArticle[]{if(!scope)return[];const city=normalize(scope.cityName);const districts=uniqueTerms(scope.districts);const villages=uniqueTerms(scope.villages);return articles.filter(article=>{const decision=classifyArticleOrganizationScope(article,scope);if(decision.status==='RELEVANT')return true;const title=normalize(article.title);/* Media Online may use configured geographic identity as editorial scope evidence. Social remains stricter because classifyTextOrganizationScope does not use this article-only fallback. */if(city&&containsTerm(title,city))return true;if(districts.some(d=>containsTerm(title,d)||containsTerm(title,`kecamatan ${d}`)))return true;return villages.some(v=>containsTerm(title,v)||containsTerm(title,`kelurahan ${v}`));});}
+export function filterArticlesByOrganizationScope(articles:OnlineArticle[],scope:OrganizationMediaScope|null):OnlineArticle[]{if(!scope)return[];const city=normalize(scope.cityName);const districts=uniqueTerms(scope.districts);const villages=uniqueTerms(scope.villages??[]);return articles.filter(article=>{const decision=classifyArticleOrganizationScope(article,scope);if(decision.status==='RELEVANT')return true;const title=normalize(article.title);/* Media Online may use configured geographic identity as editorial scope evidence. Social remains stricter because classifyTextOrganizationScope does not use this article-only fallback. */if(city&&containsTerm(title,city))return true;if(districts.some(d=>containsTerm(title,d)||containsTerm(title,`kecamatan ${d}`)))return true;return villages.some(v=>containsTerm(title,v)||containsTerm(title,`kelurahan ${v}`));});}
