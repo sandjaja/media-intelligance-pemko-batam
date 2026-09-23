@@ -1,6 +1,6 @@
 import { Pool } from 'pg';
 import { analyzeArticle as analyzeCoreArticle, parseKeywordQuery } from './media-intelligence-core.js';
-import { applyRisk } from './risk.js';
+import { applyRisk, calculateRisk } from './risk.js';
 import { classifyNews, clearSupportingIntelligenceLinks } from './news-classification.js';
 
 export const CLASSIFICATION_VERSION='article-opd-v13-20260916';
@@ -74,7 +74,8 @@ export async function analyzeArticle(pool:Pool,articleId:string){
   await clearSupportingIntelligenceLinks(pool,articleId);
   const peerResult=await pool.query(`SELECT COUNT(*)::int count FROM articles WHERE id<>$1 AND (title ILIKE $2 OR summary ILIKE $2)`,[articleId,`%${String(article.title).slice(0,80)}%`]);const peerCount=Number(peerResult.rows[0]?.count??1)+1;
   const analysis=analyzeCoreArticle({id:article.id,title:article.title,summary:article.summary,content:article.content,sourceName:article.source_name,sourceTier:Number(article.tier??2),mediaKind:article.media_kind==='print'?'print':article.media_kind==='social'?'social':'online',opdId:null,publishedAt:article.published_at},parseKeywordQuery(''),peerCount);
-  const supportingRisk=await applyRisk(pool,articleId,{sentiment:analysis.sentiment,importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore});
+  const tierRow=(await pool.query(`SELECT COALESCE(ms.tier,2) tier FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE a.id=$1`,[articleId])).rows[0];
+  const supportingRisk=calculateRisk({sentiment:analysis.sentiment,importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,tier:Number(tierRow?.tier||2)});
   await pool.query(`UPDATE articles SET opd_id=NULL,sentiment=$2,importance_score=$3,impact_score=$4,velocity_score=$5,risk_score=$6,risk_level=$7,is_highlight=$8,summary=COALESCE(NULLIF(summary,''),$9),classified_at=NOW(),classification_version=$10 WHERE id=$1`,[articleId,analysis.sentiment,analysis.importanceScore,analysis.impactScore,analysis.velocityScore,supportingRisk.score,supportingRisk.level,supportingRisk.level==='high'||supportingRisk.level==='critical',String(article.content??article.title).slice(0,300),CLASSIFICATION_VERSION]);
   await pool.query(`DELETE FROM article_entities WHERE article_id=$1 AND entity_type='entity'`,[articleId]);for(const entity of analysis.entities.slice(0,20))await pool.query(`INSERT INTO article_entities(article_id,entity_type,entity_name) VALUES($1,'entity',$2) ON CONFLICT DO NOTHING`,[articleId,entity]);
   return{articleId,newsClassification:news.classification,newsClassificationSource:news.source,newsClassificationReason:news.reason,newsClassificationSignals:news.signals,classificationVersion:CLASSIFICATION_VERSION,opdId:null,supportingOpdIds:[],districtId:null,uptdId:null,uptdName:null,uptdMatches:0,taxonomyId:null,taxonomyName:null,taxonomyScore:0,issueId:null,issueMatchScore:0,issueAssignmentSource:null,sentiment:analysis.sentiment,importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,highlight:false,keywordMatches:0,matchedKeywords:[],entities:analysis.entities,risk:null};
