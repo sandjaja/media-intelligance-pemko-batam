@@ -287,8 +287,12 @@ export async function collectOnlineSource(source:OnlineSource,scope?:Organizatio
         const html=await crawlScopedPages(source,body,pageUrl,scope);if(html.length)return html;
         const discovered=discoverFeed(body,pageUrl);if(discovered){const items=await tryFeeds(source,[discovered],scope);if(items.length)return items}
       }else{
-        const feeds=await tryFeeds(source,[discoverFeed(body,pageUrl)??'',...commonFeeds(pageUrl)],scope);if(feeds.length)return feeds;
-        const html=await crawlHtml(source,body,pageUrl,scope);if(html.length)return html;
+        const feedUrls=[discoverFeed(body,pageUrl)??'',...commonFeeds(pageUrl)];
+        const [feeds,html]=await Promise.all([tryFeeds(source,feedUrls,scope),crawlHtml(source,body,pageUrl,scope)]);
+        const merged=new Map<string,OnlineArticle>();
+        for(const item of [...feeds,...html])if(!merged.has(item.url.toLowerCase()))merged.set(item.url.toLowerCase(),item);
+        const combined=[...merged.values()].sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime()).slice(0,120);
+        if(combined.length)return combined;
       }
       homepageError=new Error(`Media ${source.name} tidak menghasilkan artikel relevan 7 hari terakhir dari scope organisasi aktif`);
     }else homepageError=new Error(`Media ${source.name} returned HTTP ${response.status}`);
