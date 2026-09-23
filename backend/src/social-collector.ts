@@ -40,7 +40,7 @@ export async function ingestSocialCandidate(pool:Pool,candidate:SocialCandidate,
   opdId:routing.primaryOpdId,
   publishedAt:candidate.publishedAt??null
  },query,1);
- const finalRisk=calculateRisk({importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,sentiment:analysis.sentiment,tier:2});
+ const finalRisk=calculateRisk({importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,sentiment:analysis.sentiment});
  const contentHash=socialContentHash(candidate),publishedAt=candidate.publishedAt?new Date(candidate.publishedAt):null;
  const curationStatus=candidate.sourceKind==='owned'&&candidate.platform==='website'?'candidate':null;
  const metadata={...(candidate.metadata&&typeof candidate.metadata==='object'&&!Array.isArray(candidate.metadata)?candidate.metadata as Record<string,unknown>:{}),socialContext:candidate.context??null,v16Routing:routing};
