@@ -1,4 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
+import { analyzeArticle as analyzeCoreArticle, parseKeywordQuery } from './media-intelligence-core.js';
+import { calculateRisk } from './risk.js';
 import { getV16HeadlineTaxonomies, getV16PrimaryEvidenceForInput, type V16HeadlineTaxonomy, type V16PrimaryEvidence } from './context-dominance-v16.js';
 
 export const OWNED_CLASSIFICATION_VERSION = 'article-opd-v16.5-20260916';
@@ -91,14 +93,18 @@ export async function lockOwnedRoutingV16(client: PoolClient, mentionId: number,
   }
   const verifiedAt = new Date().toISOString();
   const locked: OwnedV16LockedRouting = { ...routing, verificationStatus: 'LOCKED', verifiedBy, verifiedAt };
+  const publication=(await client.query(`SELECT title,content,published_at,author_name,platform FROM social_mentions WHERE id=$1 AND source_kind='owned' AND curation_status='approved' LIMIT 1`,[mentionId])).rows[0];
+  if (!publication) throw new Error('APPROVED_OWNED_PUBLICATION_NOT_FOUND');
+  const intelligence=analyzeCoreArticle({id:mentionId,title:publication.title,summary:String(publication.content||'').slice(0,900),content:publication.content,sourceName:publication.author_name||publication.platform,mediaKind:'owned',opdId:routing.primaryOpdId,publishedAt:publication.published_at},parseKeywordQuery(String(routing.keyword||'')),1);
+  const risk=calculateRisk({importance:intelligence.importanceScore,impact:intelligence.impactScore,velocity:intelligence.velocityScore,sentiment:intelligence.sentiment,tier:2});
   const result = await client.query(
     `UPDATE social_mentions
-       SET opd_id=$2,
-           metadata=jsonb_set(COALESCE(metadata,'{}'::jsonb),'{v16Routing}',$3::jsonb,true),
+       SET opd_id=$2,sentiment=$4,sentiment_score=$5,importance_score=$6,influence_score=$7,risk_score=$8,risk_level=$9,
+           metadata=jsonb_set(jsonb_set(COALESCE(metadata,'{}'::jsonb),'{v16Routing}',$3::jsonb,true),'{intelligence}',$10::jsonb,true),
            updated_at=now()
      WHERE id=$1 AND source_kind='owned' AND curation_status='approved'
      RETURNING id`,
-    [mentionId, routing.primaryOpdId, JSON.stringify(locked)],
+    [mentionId, routing.primaryOpdId, JSON.stringify(locked), intelligence.sentiment, intelligence.sentimentScore, intelligence.importanceScore, intelligence.impactScore, risk.score, risk.level, JSON.stringify({...intelligence,riskLevel:risk.level,riskReasons:risk.reasons})],
   );
   if (!result.rows[0]) throw new Error('APPROVED_OWNED_PUBLICATION_NOT_FOUND');
   return locked;
