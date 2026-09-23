@@ -33,12 +33,25 @@ function cleanArticleBody(html:string,title:string,url:string){let body=html.mat
  }else if(clean.startsWith(normalizedTitle))clean=clean.slice(normalizedTitle.length).trim();
  return clean.slice(0,100000);}
 
-export function verifyOriginalArticleHtml(html:string,requestedUrl:string,linkTitle=''):VerifiedOnlineArticle|null{
+export function diagnoseOriginalArticleHtml(html:string,requestedUrl:string,linkTitle=''){
   const url=canonical(html,requestedUrl);
   const title=first(meta(html,'og:title'),text(html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1]),text(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1]),linkTitle);
-  if(!title||title.length<5)return null;
-  const date=dateEvidence(html,url,title);if(!date)return null;
-  const publishedAt=parseDate(date.raw);if(!publishedAt)return null;
-  const excerpt=cleanArticleBody(html,title,url);if(excerpt.length<40)return null;
+  if(!title||title.length<5)return{reason:'MISSING_TITLE',url,htmlLength:html.length};
+  const date=dateEvidence(html,url,title);
+  if(!date)return{reason:'MISSING_DATE',url,htmlLength:html.length,hasArticlePublished:Boolean(meta(html,'article:published_time')),hasOgPublished:Boolean(meta(html,'og:published_time')),hasDatePublished:Boolean(meta(html,'datePublished')),hasTimeDatetime:/<time\b[^>]*datetime=["'][^"']+["']/i.test(html)};
+  const publishedAt=parseDate(date.raw);
+  if(!publishedAt)return{reason:'INVALID_DATE',url,dateEvidence:date.evidence,dateRaw:String(date.raw).slice(0,120),htmlLength:html.length};
+  const excerpt=cleanArticleBody(html,title,url);
+  if(excerpt.length<40)return{reason:'EXCERPT_TOO_SHORT',url,excerptLength:excerpt.length,hasArticleTag:/<article\b/i.test(html),hasMainTag:/<main\b/i.test(html),htmlLength:html.length,dateEvidence:date.evidence};
+  return null;
+}
+
+export function verifyOriginalArticleHtml(html:string,requestedUrl:string,linkTitle=''):VerifiedOnlineArticle|null{
+  const diagnostic=diagnoseOriginalArticleHtml(html,requestedUrl,linkTitle);if(diagnostic)return null;
+  const url=canonical(html,requestedUrl);
+  const title=first(meta(html,'og:title'),text(html.match(/<h1\b[^>]*>([\s\S]*?)<\/h1>/i)?.[1]),text(html.match(/<title\b[^>]*>([\s\S]*?)<\/title>/i)?.[1]),linkTitle)!;
+  const date=dateEvidence(html,url,title)!;
+  const publishedAt=parseDate(date.raw)!;
+  const excerpt=cleanArticleBody(html,title,url);
   return{title:title.slice(0,1000),url,publishedAt,publishedAtEvidence:date.evidence,excerpt};
 }
