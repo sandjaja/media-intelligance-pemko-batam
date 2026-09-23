@@ -4,6 +4,7 @@ import { buildSocialScopeText, type SocialConversationContext } from './social-c
 function normalize(value:unknown){return String(value??'').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu,' ').replace(/\s+/g,' ').trim();}
 function terms(values:Array<string|null|undefined>){return [...new Set(values.map(normalize).filter(v=>v.length>=3))];}
 function has(text:string,term:string){return !!text&&!!term&&(` ${text} `).includes(` ${term} `);}
+function actorTerms(scope:OrganizationMediaScope){return terms(scope.actors.flatMap(actor=>actor.aliases));}
 function organizationTerms(scope:OrganizationMediaScope){return organizationScopeTerms(scope);}
 function areaTerms(scope:OrganizationMediaScope){return terms([scope.cityName,...scope.districts,...(scope.villages??[]),...(scope.areaAliases??[])]);}
 
