@@ -13,16 +13,17 @@ function scopeRows(sql:string){
  return null;
 }
 
-test('Social ingestion retains REVIEW for classification and moderation',async()=>{
- let reachedClassification=false;
+test('Social ingestion rejects generic actor without local evidence',async()=>{
+ let inserted=false;
  const pool={async query(sql:string){
   const rows=scopeRows(sql); if(rows)return{rows};
-  if(sql.includes('FROM taxonomy_categories tc JOIN classification_sectors cs')){reachedClassification=true;return{rows:[]};}
-  if(sql.includes('FROM keywords k JOIN keyword_taxonomy kt'))return{rows:[]};
-  throw new Error('STOP_AFTER_CLASSIFICATION_GATE');
+  if(sql.includes('INSERT INTO social_mentions'))inserted=true;
+  throw new Error('Unexpected query after scope gate: '+sql);
  }} as any;
- await assert.rejects(()=>ingestSocialCandidate(pool,{platform:'instagram',contentType:'comment',content:'Dishub tolong dong parkir ini ditertibkan'}),/STOP_AFTER_CLASSIFICATION_GATE/);
- assert.equal(reachedClassification,true);
+ const result:any=await ingestSocialCandidate(pool,{platform:'instagram',contentType:'comment',content:'Dishub tolong dong parkir ini ditertibkan'});
+ assert.equal(result.skipped,true);
+ assert.equal(result.reason,'ORGANIZATION_SCOPE_OUT_OF_SCOPE');
+ assert.equal(inserted,false);
 });
 test('Social ingestion skips OUT_OF_SCOPE even when discovery query contains organization area',async()=>{
  let inserted=false;
