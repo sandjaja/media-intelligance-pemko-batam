@@ -7,6 +7,15 @@ function has(text:string,term:string){return !!text&&!!term&&(` ${text} `).inclu
 function actorTerms(scope:OrganizationMediaScope){return terms(scope.actors.flatMap(actor=>actor.aliases));}
 function organizationTerms(scope:OrganizationMediaScope){return organizationScopeTerms(scope);}
 function areaTerms(scope:OrganizationMediaScope){return terms([scope.cityName,...scope.districts,...(scope.villages??[]),...(scope.areaAliases??[])]);}
+function explicitExternalGovernmentActor(text:string,scope:OrganizationMediaScope){
+ const localAreas=areaTerms(scope);
+ const governmentActor=/\b(?:pemkab|pemerintah kabupaten|bupati|wakil bupati|dinkes|dishub|disdik|disnaker|diskominfo|dinas|badan)\s+([\p{L}][\p{L}\s-]{2,40})/gu;
+ for(const match of text.matchAll(governmentActor)){
+  const place=normalize(match[1]).split(/\b(?:imbau|mengimbau|minta|meminta|sebut|menyebut|gelar|adakan|soal|terkait|untuk|dan|yang)\b/u)[0].trim();
+  if(place&&place.length>=3&&!localAreas.some(local=>has(place,local)||has(local,place)))return match[0];
+ }
+ return null;
+}
 
 export type SocialOrganizationScopeInput={
  title?:string|null;
@@ -31,6 +40,8 @@ export function classifySocialOrganizationScope(input:SocialOrganizationScopeInp
  const contextOrg=org.strong.filter(t=>has(context,t)),contextArea=areas.filter(t=>has(context,t));
  const contextEvidence=[...new Set([...contextOrg,...contextArea])];
 
+ const externalActor=explicitExternalGovernmentActor(current,scope);
+ if(externalActor)return{status:'OUT_OF_SCOPE',reason:'social content explicitly identifies a government actor from outside the active organization area',matchedTerms:[externalActor]};
  if(currentOrg.length)return{status:'RELEVANT',reason:'social content explicitly identifies the active organization',matchedTerms:currentOrg};
  if(currentActors.length&&contextEvidence.length)return{status:'RELEVANT',reason:'social content names an internal actor and the conversation context confirms organization/area scope',matchedTerms:[...new Set([...currentActors,...contextEvidence])]};
  if(currentArea.length||contextArea.length)return{status:'REVIEW',reason:'social conversation has database-backed local geographic evidence but no explicit active-organization/internal-actor evidence',matchedTerms:[...new Set([...currentArea,...contextArea])]};
