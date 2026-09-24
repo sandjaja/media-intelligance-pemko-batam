@@ -104,7 +104,7 @@ export async function lockOwnedRoutingV16(client: PoolClient, mentionId: number,
            updated_at=now()
      WHERE id=$1 AND source_kind='owned' AND curation_status='approved'
      RETURNING id`,
-    [mentionId, routing.primaryOpdId, JSON.stringify(locked), intelligence.sentiment, intelligence.sentimentScore, intelligence.importanceScore, intelligence.impactScore, risk.score, risk.level, JSON.stringify({...intelligence,riskLevel:risk.level,riskReasons:risk.reasons})],
+    [mentionId, routing.primaryOpdId, JSON.stringify(locked), intelligence.sentiment, intelligence.sentimentScore, intelligence.importanceScore, intelligence.impactScore, risk.score, risk.level, JSON.stringify({...intelligence,riskLevel:risk.level,riskReasons:risk.reasons,riskStatus:'FINAL',riskFinalizedAt:new Date().toISOString()})],
   );
   if (!result.rows[0]) throw new Error('APPROVED_OWNED_PUBLICATION_NOT_FOUND');
   return locked;
