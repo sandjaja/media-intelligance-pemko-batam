@@ -96,7 +96,7 @@ export async function lockOwnedRoutingV16(client: PoolClient, mentionId: number,
   const publication=(await client.query(`SELECT title,content,published_at,author_name,platform FROM social_mentions WHERE id=$1 AND source_kind='owned' AND curation_status='approved' LIMIT 1`,[mentionId])).rows[0];
   if (!publication) throw new Error('APPROVED_OWNED_PUBLICATION_NOT_FOUND');
   const intelligence=analyzeCoreArticle({id:mentionId,title:publication.title,summary:String(publication.content||'').slice(0,900),content:publication.content,sourceName:publication.author_name||publication.platform,mediaKind:'social',opdId:routing.primaryOpdId,publishedAt:publication.published_at},parseKeywordQuery(String(routing.keyword||'')),1);
-  const risk=calculateRisk({importance:intelligence.importanceScore,impact:intelligence.impactScore,velocity:intelligence.velocityScore,sentiment:intelligence.sentiment});
+  const risk=calculateRisk({importance:intelligence.importanceScore,impact:intelligence.impactScore,velocity:intelligence.velocityScore,sentiment:intelligence.sentiment,sentimentScore:intelligence.sentimentScore});
   const result = await client.query(
     `UPDATE social_mentions
        SET opd_id=$2,sentiment=$4,sentiment_score=$5,importance_score=$6,influence_score=$7,risk_score=$8,risk_level=$9,
