@@ -55,3 +55,10 @@ test('external-looking parent with area name but no internal actor stays review'
  },scope);
  assert.equal(d.status,'REVIEW');
 });
+
+
+test('explicit external government actor overrides local topic context',()=>{
+ const d=classifySocialOrganizationScope({title:'Dinkes Kabupaten Lain imbau warga pakai masker dampak udara tak sehat',content:'Kabut asap juga berdampak pada wilayah Kota Contoh'},scope);
+ assert.equal(d.status,'OUT_OF_SCOPE');
+ assert.match(d.reason,/outside the active organization area/);
+});
