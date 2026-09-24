@@ -53,3 +53,25 @@ test('narrative terms ignore common stopwords', () => {
   assert.equal(terms.some(item => item.term === 'pelayanan'), true);
   assert.equal(terms.some(item => item.term === 'yang'), false);
 });
+
+
+test('semantic scoring keeps routine news below disruptive public-safety events', () => {
+  const routine=analyzeArticle({id:10,title:'Pemko gelar rapat koordinasi rutin',summary:'Rapat internal membahas agenda administrasi.'},parseKeywordQuery(''),1);
+  const flood=analyzeArticle({id:11,title:'Banjir merendam permukiman dan jalan, layanan warga terganggu',summary:'Warga terdampak, akses jalan terhambat dan petugas melakukan evakuasi.'},parseKeywordQuery(''),1);
+  assert.ok(flood.impactScore >= 55);
+  assert.ok(flood.impactScore > routine.impactScore);
+  assert.ok(flood.importanceScore > routine.importanceScore);
+});
+
+test('public service accountability can cross importance threshold without source tier', () => {
+  const analysis=analyzeArticle({id:12,title:'Warga keluhkan pelayanan publik Pemko yang terlambat',summary:'Keluhan masyarakat meminta dinas memperbaiki layanan.'},parseKeywordQuery(''),1);
+  assert.ok(analysis.importanceScore >= 65);
+  assert.equal(analysis.sentiment,'negative');
+  assert.ok(analysis.riskScore > 0);
+});
+
+test('fire and safety impact are semantic rather than headline-length based', () => {
+  const analysis=analyzeArticle({id:13,title:'Polisi tetapkan tersangka kebakaran lahan',summary:'Kebakaran lahan mengancam keselamatan warga dan lingkungan.'},parseKeywordQuery(''),1);
+  assert.ok(analysis.impactScore >= 55);
+  assert.ok(analysis.riskScore > 0);
+});
