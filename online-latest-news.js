@@ -94,7 +94,7 @@
     if(running||reanalyzing||clustering)return;reanalyzing=true;syncButtons();setReanalysisState('Menganalisis 7 hari...',true);
     try{
       const result=await api('/online/reanalyze',{method:'POST',body:JSON.stringify({days:7,limit:300})});
-      showReanalysisResult(result);window.toast?.(`Analisis ulang selesai: ${Number(result.analyzed||0)} berhasil, ${Number(result.failed||0)} gagal.`);document.getElementById('onlineRefresh')?.click();
+      showReanalysisResult(result);window.toast?.(`Analisis ulang selesai: ${Number(result.analyzed||0)} berhasil, ${Number(result.failed||0)} gagal.`);if(typeof window.renderOnlineMediaWorkspace==='function')await window.renderOnlineMediaWorkspace();else document.getElementById('onlineRefresh')?.click();
     }catch(e){window.toast?.(`Gagal analisis ulang: ${e.message}`);}
     finally{reanalyzing=false;ensureButton();setReanalysisState('Analisis Ulang 7 Hari');setState('Ambil Berita Terbaru');setClusteringState('Bangun Ulang Story Cluster');syncButtons();}
   }
