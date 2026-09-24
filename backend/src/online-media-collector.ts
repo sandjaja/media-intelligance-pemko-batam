@@ -287,28 +287,24 @@ export async function collectOnlineSource(source:OnlineSource,scope?:Organizatio
   if(source.active===false)return[];
   const targetUrl=normalizeSourceUrl(source);
   let homepageError:Error|null=null;
+  const discoveredItems:OnlineArticle[]=[];
+  const add=(items:OnlineArticle[])=>{discoveredItems.push(...items)};
   try{
     const {response,body}=await fetchText(targetUrl);
     if(response.ok){
       const pageUrl=response.url||targetUrl,type=response.headers.get('content-type')?.toLowerCase()??'';
-      if(looksXml(type,body)){const candidates=parseFeed(body,source,scope);if(candidates.length){const items=await verifyCandidates(candidates,scope);if(items.length)return items}}
-      if(isScopedPage(pageUrl)){
-        const html=await crawlScopedPages(source,body,pageUrl,scope);if(html.length)return html;
-        const discovered=discoverFeed(body,pageUrl);if(discovered){const items=await tryFeeds(source,[discovered],scope);if(items.length)return items}
-      }else{
-        const feedUrls=[discoverFeed(body,pageUrl)??'',...commonFeeds(pageUrl)];
-        const [feeds,html]=await Promise.all([tryFeeds(source,feedUrls,scope),crawlHtml(source,body,pageUrl,scope)]);
-        const merged=new Map<string,OnlineArticle>();
-        for(const item of [...feeds,...html])if(!merged.has(item.url.toLowerCase()))merged.set(item.url.toLowerCase(),item);
-        const combined=[...merged.values()].sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime()).slice(0,120);
-        if(combined.length)return combined;
-      }
-      homepageError=new Error(`Media ${source.name} tidak menghasilkan artikel relevan 7 hari terakhir dari scope organisasi aktif`);
+      if(looksXml(type,body)){const candidates=parseFeed(body,source,scope);if(candidates.length)add(await verifyCandidates(candidates,scope))}
+      else if(isScopedPage(pageUrl)){add(await crawlScopedPages(source,body,pageUrl,scope));const discovered=discoverFeed(body,pageUrl);if(discovered)add(await tryFeeds(source,[discovered],scope))}
+      else{const feedUrls=[discoverFeed(body,pageUrl)??'',...commonFeeds(pageUrl)];const [feeds,html]=await Promise.all([tryFeeds(source,feedUrls,scope),crawlHtml(source,body,pageUrl,scope)]);add(feeds);add(html)}
+      if(!discoveredItems.length)homepageError=new Error(`Media ${source.name} tidak menghasilkan artikel relevan 7 hari terakhir dari scope organisasi aktif`);
     }else homepageError=new Error(`Media ${source.name} returned HTTP ${response.status}`);
   }catch(error){homepageError=error instanceof Error?error:new Error(String(error))}
-
-  console.info({sourceId:source.id,source:source.name,targetUrl,homepageError:homepageError?.message??null,stage:'fallback_start'},'online collector fallback diagnostic');
-  const directFeedFallback=await tryFeeds(source,commonFeeds(targetUrl),scope);console.info({sourceId:source.id,source:source.name,stage:'direct_feed_fallback',verified:directFeedFallback.length},'online collector fallback diagnostic');if(directFeedFallback.length)return directFeedFallback;
-  const newsFallback=await tryExternalNewsFallback(source,targetUrl,scope);if(newsFallback.length)return newsFallback;
+  const directFeedFallback=await tryFeeds(source,commonFeeds(targetUrl),scope);add(directFeedFallback);
+  const newsFallback=await tryExternalNewsFallback(source,targetUrl,scope);add(newsFallback);
+  const merged=new Map<string,OnlineArticle>();
+  for(const item of discoveredItems){const key=item.url.toLowerCase(),existing=merged.get(key);if(!existing||item.publishedAt.getTime()>existing.publishedAt.getTime())merged.set(key,item)}
+  const combined=[...merged.values()].filter(item=>isFresh(item)).sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime()).slice(0,120);
+  console.info({sourceId:source.id,source:source.name,stage:'merged_discovery',directFeed:directFeedFallback.length,googleNews:newsFallback.length,merged:combined.length,newest:combined[0]?.publishedAt?.toISOString()??null},'online collector merged discovery diagnostic');
+  if(combined.length)return combined;
   throw homepageError??new Error(`Media ${source.name} tidak menghasilkan artikel relevan dalam 7 hari terakhir`);
 }
