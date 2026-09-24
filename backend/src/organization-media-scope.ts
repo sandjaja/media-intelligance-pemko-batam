@@ -24,14 +24,6 @@ function normalize(value: unknown): string {
   return String(value ?? '').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
 }
 function uniqueTerms(values: Array<string | null | undefined>): string[] { return [...new Set(values.map(normalize).filter(v => v.length >= 3))]; }
-function geographicVariants(value:string):string[]{
-  const base=normalize(value);if(!base)return[];
-  const variants=[base];
-  // Batam publishers commonly abbreviate "Sungai" as "Sei" (e.g. Sungai Lekop -> Sei Lekop).
-  if(base.startsWith('sungai '))variants.push('sei '+base.slice(7));
-  if(base.startsWith('sei '))variants.push('sungai '+base.slice(4));
-  return [...new Set(variants)];
-}
 function containsTerm(text: string, term: string): boolean { return !!text && !!term && (` ${text} `).includes(` ${term} `); }
 function roundupHeadline(title:string){return /\b(?:daftar\s+\d+\s+berita|berita\s+pilihan|rangkuman\s+berita|berita\s+terpopuler|berita\s+populer|top\s+\d+\s+berita)\b/i.test(normalize(title));}
 
@@ -104,4 +96,4 @@ export function classifyTextOrganizationScope(input:OrganizationScopeTextInput,s
 }
 
 export function isArticleInOrganizationScope(article:OnlineArticle,scope:OrganizationMediaScope):boolean{return classifyArticleOrganizationScope(article,scope).status!=='OUT_OF_SCOPE';}
-export function filterArticlesByOrganizationScope(articles:OnlineArticle[],scope:OrganizationMediaScope|null):OnlineArticle[]{if(!scope)return[];const city=normalize(scope.cityName);const districts=uniqueTerms(scope.districts);const villages=[...new Set((scope.villages??[]).flatMap(geographicVariants))];const areaAliases=[...new Set((scope.areaAliases??[]).flatMap(geographicVariants))];return articles.filter(article=>{const decision=classifyArticleOrganizationScope(article,scope);if(decision.status==='RELEVANT')return true;const title=normalize(article.title);/* Media Online may use configured geographic identity as editorial scope evidence. Social remains stricter because classifyTextOrganizationScope does not use this article-only fallback. */if(city&&containsTerm(title,city))return true;if(districts.some(d=>containsTerm(title,d)||containsTerm(title,`kecamatan ${d}`)))return true;if(villages.some(v=>containsTerm(title,v)||containsTerm(title,`kelurahan ${v}`)))return true;return areaAliases.some(v=>containsTerm(title,v));});}
+export function filterArticlesByOrganizationScope(articles:OnlineArticle[],scope:OrganizationMediaScope|null):OnlineArticle[]{if(!scope)return[];const city=normalize(scope.cityName);const districts=uniqueTerms(scope.districts);const villages=uniqueTerms(scope.villages??[]);const areaAliases=uniqueTerms(scope.areaAliases??[]);return articles.filter(article=>{const decision=classifyArticleOrganizationScope(article,scope);if(decision.status==='RELEVANT')return true;const title=normalize(article.title);/* Media Online may use configured geographic identity as editorial scope evidence. Social remains stricter because classifyTextOrganizationScope does not use this article-only fallback. */if(city&&containsTerm(title,city))return true;if(districts.some(d=>containsTerm(title,d)||containsTerm(title,`kecamatan ${d}`)))return true;if(villages.some(v=>containsTerm(title,v)||containsTerm(title,`kelurahan ${v}`)))return true;return areaAliases.some(v=>containsTerm(title,v));});}
