@@ -24,7 +24,7 @@ export async function ingestSocialCandidate(pool:Pool,candidate:SocialCandidate,
  const scope=await loadOrganizationMediaScope(pool);
  if(!scope)throw new Error('ACTIVE_ORGANIZATION_UNRESOLVED');
  const scopeDecision=classifySocialOrganizationScope({title:candidate.title,content:candidate.content,context:candidate.context},scope);
- if(candidate.sourceKind!=='owned'&&scopeDecision.status!=='RELEVANT')return{skipped:true,reason:scopeDecision.status==='OUT_OF_SCOPE'?'ORGANIZATION_SCOPE_OUT_OF_SCOPE':'ORGANIZATION_SCOPE_REVIEW',scopeDecision,platform:candidate.platform,externalId:candidate.externalId??null};
+ if(candidate.sourceKind!=='owned'&&scopeDecision.status==='OUT_OF_SCOPE')return{skipped:true,reason:'ORGANIZATION_SCOPE_OUT_OF_SCOPE',scopeDecision,platform:candidate.platform,externalId:candidate.externalId??null};
  const routingContent=[candidate.context?.parentContent?.title,candidate.context?.parentContent?.content,candidate.context?.parentComment?.content,candidate.content].filter(Boolean).join(' ');
  const routing=await analyzeSocialRoutingV16(pool,{title:candidate.title,content:routingContent});
  const matchedKeywords=routing.keyword?[routing.keyword]:[];
