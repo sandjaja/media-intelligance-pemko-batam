@@ -85,12 +85,41 @@ export function analyzeArticle(article: IntelligenceArticle, query: KeywordQuery
   else if (!hasPublicActor && !externalHazard) sentiment = negative > positive * 1.15 ? 'negative' : positive > negative * 1.15 ? 'positive' : 'neutral';
   const lexicalScore = total === 0 ? 0 : ((positive - negative) / total) * 100;
   const sentimentScore = clampSigned(sentiment === 'neutral' ? 0 : sentiment === 'negative' ? -Math.abs(lexicalScore || 50) : Math.abs(lexicalScore || 50));
-  const titleBoost = Math.min(20, tokens(article.title).length * 1.5);
-  const sourceBoost = 4;
-  const spreadBoost = Math.min(25, Math.log2(Math.max(1, peerCount)) * 8);
-  const impactScore = clamp(25 + titleBoost + sourceBoost + spreadBoost);
-  const importanceBase = clamp(20 + negative * 0.9 + titleBoost * 0.6 + spreadBoost * 0.7);
-  const importanceScore = clamp(importanceBase * 0.45 + impactScore * 0.4);
+  // Importance and impact are semantic inputs. Do not use source tier/media type
+  // or headline length as risk proxies: the same event must score consistently
+  // across Online, Print, Social and Owned.
+  const strategicPublicService = /\b(?:pelayanan publik|layanan publik|air bersih|air minum|listrik|jalan|jembatan|transportasi|angkutan|sampah|limbah|drainase|banjir|kesehatan|rumah sakit|puskesmas|pendidikan|sekolah|perizinan|administrasi kependudukan|pemadam|kebakaran)\b/u.test(text);
+  const leadershipOrPolicy = /\b(?:wali kota|wakil wali kota|sekretaris daerah|sekda|kebijakan|peraturan|anggaran|apbd|program prioritas|proyek strategis|investasi|pelayanan publik)\b/u.test(text);
+  const accountabilityOrIntegrity = /\b(?:korupsi|suap|gratifikasi|pungli|penyalahgunaan|tersangka|penyidikan|audit|temuan|keluhan|dikeluhkan|protes|kritik|dikritik|gagal|lalai|abai|polemik|sengketa)\b/u.test(text);
+  const emergencyOrSafety = /\b(?:kebakaran|banjir|kecelakaan|bencana|darurat|krisis|longsor|tenggelam|tewas|meninggal|korban|luka|parang|ancaman|evakuasi|penyelamatan|kabut asap|kualitas udara)\b/u.test(text);
+  const serviceDisruption = /\b(?:padam|pemadaman|terputus|gangguan layanan|terganggu|tidak beroperasi|ditutup|lumpuh|macet|terhambat|kekurangan air|kebocoran|rusak|tergenang)\b/u.test(text);
+  const economicOrEnvironmentalImpact = /\b(?:kerugian|rugi|ekonomi|investasi|usaha|pekerja|buruh|phk|pencemaran|limbah|lingkungan|kualitas udara|lahan terbakar)\b/u.test(text);
+  const broadReach = /\b(?:warga|masyarakat|publik|ribuan|ratusan|sejumlah wilayah|beberapa wilayah|kecamatan|kelurahan)\b/u.test(text);
+  const multiAgency = /\b(?:lintas opd|antar opd|bersama dinas|pemko bersama|tim gabungan|forkopimda)\b/u.test(text);
+
+  let importance = 20;
+  if (hasPublicActor) importance += 15;
+  if (strategicPublicService) importance += 20;
+  if (leadershipOrPolicy) importance += 15;
+  if (accountabilityOrIntegrity) importance += 20;
+  if (emergencyOrSafety) importance += 15;
+  if (multiAgency) importance += 10;
+  // Repeated independent coverage is evidence that a subject is becoming strategically important.
+  importance += Math.min(15, Math.max(0, peerCount - 1) * 3);
+  const importanceScore = clamp(importance);
+
+  let impact = 20;
+  if (strategicPublicService) impact += 15;
+  if (emergencyOrSafety) impact += 25;
+  if (serviceDisruption) impact += 20;
+  if (economicOrEnvironmentalImpact) impact += 15;
+  if (broadReach) impact += 10;
+  if (accountabilityOrIntegrity) impact += 10;
+  impact += Math.min(10, Math.max(0, peerCount - 1) * 2);
+  const impactScore = clamp(impact);
+
+  // Article velocity is a snapshot at analysis time. Issue velocity remains the
+  // dynamic layer; locking an article freezes this snapshot.
   const velocityScore = clamp(Math.min(100, 20 + peerCount * 10));
   const risk = calculateRisk({ importance: importanceScore, impact: impactScore, velocity: velocityScore, sentiment });
   const riskScore = risk.score;
