@@ -3,6 +3,8 @@ import { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { loadAuthorizationContext, hasPermission, type AuthorizationContext } from './rbac.js';
+import { analyzeArticle as analyzeCoreArticle, parseKeywordQuery } from './media-intelligence-core.js';
+import { calculateRisk } from './risk.js';
 
 declare module 'fastify' { interface FastifyRequest { printCreateStableAuth?: AuthorizationContext } }
 
@@ -47,7 +49,7 @@ export async function registerPrintCreateStableRoutes(app:FastifyInstance,pool:P
       stage='EDITION';
       const ed=(await client.query(`INSERT INTO print_editions(source_id,edition_date,edition_name) VALUES($1,$2,$3) ON CONFLICT (source_id,edition_date,(COALESCE(edition_name,''))) DO UPDATE SET edition_name=EXCLUDED.edition_name RETURNING id`,[p.data.sourceId,p.data.editionDate,p.data.editionName||null])).rows[0];
       stage='ARTICLE';
-      const a=(await client.query(`INSERT INTO print_articles(edition_id,opd_id,district_id,title,summary,body_text,is_headline,is_continued,status,ocr_confidence,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'needs_review',$9,$10) RETURNING *`,[ed.id,p.data.opdId||null,p.data.districtId||null,p.data.title,p.data.summary||null,p.data.bodyText||null,p.data.isHeadline,p.data.isContinued,p.data.ocrConfidence??null,r.printCreateStableAuth!.id])).rows[0];
+      const intelligence=analyzeCoreArticle({id:`print-new-${Date.now()}`,title:p.data.title,summary:p.data.summary||null,content:p.data.bodyText||null,mediaKind:'print',opdId:p.data.opdId||null,publishedAt:p.data.editionDate},parseKeywordQuery(p.data.keywords.join(' | ')),1);const risk=calculateRisk({importance:intelligence.importanceScore,impact:intelligence.impactScore,velocity:intelligence.velocityScore,sentiment:intelligence.sentiment});const a=(await client.query(`INSERT INTO print_articles(edition_id,opd_id,district_id,title,summary,body_text,is_headline,is_continued,status,ocr_confidence,created_by,sentiment,risk_score,importance_score,ai_metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'needs_review',$9,$10,$11,$12,$13,$14::jsonb) RETURNING *`,[ed.id,p.data.opdId||null,p.data.districtId||null,p.data.title,p.data.summary||null,p.data.bodyText||null,p.data.isHeadline,p.data.isContinued,p.data.ocrConfidence??null,r.printCreateStableAuth!.id,intelligence.sentiment,risk.score,intelligence.importanceScore,JSON.stringify({intelligence:{...intelligence,riskLevel:risk.level,riskReasons:risk.reasons,riskStatus:'PROVISIONAL'}})])).rows[0];
       stage='FILES';
       const uploadFiles:any[]=[];
       for(const f of p.data.files){const row=(await client.query(`INSERT INTO print_upload_files(edition_id,original_name,mime_type,byte_size,file_order,status) VALUES($1,$2,$3,$4,$5,'uploaded') RETURNING id,original_name,mime_type,byte_size,file_order`,[ed.id,f.name,f.mimeType,f.byteSize,f.order])).rows[0];uploadFiles.push(row);}
