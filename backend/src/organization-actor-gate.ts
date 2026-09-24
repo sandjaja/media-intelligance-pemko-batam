@@ -68,7 +68,7 @@ export function classifyOnlineArticleRole(article: OnlineArticle, scope: Organiz
     if (d && containsTerm(title, `kecamatan ${d}`)) actorMatches.push({ kind: 'DISTRICT', id: null, name: `Kecamatan ${district}`, opdId: null });
   }
 
-  if (actorMatches.length) return { role: 'UTAMA', reason: 'headline contains a database-backed internal government actor', scope: scopeDecision, actorMatches };
+  // A generic OPD/UPTD name (for example a common agency acronym) is not enough by itself.\n  // The headline must first carry database-backed Batam organization/geographic scope.\n  if (actorMatches.length && scopeDecision.status === 'RELEVANT') return { role: 'UTAMA', reason: 'headline contains a database-backed internal government actor within confirmed organization scope', scope: scopeDecision, actorMatches };
   if (scopeDecision.status === 'OUT_OF_SCOPE') return { role: 'OUT_OF_SCOPE', reason: scopeDecision.reason, scope: scopeDecision, actorMatches: [] };
   return { role: 'PENDUKUNG', reason: scopeDecision.status === 'REVIEW' ? 'organization scope requires review and no internal actor is present' : 'in organization/city scope but no internal government actor is present', scope: scopeDecision, actorMatches: [] };
 }
