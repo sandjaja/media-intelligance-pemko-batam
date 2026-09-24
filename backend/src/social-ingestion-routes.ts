@@ -27,7 +27,7 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
   };
   const requireWrite=async(request:FastifyRequest,reply:any)=>{
     const ctx=request.socialIngestAuth!;
-    if(!hasPermission(ctx,'intelligence.write')&&!hasPermission(ctx,'platform.admin')&&!ctx.roles.includes('humas'))return reply.code(403).send({error:'FORBIDDEN'});
+    if(!hasPermission(ctx,'intelligence.write')&&!hasPermission(ctx,'platform.admin')&&!hasPermission(ctx,'sources.manage')&&!ctx.roles.includes('humas'))return reply.code(403).send({error:'FORBIDDEN'});
   };
   const canReadAll=(ctx:AuthorizationContext)=>hasPermission(ctx,'platform.admin')||hasPermission(ctx,'intelligence.read.all');
 
