@@ -94,7 +94,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
           summary:String(mention.content||'').slice(0,900),content:mention.content??null,
           sourceName:'social',sourceTier:null,mediaKind:'social',opdId:routing.primaryOpdId,publishedAt:null
         },query,1);
-        const risk=calculateRisk({importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,sentiment:analysis.sentiment});
+        const risk=calculateRisk({importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,sentiment:analysis.sentiment,sentimentScore:analysis.sentimentScore});
         const client=await pool.connect();
         try {
           await client.query('BEGIN');
