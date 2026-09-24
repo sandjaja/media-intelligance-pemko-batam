@@ -43,4 +43,5 @@ document.getElementById('onlineKpiNegative')?.addEventListener('click',()=>{kpiF
 document.querySelectorAll('.onlineReopen').forEach(b=>b.onclick=()=>reopenClassification(b.dataset.reopenId,b.dataset.reopenTitle));
 }catch(e){if(seq!==renderSeq)return;el.innerHTML=`<div class="glass rounded-2xl p-6"><h2 class="font-bold text-rose-300">Feed Berita tidak dapat dimuat</h2><p class="text-xs text-slate-400 mt-2">${esc(e.message)}</p><button id="onlineRetry" class="mt-4 px-3 py-2 rounded-lg bg-slate-800 text-xs">Coba Lagi</button></div>`;document.getElementById('onlineRetry')?.addEventListener('click',render);}}
 window.renderOnlineMediaWorkspace=render;
+window.refreshOnlineMediaWorkspace=async()=>{latestArticles=[];latestClusters=[];page=1;return render();};
 })();
