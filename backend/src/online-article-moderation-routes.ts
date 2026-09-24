@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { collectOnlineSource } from './online-media-collector.js';
 import { classifyArticleOrganizationScope, filterArticlesByOrganizationScope, loadOrganizationMediaScope } from './organization-media-scope.js';
-import { analyzeArticle, CLASSIFICATION_VERSION } from './analyzer-v14.js';
+import { analyzeArticle, CLASSIFICATION_VERSION } from './analyzer-v15.js';
 
 declare module 'fastify' { interface FastifyRequest { onlineModerationAuth?: AuthorizationContext } }
 const canModerate=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
