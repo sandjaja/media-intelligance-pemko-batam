@@ -350,7 +350,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   const auditConversation=async(client:any,userId:string,action:string,metadata:any)=>client.query('INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,$2,$3::jsonb)',[userId,action,JSON.stringify(metadata)]);
 
   app.get('/api/social/conversation-clusters',{preHandler:auth},async(request,reply)=>{
-    const parsed=z.object({days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7),platform:platformSchema.optional(),opdId:z.string().regex(/^\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional()}).safeParse(request.query);
+    const parsed=z.object({days:z.coerce.number().int().refine(v=>[1,7,14,30].includes(v)).default(7),platform:platformSchema.optional(),opdId:z.string().regex(/^\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional()}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
     const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
     const params:unknown[]=[organizationId,parsed.data.days],memberWhere:string[]=["COALESCE(sm.metadata->'organizationScope'->>'status','RELEVANT')='RELEVANT'","COALESCE(sm.published_at,sm.captured_at)>=NOW()-($2::int*INTERVAL '1 day')"];
@@ -367,7 +367,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   });
 
   app.post('/api/social/conversation-clusters/incremental',{preHandler:manager},async(request,reply)=>{
-    const body=z.object({days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7)}).safeParse(request.body??{});
+    const body=z.object({days:z.coerce.number().int().refine(v=>[1,7,14,30].includes(v)).default(7)}).safeParse(request.body??{});
     if(!body.success)return reply.code(400).send({error:'INVALID_REQUEST'});
     const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
     return{ok:true,result:await persistSocialConversationClusters(pool,organizationId,body.data.days)};
@@ -399,7 +399,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   });
 
   app.get('/api/social/conversation-insights', { preHandler: auth }, async (request, reply) => {
-    const parsed=z.object({days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7),platform:platformSchema.optional(),opdId:z.string().regex(/^\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional()}).safeParse(request.query);
+    const parsed=z.object({days:z.coerce.number().int().refine(v=>[1,7,14,30].includes(v)).default(7),platform:platformSchema.optional(),opdId:z.string().regex(/^\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional()}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
     const params:unknown[]=[parsed.data.days],where:string[]=["source_kind='external'","COALESCE(metadata->'organizationScope'->>'status','RELEVANT')='RELEVANT'","COALESCE(published_at,captured_at) >= NOW() - ($1::int * INTERVAL '1 day')"];
     const bind=(value:unknown)=>{params.push(value);return '$'+params.length;};
@@ -421,7 +421,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   });
 
   app.get('/api/social/summary', { preHandler: auth }, async (request, reply) => {
-    const parsed=z.object({opdId:z.string().regex(/^\d+$/).optional(),platform:platformSchema.optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional(),from:z.string().optional(),to:z.string().optional(),days:z.coerce.number().int().refine(v=>[7,14,30].includes(v)).default(7)}).safeParse(request.query);
+    const parsed=z.object({opdId:z.string().regex(/^\d+$/).optional(),platform:platformSchema.optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional(),from:z.string().optional(),to:z.string().optional(),days:z.coerce.number().int().refine(v=>[1,7,14,30].includes(v)).default(7)}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
     const params:unknown[]=[],where:string[]=[`source_kind='external'`,`COALESCE(metadata->'organizationScope'->>'status','RELEVANT')='RELEVANT'`];const opdId=scopedOpd(request.socialAuth!,parsed.data.opdId);
     const bind=(value:unknown)=>{params.push(value);return '$'+params.length;};
