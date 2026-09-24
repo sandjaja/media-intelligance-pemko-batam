@@ -90,6 +90,6 @@ export async function getV16PrimaryEvidenceForInput(pool:Pool,input:V16RoutingIn
 
 export async function getV16PrimaryEvidence(pool:Pool,articleId:string):Promise<V16PrimaryEvidence|null>{
  const article=(await pool.query(`SELECT id,title,summary,content FROM articles WHERE id=$1`,[articleId])).rows[0];if(!article)return null;
- const manualKeywordIds=(await pool.query(`SELECT keyword_id FROM article_manual_keywords WHERE article_id=$1 AND active=true`,[articleId])).rows.map((r:any)=>String(r.keyword_id));
+ const manualKeywordIds=(await pool.query(`SELECT keyword_id FROM article_manual_keywords amk WHERE amk.article_id=$1 AND amk.active=true AND (amk.keyword_role='PRIMARY' OR (amk.keyword_role IS NULL AND NOT EXISTS (SELECT 1 FROM article_manual_keywords p WHERE p.article_id=amk.article_id AND p.active=true AND p.keyword_role='PRIMARY')))`,[articleId])).rows.map((r:any)=>String(r.keyword_id));
  return getV16PrimaryEvidenceForInput(pool,{title:String(article.title||''),summary:article.summary,content:article.content,manualKeywordIds});
 }
