@@ -14,7 +14,7 @@ function explicitExternalGovernmentActor(text:string,scope:OrganizationMediaScop
  const patterns=[
   /\b(?:pemkab|pemerintah kabupaten)\s+([\p{L}-]{3,30})\b/gu,
   /\b(?:bupati|wakil bupati)\s+([\p{L}-]{3,30})\b/gu,
-  /\b(?:dinkes|dishub|disdik|disnaker|diskominfo)\s+([\p{L}-]{3,30})\b/gu
+  /\b(?:dinkes|dishub|disdik|disnaker|diskominfo)\s+(?!tolong\b|mohon\b|harap\b|segera\b)([\p{L}-]{3,30})\b/gu
  ];
  for(const pattern of patterns)for(const match of text.matchAll(pattern)){
   const place=normalize(match[1]);
