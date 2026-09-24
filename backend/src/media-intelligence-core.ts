@@ -52,6 +52,12 @@ export function matchesKeywordQuery(article: IntelligenceArticle, query: Keyword
 }
 export function matchedKeywords(article: IntelligenceArticle, query: KeywordQuery) { const haystack = normalize([article.title, article.summary ?? '', article.content ?? ''].join(' ')); return [...new Set([...query.and, ...query.or, ...query.exact].filter(term => containsTerm(haystack, term)))]; }
 function clamp(value: number) { return Math.max(0, Math.min(100, Math.round(value))); }
+function clampSigned(value: number) { return Math.max(-100, Math.min(100, Math.round(value))); }
+
+const PUBLIC_ACTOR = /\b(?:pemko|pemerintah kota|wali kota|wakil wali kota|dinas|badan|bagian|opd|camat|kecamatan|lurah|kelurahan|pelayanan publik)\b/u;
+const ACCOUNTABILITY_NEGATIVE = /\b(?:dinilai|dikritik|dikeluhkan|keluhan|protes|lambat|terlambat|gagal|lalai|abai|korupsi|suap|polemik|sengketa)\b/u;
+const RESPONSE_POSITIVE = /\b(?:menangani|mengatasi|memperbaiki|perbaikan|menindaklanjuti|merespons|respon|antisipasi|mencegah|pencegahan|memastikan|imbau|mengimbau|menjaga|aman|lancar|berhasil|apresiasi)\b/u;
+const EXTERNAL_HAZARD = /\b(?:kabut asap|kualitas udara|banjir|kebakaran|kecelakaan|krisis|darurat|ancaman)\b/u;
 
 export function fingerprintArticle(article: IntelligenceArticle) {
   const title = tokens(article.title).filter(t => t.length > 2 && !STOPWORDS.has(t)).slice(0, 24).sort();
@@ -65,8 +71,20 @@ export function analyzeArticle(article: IntelligenceArticle, query: KeywordQuery
   for (const [term, weight] of POSITIVE) if (containsTerm(text, term)) positive += weight;
   for (const [term, weight] of NEGATIVE) if (containsTerm(text, term)) negative += weight;
   const total = positive + negative;
-  const sentimentScore = clamp(total === 0 ? 0 : ((positive - negative) / total) * 100);
-  const sentiment: Sentiment = negative > positive * 1.15 ? 'negative' : positive > negative * 1.15 ? 'positive' : 'neutral';
+  const hasPublicActor = PUBLIC_ACTOR.test(text) || article.opdId != null;
+  const accountabilityNegative = hasPublicActor && ACCOUNTABILITY_NEGATIVE.test(text);
+  const responsePositive = hasPublicActor && RESPONSE_POSITIVE.test(text);
+  const externalHazard = EXTERNAL_HAZARD.test(text);
+  // Sentiment is direction toward government/service response, not topic valence.
+  // A hazard by itself (e.g. kabut asap) stays neutral unless the text attributes
+  // failure/criticism or a clearly positive response to the public actor.
+  let sentiment: Sentiment = 'neutral';
+  if (accountabilityNegative && !responsePositive) sentiment = 'negative';
+  else if (responsePositive && !accountabilityNegative) sentiment = 'positive';
+  else if (!externalHazard && hasPublicActor) sentiment = negative > positive * 1.15 ? 'negative' : positive > negative * 1.15 ? 'positive' : 'neutral';
+  else if (!hasPublicActor && !externalHazard) sentiment = negative > positive * 1.15 ? 'negative' : positive > negative * 1.15 ? 'positive' : 'neutral';
+  const lexicalScore = total === 0 ? 0 : ((positive - negative) / total) * 100;
+  const sentimentScore = clampSigned(sentiment === 'neutral' ? 0 : sentiment === 'negative' ? -Math.abs(lexicalScore || 50) : Math.abs(lexicalScore || 50));
   const titleBoost = Math.min(20, tokens(article.title).length * 1.5);
   const sourceBoost = 4;
   const spreadBoost = Math.min(25, Math.log2(Math.max(1, peerCount)) * 8);
