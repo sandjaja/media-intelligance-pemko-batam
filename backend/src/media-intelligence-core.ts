@@ -121,7 +121,7 @@ export function analyzeArticle(article: IntelligenceArticle, query: KeywordQuery
   // Article velocity is a snapshot at analysis time. Issue velocity remains the
   // dynamic layer; locking an article freezes this snapshot.
   const velocityScore = clamp(Math.min(100, 20 + peerCount * 10));
-  const risk = calculateRisk({ importance: importanceScore, impact: impactScore, velocity: velocityScore, sentiment });
+  const risk = calculateRisk({ importance: importanceScore, impact: impactScore, velocity: velocityScore, sentiment, sentimentScore });
   const riskScore = risk.score;
   const riskLevel: RiskLevel = risk.level;
   return { sentiment, sentimentScore, impactScore, riskScore, riskLevel, importanceScore, velocityScore, matchedKeywords: matchedKeywords(article, query), entities: extractEntities(article), duplicateFingerprint: fingerprintArticle(article) };
