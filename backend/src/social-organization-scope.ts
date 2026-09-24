@@ -9,10 +9,16 @@ function organizationTerms(scope:OrganizationMediaScope){return organizationScop
 function areaTerms(scope:OrganizationMediaScope){return terms([scope.cityName,...scope.districts,...(scope.villages??[]),...(scope.areaAliases??[])]);}
 function explicitExternalGovernmentActor(text:string,scope:OrganizationMediaScope){
  const localAreas=areaTerms(scope);
- const governmentActor=/\b(?:pemkab|pemerintah kabupaten|bupati|wakil bupati|dinkes|dishub|disdik|disnaker|diskominfo|dinas|badan)\s+([\p{L}][\p{L}\s-]{2,40})/gu;
- for(const match of text.matchAll(governmentActor)){
-  const place=normalize(match[1]).split(/\b(?:imbau|mengimbau|minta|meminta|sebut|menyebut|gelar|adakan|soal|terkait|untuk|dan|yang)\b/u)[0].trim();
-  if(place&&place.length>=3&&!localAreas.some(local=>has(place,local)||has(local,place)))return match[0];
+ // Only explicit jurisdiction-bearing actors are negative scope evidence.
+ // Generic local actors such as "Dishub tolong..." remain eligible for parent-context inheritance.
+ const patterns=[
+  /\b(?:pemkab|pemerintah kabupaten)\s+([\p{L}-]{3,30})\b/gu,
+  /\b(?:bupati|wakil bupati)\s+([\p{L}-]{3,30})\b/gu,
+  /\b(?:dinkes|dishub|disdik|disnaker|diskominfo)\s+([\p{L}-]{3,30})\b/gu
+ ];
+ for(const pattern of patterns)for(const match of text.matchAll(pattern)){
+  const place=normalize(match[1]);
+  if(place&&!localAreas.some(local=>has(place,local)||has(local,place)))return match[0];
  }
  return null;
 }
