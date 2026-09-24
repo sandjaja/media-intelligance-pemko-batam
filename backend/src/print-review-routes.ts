@@ -7,6 +7,7 @@ import { analyzePrintRoutingV16 } from './print-v16-adapter.js';
 import { findEligiblePrintCandidates } from './issue-monitor-matcher.js';
 import { analyzeArticle as analyzeCoreArticle, parseKeywordQuery } from './media-intelligence-core.js';
 import { calculateRisk } from './risk.js';
+import { detectUnifiedIssueCandidates } from './unified-candidate-issues.js';
 
 declare module 'fastify' { interface FastifyRequest { printReviewAuth?: AuthorizationContext } }
 
@@ -53,6 +54,14 @@ export async function registerPrintReviewRoutes(app: FastifyInstance, pool: Pool
         const edition=(await pool.query(`SELECT pe.edition_date FROM print_articles pa JOIN print_editions pe ON pe.id=pa.edition_id WHERE pa.id=$1`,[id.data])).rows[0];
         await findEligiblePrintCandidates(pool,{printArticleId:id.data,title:current.title,content:[current.summary,current.body_text].filter(Boolean).join(' '),publishedAt:edition?.edition_date??null,taxonomyId:finalAnalysis.taxonomyId==null?null:Number(finalAnalysis.taxonomyId)});
       }catch(issueMonitorError){request.log.error({err:issueMonitorError,printArticleId:id.data},'print issue monitor candidate matching failed');}
+      // Run the same Unified Issue Engine used by Online only after the
+      // authoritative print keyword/routing decision has been finalized.
+      // Keep this downstream/non-blocking: issue resolution must never roll
+      // back a successfully locked clipping.
+      try{
+        const organizationId=Number((await pool.query(`SELECT organization_id FROM opd WHERE id=$1`,[finalAnalysis.primaryOpdId])).rows[0]?.organization_id||0);
+        if(organizationId)await detectUnifiedIssueCandidates(pool,organizationId,{sourceType:'print',evidenceId:id.data});
+      }catch(unifiedIssueError){request.log.error({err:unifiedIssueError,printArticleId:id.data},'Unified Issue print resolution skipped');}
       return{data:analyzed,analysis:lockedRouting};
     }catch(error:any){await client.query('ROLLBACK');request.log.error({err:error,printArticleId:id.success?id.data:null},'print keyword finalization failed');return reply.code(500).send({error:'PRINT_KEYWORD_FINALIZATION_FAILED',message:error?.message||'Penyimpanan keyword gagal.'});}finally{client.release();}
   });
