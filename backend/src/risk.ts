@@ -2,17 +2,29 @@ import { Pool } from 'pg';
 
 export type RiskLevel = 'low' | 'medium' | 'high' | 'critical';
 
-export function calculateRisk(input: { importance: number; impact: number; velocity: number; sentiment: string | null }): { score: number; level: RiskLevel; reasons: string[]; alertType: string | null } {
-  let score = 0;
+const clamp = (value: number) => Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
+
+export function calculateRisk(input: { importance: number; impact: number; velocity: number; sentiment: string | null; sentimentScore?: number | null }): { score: number; level: RiskLevel; reasons: string[]; alertType: string | null } {
+  const importance = clamp(Number(input.importance));
+  const impact = clamp(Number(input.impact));
+  const velocity = clamp(Number(input.velocity));
+  const rawSentiment = Number(input.sentimentScore);
+  const sentimentIntensity = input.sentiment === 'negative'
+    ? (Number.isFinite(rawSentiment) && rawSentiment !== 0 ? clamp(Math.abs(rawSentiment)) : 100)
+    : 0;
+
+  const sentimentRisk = sentimentIntensity * 0.30;
+  const importanceRisk = importance * 0.25;
+  const impactRisk = impact * 0.25;
+  const velocityRisk = velocity * 0.20;
+  const score = Math.min(100, Math.round(sentimentRisk + importanceRisk + impactRisk + velocityRisk));
+
   const reasons: string[] = [];
-  if (input.sentiment === 'negative') { score += 30; reasons.push('Sentimen negatif'); }
-  if (input.importance >= 80) { score += 25; reasons.push('Importance tinggi'); }
-  else if (input.importance >= 65) { score += 15; reasons.push('Importance menengah-tinggi'); }
-  if (input.impact >= 75) { score += 25; reasons.push('Dampak publik tinggi'); }
-  else if (input.impact >= 55) { score += 15; reasons.push('Dampak publik signifikan'); }
-  if (input.velocity >= 75) { score += 20; reasons.push('Momentum pemberitaan tinggi'); }
-  else if (input.velocity >= 50) { score += 10; reasons.push('Momentum pemberitaan meningkat'); }
-  score = Math.min(100, score);
+  if (sentimentRisk > 0) reasons.push(`Sentimen negatif +${Math.round(sentimentRisk)}`);
+  if (importanceRisk > 0) reasons.push(`Importance +${Math.round(importanceRisk)}`);
+  if (impactRisk > 0) reasons.push(`Dampak publik +${Math.round(impactRisk)}`);
+  if (velocityRisk > 0) reasons.push(`Momentum pemberitaan +${Math.round(velocityRisk)}`);
+
   const level: RiskLevel = score >= 80 ? 'critical' : score >= 60 ? 'high' : score >= 35 ? 'medium' : 'low';
   const alertType = level === 'critical' ? 'CRITICAL_MEDIA_RISK' : level === 'high' ? 'HIGH_MEDIA_RISK' : null;
   return { score, level, reasons, alertType };
