@@ -39,6 +39,10 @@ export async function analyzeArticle(pool:Pool,articleId:string,options:Analysis
  if(article.media_kind==='online'&&onlineOutOfScope&&!news){
   await clearSupportingIntelligenceLinks(pool,articleId);
   await pool.query(`UPDATE articles SET news_classification='PENDUKUNG',news_classification_source='AUTO',news_classification_changed_by=NULL,news_classification_changed_at=NOW(),classified_at=NOW(),classification_version=$2 WHERE id=$1 AND news_classification_source<>'MANUAL'`,[articleId,CLASSIFICATION_VERSION]);
+  // Keep the stored classification for audit/history, but hide automatic OUT_OF_SCOPE
+  // Online articles from the default relevant feed using the existing moderation contract.
+  // Do not create duplicate markers on repeated reanalysis.
+  await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) SELECT NULL,'ONLINE_ARTICLE_MARKED_IRRELEVANT',$2::jsonb WHERE NOT EXISTS (SELECT 1 FROM audit_logs al WHERE al.action='ONLINE_ARTICLE_MARKED_IRRELEVANT' AND al.metadata->>'articleId'=$1)`,[articleId,JSON.stringify({articleId:String(articleId),reason:'AUTO_ORGANIZATION_SCOPE_OUT_OF_SCOPE',source:'AUTO_ORGANIZATION_SCOPE',classificationVersion:CLASSIFICATION_VERSION})]);
   const peerResult=await pool.query(`SELECT COUNT(*)::int count FROM articles WHERE id<>$1 AND (title ILIKE $2 OR summary ILIKE $2)`,[articleId,`%${String(article.title).slice(0,80)}%`]);
   const peerCount=Number(peerResult.rows[0]?.count??1)+1;
   const analysis=analyzeCoreArticle({id:article.id,title:article.title,summary:article.summary,content:article.content,sourceName:article.source_name,sourceTier:Number(article.tier??2),mediaKind:'online',opdId:null,publishedAt:article.published_at},parseKeywordQuery(''),peerCount);
