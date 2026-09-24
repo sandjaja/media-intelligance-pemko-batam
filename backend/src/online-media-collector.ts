@@ -55,7 +55,7 @@ function googleNewsUrl(source:OnlineSource,targetUrl:string,scope?:OrganizationM
   if(!domain)return null;
   const terms=sourceContext(source,scope);
   const localQuery=terms.length?`(${terms.map(term=>`"${term.replace(/"/g,'')}"`).join(' OR ')})`:sourcePathTerms(source).join(' ');
-  const q=encodeURIComponent(`site:${domain}${localQuery?` ${localQuery}`:''}`);
+  const host=sourceDomain(targetUrl)||domain;\n  const q=encodeURIComponent(`site:${host}${localQuery?` ${localQuery}`:''}`);
   return `https://news.google.com/rss/search?q=${q}&hl=id&gl=ID&ceid=ID:id`;
 }
 
@@ -303,7 +303,7 @@ export async function collectOnlineSource(source:OnlineSource,scope?:Organizatio
   const newsFallback=await tryExternalNewsFallback(source,targetUrl,scope);add(newsFallback);
   const merged=new Map<string,OnlineArticle>();
   for(const item of discoveredItems){const key=item.url.toLowerCase(),existing=merged.get(key);if(!existing||item.publishedAt.getTime()>existing.publishedAt.getTime())merged.set(key,item)}
-  const combined=[...merged.values()].filter(item=>isFresh(item)).sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime()).slice(0,120);
+  const combined=[...merged.values()].filter(item=>isFresh(item)).sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime()).slice(0,300);
   console.info({sourceId:source.id,source:source.name,stage:'merged_discovery',directFeed:directFeedFallback.length,googleNews:newsFallback.length,merged:combined.length,newest:combined[0]?.publishedAt?.toISOString()??null},'online collector merged discovery diagnostic');
   if(combined.length)return combined;
   throw homepageError??new Error(`Media ${source.name} tidak menghasilkan artikel relevan dalam 7 hari terakhir`);
