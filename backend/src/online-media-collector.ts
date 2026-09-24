@@ -55,7 +55,8 @@ function googleNewsUrl(source:OnlineSource,targetUrl:string,scope?:OrganizationM
   if(!domain)return null;
   const terms=sourceContext(source,scope);
   const localQuery=terms.length?`(${terms.map(term=>`"${term.replace(/"/g,'')}"`).join(' OR ')})`:sourcePathTerms(source).join(' ');
-  const host=sourceDomain(targetUrl)||domain;\n  const q=encodeURIComponent(`site:${host}${localQuery?` ${localQuery}`:''}`);
+  const host=sourceDomain(targetUrl)||domain;
+  const q=encodeURIComponent(`site:${host}${localQuery?` ${localQuery}`:''}`);
   return `https://news.google.com/rss/search?q=${q}&hl=id&gl=ID&ceid=ID:id`;
 }
 
