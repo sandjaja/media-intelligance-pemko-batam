@@ -5,6 +5,8 @@ import type { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { analyzeSocialRoutingV16 } from './social-v16-adapter.js';
+import { analyzeArticle as analyzeCoreArticle, parseKeywordQuery } from './media-intelligence-core.js';
+import { calculateRisk } from './risk.js';
 import { loadOrganizationMediaScope } from './organization-media-scope.js';
 import { classifySocialOrganizationScope } from './social-organization-scope.js';
 import { clusterSocialConversations, persistSocialConversationClusters } from './social-conversation-clustering.js';
@@ -71,7 +73,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
       if (mention.metadata?.manualClassification?.locked===true || mention.metadata?.socialVerification?.status==='LOCKED') { manualLocked++; continue; }
       try {
         const scopeDecision=classifySocialOrganizationScope({title:mention.title,content:mention.content},scope);
-        if(scopeDecision.status==='OUT_OF_SCOPE'){
+        if(scopeDecision.status!=='RELEVANT'){
           const client=await pool.connect();
           try{
             await client.query('BEGIN');
@@ -86,12 +88,22 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
           continue;
         }
         const routing=await analyzeSocialRoutingV16(pool,{title:mention.title,content:mention.content});
+        const query=parseKeywordQuery(routing.keyword?[routing.keyword].join(' | '):'');
+        const analysis=analyzeCoreArticle({
+          id:mention.id,title:String(mention.title||mention.content||'').slice(0,300),
+          summary:String(mention.content||'').slice(0,900),content:mention.content??null,
+          sourceName:'social',sourceTier:null,mediaKind:'social',opdId:routing.primaryOpdId,publishedAt:null
+        },query,1);
+        const risk=calculateRisk({importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,sentiment:analysis.sentiment});
         const client=await pool.connect();
         try {
           await client.query('BEGIN');
           const metadata={...(mention.metadata||{}),v16Routing:routing};
-          await client.query(`UPDATE social_mentions SET opd_id=$2,metadata=$3::jsonb,processing_status=$4,updated_at=NOW() WHERE id=$1`,[
-            mention.id,routing.primaryOpdId,JSON.stringify(metadata),routing.routingStatus==='ROUTED'?'classified':'captured'
+          const intelligence={...analysis,riskLevel:risk.level,riskReasons:risk.reasons,riskStatus:'PROVISIONAL'};
+          const nextMetadata={...metadata,intelligence};
+          await client.query(`UPDATE social_mentions SET opd_id=$2,metadata=$3::jsonb,processing_status=$4,sentiment=$5,sentiment_score=$6,importance_score=$7,influence_score=$8,risk_score=$9,risk_level=$10,updated_at=NOW() WHERE id=$1`,[
+            mention.id,routing.primaryOpdId,JSON.stringify(nextMetadata),routing.routingStatus==='ROUTED'?'classified':'captured',
+            analysis.sentiment,analysis.sentimentScore,analysis.importanceScore,analysis.impactScore,risk.score,risk.level
           ]);
           await client.query(`DELETE FROM social_mention_keywords WHERE mention_id=$1`,[mention.id]);
           if(routing.keywordId) await client.query(`INSERT INTO social_mention_keywords(mention_id,keyword_id,matched_text,match_count,confidence) VALUES($1,$2,$3,1,$4) ON CONFLICT(mention_id,keyword_id) DO UPDATE SET matched_text=EXCLUDED.matched_text,match_count=1,confidence=EXCLUDED.confidence`,[
