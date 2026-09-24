@@ -156,7 +156,7 @@ function parseGoogleNewsFeed(xml:string,source:OnlineSource,scope?:OrganizationM
     const publisherUrl=descriptionHrefs.find(href=>publisherDomain(href)===domain);
     out.push({sourceId:source.id,title,url:publisherUrl||url,publishedAt,excerpt});
   }
-  return freshOnly(out).filter(item=>item.title.length>=5).slice(0,50);
+  return freshOnly(out).filter(item=>item.title.length>=5).slice(0,100);
 }
 function discoverFeed(html:string,baseUrl:string){
   for(const tag of html.match(/<link\b[^>]*>/gi)??[]){
@@ -235,7 +235,7 @@ function articleLinks(html:string,baseUrl:string,scope?:OrganizationMediaScope|n
       out.push({url,text,score});
     }catch{}
   }
-  return out.sort((a,b)=>b.score-a.score).slice(0,100);
+  return out.sort((a,b)=>b.score-a.score).slice(0,200);
 }
 function parseArticleHtml(html:string,url:string,linkText:string,source:OnlineSource,scope?:OrganizationMediaScope|null):OnlineArticle|null{
   const finalUrl=canonical(html,url);
@@ -258,7 +258,7 @@ async function crawlHtml(source:OnlineSource,html:string,pageUrl:string,scope?:O
   const articles:OnlineArticle[]=verified.map(v=>({sourceId:source.id,title:v.title,url:v.url,publishedAt:v.publishedAt,excerpt:v.excerpt}));
   const afterArticle=articleOnly(articles);const afterFresh=freshOnly(afterArticle);
   if(verified.length!==afterFresh.length)console.info({sourceId:source.id,stage:'post_verify_filter',verified:verified.length,afterArticle:afterArticle.length,afterFresh:afterFresh.length},'online collector post verify diagnostic');
-  return afterFresh.sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime()).slice(0,80);
+  return afterFresh.sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime()).slice(0,160);
 }
 function normalizedPageUrl(value:string,base?:string){try{const u=new URL(decodeHtmlEntities(value),base);u.hash='';for(const key of [...u.searchParams.keys()])if(!u.searchParams.get(key))u.searchParams.delete(key);u.searchParams.sort();return u.toString()}catch{return''}}
 function pageNumber(value:string){try{const u=new URL(value);const q=Number(u.searchParams.get('page')||u.searchParams.get('p')||0);const path=Number(u.pathname.match(/\/(?:page\/)?(\d+)\/?$/i)?.[1]||0);return q||path||0}catch{return 0}}
