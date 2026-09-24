@@ -284,6 +284,29 @@ async function crawlScopedPages(source:OnlineSource,firstHtml:string,firstUrl:st
   return [...merged.values()].sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime()).slice(0,120);
 }
 function isScopedPage(url:string){try{const path=new URL(url).pathname.replace(/\/+$/,'');return path.length>0&&path!=='/'}catch{return false}}
+function discoveryIndexUrls(baseUrl:string){
+  try{
+    const u=new URL(baseUrl),origin=u.origin;
+    // Regional publishers commonly expose article links through index pages even
+    // when the browser homepage is hydrated client-side. These are discovery
+    // pages only; their URLs are never treated as articles.
+    return [`${origin}/index-news/kota-batam`,`${origin}/index-news`];
+  }catch{return[] as string[]}
+}
+async function crawlDiscoveryIndexes(source:OnlineSource,baseUrl:string,scope?:OrganizationMediaScope|null){
+  const merged=new Map<string,OnlineArticle>();
+  for(const indexUrl of discoveryIndexUrls(baseUrl)){
+    try{
+      const fetched=await fetchText(indexUrl,8000);
+      if(!fetched.response.ok)continue;
+      const items=await crawlScopedPages(source,fetched.body,fetched.response.url||indexUrl,scope);
+      for(const item of items)if(!merged.has(item.url.toLowerCase()))merged.set(item.url.toLowerCase(),item);
+    }catch{}
+  }
+  const items=[...merged.values()].sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime());
+  console.info({sourceId:source.id,source:source.name,stage:'index_discovery',candidates:items.length},'online collector index discovery diagnostic');
+  return items;
+}
 export async function collectOnlineSource(source:OnlineSource,scope?:OrganizationMediaScope|null):Promise<OnlineArticle[]>{
   if(source.active===false)return[];
   const targetUrl=normalizeSourceUrl(source);
@@ -301,11 +324,12 @@ export async function collectOnlineSource(source:OnlineSource,scope?:Organizatio
     }else homepageError=new Error(`Media ${source.name} returned HTTP ${response.status}`);
   }catch(error){homepageError=error instanceof Error?error:new Error(String(error))}
   const directFeedFallback=await tryFeeds(source,commonFeeds(targetUrl),scope);add(directFeedFallback);
+  const indexDiscovery=await crawlDiscoveryIndexes(source,targetUrl,scope);add(indexDiscovery);
   const newsFallback=await tryExternalNewsFallback(source,targetUrl,scope);add(newsFallback);
   const merged=new Map<string,OnlineArticle>();
   for(const item of discoveredItems){const key=item.url.toLowerCase(),existing=merged.get(key);if(!existing||item.publishedAt.getTime()>existing.publishedAt.getTime())merged.set(key,item)}
   const combined=[...merged.values()].filter(item=>isFresh(item)).sort((a,b)=>b.publishedAt.getTime()-a.publishedAt.getTime()).slice(0,300);
-  console.info({sourceId:source.id,source:source.name,stage:'merged_discovery',directFeed:directFeedFallback.length,googleNews:newsFallback.length,merged:combined.length,newest:combined[0]?.publishedAt?.toISOString()??null},'online collector merged discovery diagnostic');
+  console.info({sourceId:source.id,source:source.name,stage:'merged_discovery',directFeed:directFeedFallback.length,indexDiscovery:indexDiscovery.length,googleNews:newsFallback.length,merged:combined.length,newest:combined[0]?.publishedAt?.toISOString()??null},'online collector merged discovery diagnostic');
   if(combined.length)return combined;
   throw homepageError??new Error(`Media ${source.name} tidak menghasilkan artikel relevan dalam 7 hari terakhir`);
 }
