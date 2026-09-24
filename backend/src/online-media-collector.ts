@@ -234,7 +234,7 @@ function articleLinks(html:string,baseUrl:string,scope?:OrganizationMediaScope|n
       out.push({url,text,score});
     }catch{}
   }
-  return out.sort((a,b)=>b.score-a.score).slice(0,40);
+  return out.sort((a,b)=>b.score-a.score).slice(0,100);
 }
 function parseArticleHtml(html:string,url:string,linkText:string,source:OnlineSource,scope?:OrganizationMediaScope|null):OnlineArticle|null{
   const finalUrl=canonical(html,url);
@@ -253,7 +253,7 @@ function parseArticleHtml(html:string,url:string,linkText:string,source:OnlineSo
 }
 async function crawlHtml(source:OnlineSource,html:string,pageUrl:string,scope?:OrganizationMediaScope|null){
   const links=articleLinks(html,pageUrl,scope);
-  const verified=await verifyDiscoveredArticles(links.map(link=>({sourceId:source.id,title:link.text,url:link.url})),{concurrency:6,limit:80});
+  const verified=await verifyDiscoveredArticles(links.map(link=>({sourceId:source.id,title:link.text,url:link.url})),{concurrency:6,limit:120});
   const articles:OnlineArticle[]=verified.map(v=>({sourceId:source.id,title:v.title,url:v.url,publishedAt:v.publishedAt,excerpt:v.excerpt}));
   const afterArticle=articleOnly(articles);const afterFresh=freshOnly(afterArticle);
   if(verified.length!==afterFresh.length)console.info({sourceId:source.id,stage:'post_verify_filter',verified:verified.length,afterArticle:afterArticle.length,afterFresh:afterFresh.length},'online collector post verify diagnostic');
