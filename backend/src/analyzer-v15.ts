@@ -6,7 +6,7 @@ import { getManualNewsClassification, clearSupportingIntelligenceLinks } from '.
 import { loadOrganizationMediaScope } from './organization-media-scope.js';
 import { classifyOnlineArticleRole } from './organization-actor-gate.js';
 
-export const CLASSIFICATION_VERSION='article-opd-v16.5-20260923-actor-gate';
+export const CLASSIFICATION_VERSION='article-opd-v16.5-20260924-scope-hard-gate';
 export type AnalysisOptions={onlineGateRole?:'UTAMA'|'PENDUKUNG'|null;onlineGateReason?:string|null;onlineGateSignals?:string[]};
 
 export async function analyzeArticle(pool:Pool,articleId:string,options:AnalysisOptions={}){
@@ -16,16 +16,34 @@ export async function analyzeArticle(pool:Pool,articleId:string,options:Analysis
  let gateRole=article.media_kind==='online'?options.onlineGateRole??null:null;
  let gateReason=options.onlineGateReason??null;
  let gateSignals=options.onlineGateSignals??[];
+ let onlineOutOfScope=false;
  if(article.media_kind==='online'&&!gateRole){
   const scope=await loadOrganizationMediaScope(pool);
   if(scope){
    const decision=classifyOnlineArticleRole({sourceId:String(article.source_id||''),title:String(article.title||''),url:String(article.url||''),publishedAt:article.published_at?new Date(article.published_at):new Date(),excerpt:String(article.summary||article.content||'')},scope);
-   if(decision.role!=='OUT_OF_SCOPE'){
+   if(decision.role==='OUT_OF_SCOPE'){
+    onlineOutOfScope=true;
+    gateReason=decision.reason;
+    gateSignals=decision.scope.matchedTerms.map(t=>`SCOPE:${t}`);
+   }else{
     gateRole=decision.role;
     gateReason=decision.reason;
     gateSignals=[...decision.actorMatches.map(a=>`ACTOR:${a.kind}:${a.name}`),...decision.scope.matchedTerms.map(t=>`SCOPE:${t}`)];
    }
   }
+ }
+ // Organization Scope is the first gate for automatic Online classification.
+ // An OUT_OF_SCOPE headline must never reach Master Classification/routing, otherwise
+ // a generic taxonomy/OPD keyword can promote an external article back to UTAMA.
+ // Explicit MANUAL decisions remain authoritative and are never overwritten here.
+ if(article.media_kind==='online'&&onlineOutOfScope&&!news){
+  await clearSupportingIntelligenceLinks(pool,articleId);
+  await pool.query(`UPDATE articles SET news_classification='PENDUKUNG',news_classification_source='AUTO',news_classification_changed_by=NULL,news_classification_changed_at=NOW(),classified_at=NOW(),classification_version=$2 WHERE id=$1 AND news_classification_source<>'MANUAL'`,[articleId,CLASSIFICATION_VERSION]);
+  const peerResult=await pool.query(`SELECT COUNT(*)::int count FROM articles WHERE id<>$1 AND (title ILIKE $2 OR summary ILIKE $2)`,[articleId,`%${String(article.title).slice(0,80)}%`]);
+  const peerCount=Number(peerResult.rows[0]?.count??1)+1;
+  const analysis=analyzeCoreArticle({id:article.id,title:article.title,summary:article.summary,content:article.content,sourceName:article.source_name,sourceTier:Number(article.tier??2),mediaKind:'online',opdId:null,publishedAt:article.published_at},parseKeywordQuery(''),peerCount);
+  await pool.query(`UPDATE articles SET opd_id=NULL,sentiment=$2,importance_score=$3,impact_score=$4,velocity_score=$5,risk_score=$6,risk_level=$7,is_highlight=false WHERE id=$1`,[articleId,analysis.sentiment,analysis.importanceScore,analysis.impactScore,analysis.velocityScore,analysis.riskScore,analysis.riskLevel]);
+  return{articleId,newsClassification:'PENDUKUNG',newsClassificationSource:'AUTO',newsClassificationReason:gateReason||'outside configured organization scope',newsClassificationSignals:gateSignals,classificationSource:'AUTO_ORGANIZATION_SCOPE',routingStatus:'OUT_OF_SCOPE',needsVerification:false,classificationVersion:CLASSIFICATION_VERSION,opdId:null,supportingOpdIds:[],districtId:null,uptdId:null,uptdName:null,uptdMatches:0,taxonomyId:null,taxonomyName:null,taxonomyScore:0,issueId:null,issueMatchScore:0,issueAssignmentSource:null,sentiment:analysis.sentiment,importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,highlight:false,keywordMatches:0,matchedKeywords:[],entities:analysis.entities,risk:{score:analysis.riskScore,level:analysis.riskLevel,reasons:[],alertType:null}};
  }
  if(!news&&gateRole){
   news={classification:gateRole,source:'AUTO' as const,reason:gateReason||'online organization actor gate',signals:gateSignals};
