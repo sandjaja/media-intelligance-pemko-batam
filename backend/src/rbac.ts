@@ -64,6 +64,6 @@ export function hasPermission(context: AuthorizationContext, permission: string)
   if (context.legacyRole === 'admin') return true;
   if (context.roles.includes('super_admin')) return true;
   // Humas is the operational role for the print-media workflow.
-  if (context.roles.includes('humas') && permission === 'intelligence.write') return true;
+  if (context.roles.includes('humas') && ['intelligence.write','intelligence.read.all','sources.manage'].includes(permission)) return true;
   return context.permissions.includes(permission);
 }
