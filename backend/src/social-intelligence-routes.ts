@@ -139,6 +139,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     ]).safeParse(request.body);
     if(!Number.isInteger(mentionId)||mentionId<=0||!p.success)return reply.code(400).send({error:'INVALID_REQUEST'});
     const actor=request.socialAuth!;
+    const organizationId=await resolveOrganizationId(actor);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
     const mention=(await pool.query(`SELECT id,title,source_kind,metadata,opd_id FROM social_mentions WHERE id=$1`,[mentionId])).rows[0];
     if(!mention)return reply.code(404).send({error:'MENTION_NOT_FOUND'});
     if(mention.source_kind!=='external')return reply.code(409).send({error:'EXTERNAL_SOCIAL_REQUIRED'});
@@ -166,7 +167,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   app.post('/api/admin/social/classification-verification/bulk',{preHandler:manager},async(request,reply)=>{
     const p=z.object({mentionIds:z.array(z.number().int().positive()).min(1).max(100)}).safeParse(request.body);
     if(!p.success)return reply.code(400).send({error:'INVALID_REQUEST'});
-    const actor=request.socialAuth!,ids=[...new Set(p.data.mentionIds)];let locked=0,skipped=0;const errors:Array<{id:number;error:string}>=[];
+    const actor=request.socialAuth!,organizationId=await resolveOrganizationId(actor);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});const ids=[...new Set(p.data.mentionIds)];let locked=0,skipped=0;const errors:Array<{id:number;error:string}>=[];
     for(const mentionId of ids){try{
       const mention=(await pool.query(`SELECT id,source_kind,metadata,opd_id FROM social_mentions WHERE id=$1`,[mentionId])).rows[0];
       if(!mention||mention.source_kind!=='external'||mention.metadata?.manualClassification?.locked===true||mention.metadata?.socialVerification?.status==='LOCKED'){skipped++;continue;}
