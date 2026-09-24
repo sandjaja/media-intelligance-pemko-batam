@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { collectOnlineSource } from './online-media-collector.js';
 import { classifyArticleOrganizationScope, filterArticlesByOrganizationScope, loadOrganizationMediaScope } from './organization-media-scope.js';
+import { classifyOnlineArticleRole } from './organization-actor-gate.js';
 import { analyzeArticle, CLASSIFICATION_VERSION } from './analyzer-v15.js';
 
 declare module 'fastify' { interface FastifyRequest { onlineModerationAuth?: AuthorizationContext } }
@@ -17,7 +18,7 @@ const duplicate=(title:string,known:string[])=>{const c=canonical(title);return 
 const normalizedArticleUrl=(value:string)=>{try{const u=new URL(value);u.hash='';for(const key of [...u.searchParams.keys()])if(/^utm_/i.test(key)||/^(fbclid|gclid|dclid|msclkid|mc_cid|mc_eid|ref|ref_src)$/i.test(key))u.searchParams.delete(key);u.searchParams.sort();u.pathname=u.pathname.replace(/\/+$/,'')||'/';return u.toString();}catch{return String(value||'').trim();}};
 function healthTarget(url:string){try{return new URL(url).toString()}catch{return url}}
 async function probeUrl(url:string){const ctrl=new AbortController();const timer=setTimeout(()=>ctrl.abort(),5500);try{const r=await fetch(url,{method:'GET',redirect:'follow',signal:ctrl.signal,headers:{'user-agent':'Mozilla/5.0 (compatible; GovernmentMediaIntelligence/health)','accept':'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8','accept-language':'id-ID,id;q=0.9'}});try{await r.body?.cancel();}catch{}return{ok:r.ok,status:r.status,finalUrl:r.url||url};}finally{clearTimeout(timer)}}
-const DIAGNOSTIC_BUILD='classification-diagnostic-v3-v14-20260916';
+const DIAGNOSTIC_BUILD='classification-diagnostic-v4-v16.5-scope-20260924';
 function phraseHit(text:string,phrase:string){const t=` ${canonical(text)} `,p=canonical(phrase);return p.length>=2&&t.includes(` ${p} `);}
 
 export async function runOnlineSourceCollection(pool:Pool,source:any,orgId:number){
@@ -64,12 +65,16 @@ export async function registerOnlineArticleModerationRoutes(app:FastifyInstance,
   app.get('/api/online/articles/:id/classification-diagnostic',{preHandler:auth},async(request,reply)=>{
     const ctx=request.onlineModerationAuth!;if(!canModerate(ctx))return reply.code(403).send({error:'CLASSIFICATION_DIAGNOSTIC_REQUIRES_HUMAS_OR_SUPER_ADMIN'});
     const id=z.coerce.number().int().positive().safeParse((request.params as any).id);if(!id.success)return reply.code(400).send({error:'INVALID_ARTICLE_ID'});
-    const article=(await pool.query(`SELECT a.id,a.title,a.summary,a.content,a.opd_id,o.name opd_name FROM articles a LEFT JOIN opd o ON o.id=a.opd_id WHERE a.id=$1`,[id.data])).rows[0];if(!article)return reply.code(404).send({error:'ARTICLE_NOT_FOUND'});
+    const article=(await pool.query(`SELECT a.id,a.source_id,a.title,a.url,a.summary,a.content,a.published_at,a.opd_id,a.news_classification,a.news_classification_source,a.classification_version,o.name opd_name FROM articles a LEFT JOIN opd o ON o.id=a.opd_id WHERE a.id=$1`,[id.data])).rows[0];if(!article)return reply.code(404).send({error:'ARTICLE_NOT_FOUND'});
+    const orgId=await organizationId(pool,ctx);const scope=orgId?await loadOrganizationMediaScope(pool,orgId):null;
+    const scopeArticle={sourceId:String(article.source_id||''),title:String(article.title||''),url:String(article.url||''),publishedAt:article.published_at?new Date(article.published_at):new Date(),excerpt:String(article.summary||article.content||'')};
+    const scopeDecision=scope?classifyArticleOrganizationScope(scopeArticle,scope):null;
+    const roleDecision=scope?classifyOnlineArticleRole(scopeArticle,scope):null;
     const fullText=`${article.title||''} ${article.summary||''} ${article.content||''}`;
     const rows=(await pool.query(`SELECT k.id keyword_id,k.keyword,kt.category_id,tc.name taxonomy_name,cs.name sector_name,kt.weight,ko.opd_id,ko.routing_role,o.name opd_name FROM keywords k JOIN keyword_taxonomy kt ON kt.keyword_id=k.id AND kt.active=true JOIN taxonomy_categories tc ON tc.id=kt.category_id AND tc.active=true JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true LEFT JOIN keyword_opd ko ON ko.keyword_id=k.id AND ko.active=true LEFT JOIN opd o ON o.id=ko.opd_id WHERE k.active=true AND k.organization_id IS NOT NULL AND k.opd_id IS NULL AND k.district_id IS NULL AND tc.organization_id=k.organization_id AND cs.organization_id=k.organization_id ORDER BY k.id`)).rows;
     const matched=rows.filter(r=>phraseHit(fullText,String(r.keyword||''))).map(r=>({keywordId:String(r.keyword_id),keyword:r.keyword,weight:Number(r.weight||0),inTitle:phraseHit(String(article.title||''),String(r.keyword||'')),inSummary:phraseHit(String(article.summary||''),String(r.keyword||'')),inContent:phraseHit(String(article.content||''),String(r.keyword||'')),taxonomyId:String(r.category_id),taxonomy:r.taxonomy_name,sector:r.sector_name,opdId:r.opd_id==null?null:String(r.opd_id),opd:r.opd_name??null,routingRole:r.routing_role??null}));
     const stored=(await pool.query(`SELECT entity_type,entity_name FROM article_entities WHERE article_id=$1 ORDER BY entity_type,entity_name`,[id.data])).rows;
-    return{ok:true,build:DIAGNOSTIC_BUILD,classificationVersion:CLASSIFICATION_VERSION,article:{id:String(article.id),title:article.title,currentOpdId:article.opd_id==null?null:String(article.opd_id),currentOpd:article.opd_name??null},masterRowsLoaded:rows.length,matchedCount:matched.length,matched,storedEntities:stored,note:'Read-only diagnostic. No article classification data was changed.'};
+    return{ok:true,build:DIAGNOSTIC_BUILD,classificationVersion:CLASSIFICATION_VERSION,article:{id:String(article.id),title:article.title,currentOpdId:article.opd_id==null?null:String(article.opd_id),currentOpd:article.opd_name??null,newsClassification:article.news_classification??null,newsClassificationSource:article.news_classification_source??null,storedClassificationVersion:article.classification_version??null},organizationScope:scope?{organizationId:scope.organizationId,organizationName:scope.organizationName,cityName:scope.cityName??null,status:scopeDecision?.status??null,reason:scopeDecision?.reason??null,matchedTerms:scopeDecision?.matchedTerms??[],role:roleDecision?.role??null,roleReason:roleDecision?.reason??null,actorMatches:roleDecision?.actorMatches??[]}:null,masterRowsLoaded:rows.length,matchedCount:matched.length,matched,storedEntities:stored,note:'Read-only diagnostic. No article classification data was changed.'};
   });
 
   app.post('/api/online/sources/:id/run',{preHandler:auth},async(request,reply)=>{
