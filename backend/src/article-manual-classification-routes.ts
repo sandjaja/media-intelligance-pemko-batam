@@ -7,6 +7,7 @@ import { analyzeArticle } from './analyzer-v14.js';
 import { clearSupportingIntelligenceLinks } from './news-classification.js';
 import { linkEligibleOnline } from './issue-monitor-matcher.js';
 import { detectUnifiedIssueCandidates } from './unified-candidate-issues.js';
+import { recalculateIssueRisk } from './issue-risk.js';
 
 declare module 'fastify' { interface FastifyRequest { articleCorrectionAuth?: AuthorizationContext } }
 const canManage=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
@@ -90,7 +91,9 @@ export async function registerArticleManualClassificationRoutes(app:FastifyInsta
    return{ok:true,data:{articleId:String(articleId),action:'REOPEN',verificationStatus:'REOPENED',riskStatus:'PROVISIONAL',classification:article.news_classification,source:article.news_classification_source}};
   }
   if(p.data.action==='APPROVE'){
-   if(article.news_classification!=='UTAMA'&&article.news_classification!=='PENDUKUNG')return reply.code(409).send({error:'ARTICLE_NOT_CLASSIFIED'});
+   // Only primary news may enter the verified/locked state used by Issue Evidence.
+   // Supporting news stays reviewable so it can still be promoted by choosing a Primary Keyword.
+   if(article.news_classification!=='UTAMA')return reply.code(409).send({error:'PRIMARY_ARTICLE_REQUIRED_FOR_VERIFICATION'});
    await audit(pool,actor.id,'ARTICLE_CLASSIFICATION_VERIFIED',{organizationId,articleId:String(articleId),title:article.title,before,after:before,reason:p.data.reason||null,riskStatus:'FINAL',riskFinalizedAt:new Date().toISOString()});
    let issueMonitorMatches=0;
    if(article.news_classification==='UTAMA'){try{const evidence=(await pool.query(`SELECT a.published_at,a.title,COALESCE(a.content,a.summary,'') content,(SELECT kt.category_id FROM article_manual_keywords amk JOIN keyword_taxonomy kt ON kt.keyword_id=amk.keyword_id AND kt.active=true WHERE amk.article_id=a.id AND amk.active=true ORDER BY CASE WHEN amk.keyword_role='PRIMARY' THEN 0 WHEN amk.keyword_role IS NULL THEN 1 ELSE 2 END,kt.weight DESC LIMIT 1) taxonomy_id FROM articles a WHERE a.id=$1`,[articleId])).rows[0];if(evidence){issueMonitorMatches=(await linkEligibleOnline(pool,{articleId,publishedAt:evidence.published_at,title:evidence.title,content:evidence.content,taxonomyId:evidence.taxonomy_id?Number(evidence.taxonomy_id):null})).length;}}catch(e){request.log.warn({err:e,articleId},'Issue Monitor online linkage skipped');}}
@@ -102,14 +105,15 @@ export async function registerArticleManualClassificationRoutes(app:FastifyInsta
   const client=await pool.connect();
   try{
    await client.query('BEGIN');
+   const affectedIssueIds=(await client.query(`SELECT DISTINCT issue_id FROM issue_articles WHERE article_id=$1`,[articleId])).rows.map((row:any)=>Number(row.issue_id)).filter(Number.isFinite);
    await client.query(`UPDATE article_manual_keywords SET active=false,updated_at=NOW() WHERE article_id=$1 AND active=true`,[articleId]);
    await client.query(`UPDATE articles SET news_classification='PENDUKUNG',news_classification_source='MANUAL',news_classification_changed_by=$2,news_classification_changed_at=NOW() WHERE id=$1`,[articleId,actor.id]);
    await clearSupportingIntelligenceLinks(client as unknown as Pool,String(articleId));
+   for(const issueId of affectedIssueIds)await recalculateIssueRisk(client,issueId);
    const supportingAnalysis=await analyzeArticle(client as unknown as Pool,String(articleId));
    await audit(client,actor.id,'ARTICLE_CLASSIFICATION_SET_SUPPORTING',{organizationId,articleId:String(articleId),title:article.title,before,after:{classification:'PENDUKUNG',source:'MANUAL'},reason:p.data.reason,riskStatus:'FINAL',riskScore:supportingAnalysis?.risk?.score??null,riskLevel:supportingAnalysis?.risk?.level??null,riskFinalizedAt:new Date().toISOString()});
-   await audit(client,actor.id,'ARTICLE_CLASSIFICATION_VERIFIED',{organizationId,articleId:String(articleId),title:article.title,before,after:{classification:'PENDUKUNG',source:'MANUAL'},verificationSource:'SET_SUPPORTING',reason:p.data.reason,riskStatus:'FINAL',riskFinalizedAt:new Date().toISOString()});
    await client.query('COMMIT');
-   return{ok:true,data:{articleId:String(articleId),action:'SET_SUPPORTING',verificationStatus:'LOCKED',riskStatus:'FINAL',risk:supportingAnalysis?.risk??null,classification:'PENDUKUNG',source:'MANUAL'}};
+   return{ok:true,data:{articleId:String(articleId),action:'SET_SUPPORTING',verificationStatus:'SUPPORTING_CONFIRMED',riskStatus:'FINAL',risk:supportingAnalysis?.risk??null,classification:'PENDUKUNG',source:'MANUAL'}};
   }catch(e){await client.query('ROLLBACK');request.log.error({err:e,articleId},'classification verification failed');return reply.code(409).send({error:'CLASSIFICATION_VERIFICATION_FAILED',message:e instanceof Error?e.message:String(e)});}finally{client.release();}
  });
 }
