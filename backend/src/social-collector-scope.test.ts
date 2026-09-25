@@ -13,16 +13,14 @@ function scopeRows(sql:string){
  return null;
 }
 
-test('Social ingestion rejects generic actor without local evidence',async()=>{
+test('Social ingestion keeps generic actor in scope review before classification',async()=>{
  let inserted=false;
  const pool={async query(sql:string){
   const rows=scopeRows(sql); if(rows)return{rows};
   if(sql.includes('INSERT INTO social_mentions'))inserted=true;
   throw new Error('Unexpected query after scope gate: '+sql);
  }} as any;
- const result:any=await ingestSocialCandidate(pool,{platform:'instagram',contentType:'comment',content:'Dishub tolong dong parkir ini ditertibkan'});
- assert.equal(result.skipped,true);
- assert.equal(result.reason,'ORGANIZATION_SCOPE_OUT_OF_SCOPE');
+ await assert.rejects(()=>ingestSocialCandidate(pool,{platform:'instagram',contentType:'comment',content:'Dishub tolong dong parkir ini ditertibkan'}),/Unexpected query after scope gate/);
  assert.equal(inserted,false);
 });
 test('Social ingestion skips OUT_OF_SCOPE even when discovery query contains organization area',async()=>{
