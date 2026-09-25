@@ -20,14 +20,18 @@ async function readManual(pool:Pool,articleId:string):Promise<NewsClassification
  * routed OPD. One title hit or two summary keyword hits are required.
  */
 async function masterPrimaryEvidence(pool:Pool,articleId:string){
- const article=(await pool.query(`SELECT id,title,summary FROM articles WHERE id=$1`,[articleId])).rows[0];if(!article)return null;
+ const article=(await pool.query(`SELECT id,title,summary,content FROM articles WHERE id=$1`,[articleId])).rows[0];if(!article)return null;
  const routed=(await pool.query(`SELECT ao.opd_id,o.code FROM article_opd ao JOIN opd o ON o.id=ao.opd_id AND o.active=true WHERE ao.article_id=$1 AND ao.routing_role='PRIMARY' ORDER BY ao.relevance_score DESC NULLS LAST,ao.updated_at DESC LIMIT 1`,[articleId])).rows[0];if(!routed)return null;
  const rows=(await pool.query(`SELECT DISTINCT k.id,k.keyword FROM keywords k JOIN keyword_taxonomy kt ON kt.keyword_id=k.id AND kt.active=true JOIN taxonomy_categories tc ON tc.id=kt.category_id AND tc.active=true JOIN classification_sectors cs ON cs.id=tc.sector_id AND cs.active=true JOIN keyword_opd ko ON ko.keyword_id=k.id AND ko.active=true AND ko.routing_role='PRIMARY' JOIN opd o ON o.id=ko.opd_id AND o.active=true WHERE k.active=true AND k.organization_id IS NOT NULL AND k.opd_id IS NULL AND k.district_id IS NULL AND ko.opd_id=$1 AND tc.organization_id=k.organization_id AND cs.organization_id=k.organization_id ORDER BY k.id`,[routed.opd_id])).rows;
- const title=String(article.title||''),summary=String(article.summary||'');
+ const title=String(article.title||''),summary=String(article.summary||''),content=String(article.content||'');
+ // Mesin 2 is deliberately assertive after Organization Scope has accepted the article:
+ // one real Master Keyword occurrence anywhere in title/summary/body is enough to propose UTAMA.
+ // Human verification remains the quality gate before analysis and Issue Evidence.
  const titleHits=rows.filter((r:any)=>containsPhrase(title,String(r.keyword||'')));
  const summaryHits=rows.filter((r:any)=>containsPhrase(summary,String(r.keyword||'')));
- if(titleHits.length<1&&summaryHits.length<2)return null;
- const evidence=[...new Set([...titleHits,...summaryHits].map((r:any)=>String(r.keyword)))];
+ const contentHits=rows.filter((r:any)=>containsPhrase(content,String(r.keyword||'')));
+ if(titleHits.length<1&&summaryHits.length<1&&contentHits.length<1)return null;
+ const evidence=[...new Set([...titleHits,...summaryHits,...contentHits].map((r:any)=>String(r.keyword)))];
  return{opdId:String(routed.opd_id),code:String(routed.code||routed.opd_id),keywords:evidence};
 }
 
