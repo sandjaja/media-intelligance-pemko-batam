@@ -59,18 +59,25 @@ export async function analyzeArticle(pool:Pool,articleId:string,options:Analysis
   await pool.query(`UPDATE articles SET opd_id=NULL,sentiment=$2,importance_score=$3,impact_score=$4,velocity_score=$5,risk_score=$6,risk_level=$7,is_highlight=false WHERE id=$1`,[articleId,analysis.sentiment,analysis.importanceScore,analysis.impactScore,analysis.velocityScore,analysis.riskScore,analysis.riskLevel]);
   return{articleId,newsClassification:'PENDUKUNG',newsClassificationSource:'AUTO',newsClassificationReason:gateReason||'outside configured organization scope',newsClassificationSignals:gateSignals,classificationSource:'AUTO_ORGANIZATION_SCOPE',routingStatus:'OUT_OF_SCOPE',needsVerification:false,classificationVersion:CLASSIFICATION_VERSION,opdId:null,supportingOpdIds:[],districtId:null,uptdId:null,uptdName:null,uptdMatches:0,taxonomyId:null,taxonomyName:null,taxonomyScore:0,issueId:null,issueMatchScore:0,issueAssignmentSource:null,sentiment:analysis.sentiment,importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,highlight:false,keywordMatches:0,matchedKeywords:[],entities:analysis.entities,risk:{score:analysis.riskScore,level:analysis.riskLevel,reasons:[],alertType:null}};
  }
- if(!news&&gateRole){
-  news={classification:gateRole,source:'AUTO' as const,reason:gateReason||'online organization actor gate',signals:gateSignals};
-  await pool.query(`UPDATE articles SET news_classification=$2,news_classification_source='AUTO',news_classification_changed_by=NULL,news_classification_changed_at=NOW() WHERE id=$1 AND news_classification_source<>'MANUAL'`,[articleId,gateRole]);
- }
+ // Machine 1 (Organization Scope/actor evidence) never decides UTAMA/PENDUKUNG.
+ // For automatic decisions Machine 2 is authoritative: Master Keyword -> UTAMA;
+ // no keyword + known OPD actor -> AMBIGUOUS; neither -> PENDUKUNG.
  let routing:any=null;
- if(!news||news.classification==='UTAMA'){
+ if(!news){
   routing=await routeArticleV16(pool,articleId);
-  if(!news){
-   const hasPrimary=Boolean(routing?.opdId),ambiguous=routing?.routingStatus==='AMBIGUOUS';
-   news={classification:(hasPrimary||ambiguous)?'UTAMA':'PENDUKUNG',source:'AUTO' as const,reason:hasPrimary?'valid v16 Master PRIMARY OPD routing':ambiguous?'relevant headline taxonomy detected but Primary OPD routing is ambiguous':'no v16 Master PRIMARY OPD routing',signals:hasPrimary?[`MASTER_PRIMARY_OPD:${routing.opdId}`,...(routing?.matchedKeywords??[]).slice(0,8).map((k:string)=>`MASTER_KEYWORD:${k}`)]:ambiguous?(routing?.headlineTaxonomyNames??[]).map((t:string)=>`AMBIGUOUS_HEADLINE_TAXONOMY:${t}`):[]};
-   await pool.query(`UPDATE articles SET news_classification=$2,news_classification_source='AUTO',news_classification_changed_by=NULL,news_classification_changed_at=NOW() WHERE id=$1 AND news_classification_source<>'MANUAL'`,[articleId,news.classification]);
-  }
+  const hasKeyword=Boolean(routing?.keywordId)||(routing?.matchedKeywords??[]).length>0;
+  const hasPrimary=Boolean(routing?.opdId);
+  const hasOpdActor=(gateSignals??[]).some((s:string)=>s.startsWith('ACTOR:OPD:')||s.startsWith('ACTOR:UPTD:'));
+  const ambiguous=!hasKeyword&&(hasOpdActor||routing?.routingStatus==='AMBIGUOUS');
+  news={
+   classification:hasKeyword&&hasPrimary?'UTAMA':ambiguous?'UTAMA':'PENDUKUNG',
+   source:'AUTO' as const,
+   reason:hasKeyword&&hasPrimary?'Master Keyword found and mapped to Primary OPD':ambiguous?'OPD/taxonomy context found but no Master Keyword; Humas review required':'no Master Keyword and no OPD evidence',
+   signals:hasKeyword&&hasPrimary?[`MASTER_PRIMARY_OPD:${routing.opdId}`,...(routing?.matchedKeywords??[]).slice(0,8).map((k:string)=>`MASTER_KEYWORD:${k}`)]:ambiguous?[...(gateSignals??[]),...(routing?.headlineTaxonomyNames??[]).map((t:string)=>`AMBIGUOUS_HEADLINE_TAXONOMY:${t}`)]:[]
+  };
+  await pool.query(`UPDATE articles SET news_classification=$2,news_classification_source='AUTO',news_classification_changed_by=NULL,news_classification_changed_at=NOW() WHERE id=$1 AND news_classification_source<>'MANUAL'`,[articleId,news.classification]);
+ }else if(news.classification==='UTAMA'){
+  routing=await routeArticleV16(pool,articleId);
  }
  if(!news)return null;
  if(news.classification==='PENDUKUNG'){
