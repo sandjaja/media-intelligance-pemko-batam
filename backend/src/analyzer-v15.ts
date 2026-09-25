@@ -5,9 +5,18 @@ import { routeArticleV16 } from './atomic-router-v16.js';
 import { getManualNewsClassification, clearSupportingIntelligenceLinks } from './news-classification.js';
 import { loadOrganizationMediaScope } from './organization-media-scope.js';
 import { classifyOnlineArticleRole } from './organization-actor-gate.js';
+import { recalculateIssueRisk } from './issue-risk.js';
 
 export const CLASSIFICATION_VERSION='article-opd-v16.5-20260924-scope-hard-gate';
 export type AnalysisOptions={onlineGateRole?:'UTAMA'|'PENDUKUNG'|null;onlineGateReason?:string|null;onlineGateSignals?:string[]};
+
+async function detachIneligibleIssueLinks(pool:Pool,articleId:string,reason:string){
+ const linked=(await pool.query(`SELECT DISTINCT issue_id FROM issue_articles WHERE article_id=$1`,[articleId])).rows.map((r:any)=>Number(r.issue_id)).filter(Number.isFinite);
+ if(!linked.length)return;
+ await pool.query(`DELETE FROM issue_articles WHERE article_id=$1`,[articleId]);
+ await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES(NULL,'ONLINE_INELIGIBLE_ISSUE_LINKS_REMOVED',$2::jsonb)`,[articleId,JSON.stringify({articleId:String(articleId),issueIds:linked,reason,classificationVersion:CLASSIFICATION_VERSION})]).catch(()=>undefined);
+ for(const issueId of linked)await recalculateIssueRisk(pool,issueId);
+}
 
 export async function analyzeArticle(pool:Pool,articleId:string,options:AnalysisOptions={}){
  const article=(await pool.query(`SELECT a.id,a.source_id,a.title,a.url,a.content,a.summary,a.published_at,ms.name source_name,ms.tier,ms.category media_kind FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE a.id=$1`,[articleId])).rows[0];
@@ -38,6 +47,7 @@ export async function analyzeArticle(pool:Pool,articleId:string,options:Analysis
  // Explicit MANUAL decisions remain authoritative and are never overwritten here.
  if(article.media_kind==='online'&&onlineOutOfScope&&!news){
   await clearSupportingIntelligenceLinks(pool,articleId);
+  await detachIneligibleIssueLinks(pool,articleId,'AUTO_ORGANIZATION_SCOPE_OUT_OF_SCOPE');
   await pool.query(`UPDATE articles SET news_classification='PENDUKUNG',news_classification_source='AUTO',news_classification_changed_by=NULL,news_classification_changed_at=NOW(),classified_at=NOW(),classification_version=$2 WHERE id=$1 AND news_classification_source<>'MANUAL'`,[articleId,CLASSIFICATION_VERSION]);
   // Keep the stored classification for audit/history, but hide automatic OUT_OF_SCOPE
   // Online articles from the default relevant feed using the existing moderation contract.
@@ -65,6 +75,7 @@ export async function analyzeArticle(pool:Pool,articleId:string,options:Analysis
  if(!news)return null;
  if(news.classification==='PENDUKUNG'){
   await clearSupportingIntelligenceLinks(pool,articleId);
+  await detachIneligibleIssueLinks(pool,articleId,'ONLINE_CLASSIFICATION_PENDUKUNG');
   const peerResult=await pool.query(`SELECT COUNT(*)::int count FROM articles WHERE id<>$1 AND (title ILIKE $2 OR summary ILIKE $2)`,[articleId,`%${String(article.title).slice(0,80)}%`]);
   const peerCount=Number(peerResult.rows[0]?.count??1)+1;
   const analysis=analyzeCoreArticle({id:article.id,title:article.title,summary:article.summary,content:article.content,sourceName:article.source_name,sourceTier:Number(article.tier??2),mediaKind:article.media_kind==='print'?'print':article.media_kind==='social'?'social':'online',opdId:null,publishedAt:article.published_at},parseKeywordQuery(''),peerCount);
@@ -88,6 +99,7 @@ export async function analyzeArticle(pool:Pool,articleId:string,options:Analysis
    return{articleId,newsClassification:'UTAMA',newsClassificationSource:'AUTO',newsClassificationReason:reason,newsClassificationSignals:signals,classificationSource:gateUtama?'AUTO_ACTOR_GATE_AMBIGUOUS':'AUTO_AMBIGUOUS',routingStatus:'AMBIGUOUS',needsVerification:true,classificationVersion:CLASSIFICATION_VERSION,opdId:null,supportingOpdIds:[],districtId:null,uptdId:null,uptdName:null,uptdMatches:0,taxonomyId:routing?.taxonomyId??null,taxonomyName:routing?.taxonomyName??null,taxonomyScore:0,issueId:null,issueMatchScore:0,issueAssignmentSource:null,sentiment:analysis.sentiment,importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,risk:{score:analysis.riskScore,level:analysis.riskLevel,reasons:[],alertType:null}};
   }
   await clearSupportingIntelligenceLinks(pool,articleId);
+  await detachIneligibleIssueLinks(pool,articleId,'ONLINE_NO_PRIMARY_OPD_ROUTING');
   const peerResult=await pool.query(`SELECT COUNT(*)::int count FROM articles WHERE id<>$1 AND (title ILIKE $2 OR summary ILIKE $2)`,[articleId,`%${String(article.title).slice(0,80)}%`]);
   const peerCount=Number(peerResult.rows[0]?.count??1)+1;
   const analysis=analyzeCoreArticle({id:article.id,title:article.title,summary:article.summary,content:article.content,sourceName:article.source_name,sourceTier:Number(article.tier??2),mediaKind:'online',opdId:null,publishedAt:article.published_at},parseKeywordQuery(''),peerCount);
