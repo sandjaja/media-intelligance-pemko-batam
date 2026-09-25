@@ -231,7 +231,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
       keywordId: z.string().regex(/^\d+$/).optional(),
       sentiment: sentimentSchema.optional(),
       riskLevel: z.enum(['low','medium','high','critical']).optional(),
-      classification: z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional(),
+      classification: z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL','SCOPE_REVIEW']).optional(),
       sourceKind: z.enum(['external','owned']).default('external'),
       from: z.string().optional(),
       to: z.string().optional(),
@@ -243,7 +243,8 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
 
     const params: unknown[] = [];
     const where: string[] = [`sm.source_kind='${parsed.data.sourceKind}'`];
-    if(parsed.data.sourceKind==='external')where.push(`COALESCE(sm.metadata->'organizationScope'->>'status','RELEVANT')='RELEVANT'`);
+    if(parsed.data.sourceKind==='external'&&parsed.data.classification!=='SCOPE_REVIEW')where.push(`COALESCE(sm.metadata->'organizationScope'->>'status','RELEVANT')='RELEVANT'`);
+    if(parsed.data.sourceKind==='external'&&parsed.data.classification==='SCOPE_REVIEW')where.push(`sm.metadata->'organizationScope'->>'status'='REVIEW'`);
     const bind = (value: unknown) => { params.push(value); return '$' + params.length; };
     const opdId = scopedOpd(request.socialAuth!, parsed.data.opdId);
 
@@ -251,7 +252,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     if (parsed.data.platform) where.push(`sm.platform=${bind(parsed.data.platform)}`);
     if (parsed.data.sentiment) where.push(`sm.sentiment=${bind(parsed.data.sentiment)}`);
     if (parsed.data.riskLevel) where.push(`sm.risk_level=${bind(parsed.data.riskLevel)}`);
-    if (parsed.data.classification) { const cp=bind(parsed.data.classification); where.push(`CASE WHEN COALESCE(sm.metadata->'manualClassification'->>'locked','false')='true' THEN 'MANUAL' WHEN COALESCE(sm.metadata->'v16Routing'->>'routingStatus','UNROUTED')='AMBIGUOUS' THEN 'AMBIGU' ELSE COALESCE(sm.metadata->'v16Routing'->>'newsClassification',CASE WHEN COALESCE(sm.metadata->'v16Routing'->>'routingStatus','UNROUTED')='ROUTED' THEN 'UTAMA' ELSE 'PENDUKUNG' END) END=${cp}`); }
+    if (parsed.data.classification&&parsed.data.classification!=='SCOPE_REVIEW') { const cp=bind(parsed.data.classification); where.push(`CASE WHEN COALESCE(sm.metadata->'manualClassification'->>'locked','false')='true' THEN 'MANUAL' WHEN COALESCE(sm.metadata->'v16Routing'->>'routingStatus','UNROUTED')='AMBIGUOUS' THEN 'AMBIGU' ELSE COALESCE(sm.metadata->'v16Routing'->>'newsClassification',CASE WHEN COALESCE(sm.metadata->'v16Routing'->>'routingStatus','UNROUTED')='ROUTED' THEN 'UTAMA' ELSE 'PENDUKUNG' END) END=${cp}`); }
     if (parsed.data.from) where.push(`sm.published_at >= ${bind(parsed.data.from)}`);
     else if(parsed.data.days===1) where.push(`COALESCE(sm.published_at,sm.captured_at) >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Jakarta') AT TIME ZONE 'Asia/Jakarta'`);
     else where.push(`COALESCE(sm.published_at,sm.captured_at) >= NOW() - (${bind(parsed.data.days)}::int * INTERVAL '1 day')`);
