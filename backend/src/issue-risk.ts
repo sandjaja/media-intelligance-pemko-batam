@@ -52,12 +52,12 @@ export async function recalculateIssueRisk(db:Db,issueId:number){
       OR sm.metadata->'manualClassification'->>'locked'='true')) valid
   FROM social_mention_issues x JOIN social_mentions sm ON sm.id=x.mention_id
   WHERE x.issue_id=$1 AND sm.source_kind='external'`,[issueId])).rows;
- const all=[...online,...print,...social] as Evidence[], valid=all.filter(x=>x.valid);
+ const linked=[...online,...print,...social] as Evidence[], valid=linked.filter(x=>x.valid);
  const ownedCount=Number((await db.query(`SELECT COUNT(*)::int n FROM social_mention_issues x JOIN social_mentions sm ON sm.id=x.mention_id WHERE x.issue_id=$1 AND sm.source_kind='owned'`,[issueId])).rows[0]?.n||0);
 
  if(!valid.length){
   await db.query(`UPDATE issues SET risk_level=NULL,updated_at=now() WHERE id=$1`,[issueId]);
-  return {issueId,assessed:false,externalEvidence:all.length,validEvidence:0,ownedCount};
+  return {issueId,assessed:false,externalEvidence:0,validEvidence:0,excludedEvidence:linked.length,ownedCount};
  }
  const counts={positive:0,neutral:0,negative:0};
  for(const e of valid){const s=String(e.sentiment||'').toLowerCase();if(s==='positive')counts.positive++;else if(s==='negative')counts.negative++;else counts.neutral++;}
@@ -71,7 +71,7 @@ export async function recalculateIssueRisk(db:Db,issueId:number){
  const velocityScore=clamp(velocityValues.length?avg(velocityValues):Math.min(100,valid.length*10));
  const calculated=calculateIssueRiskComponents({negativeShare,negativeIntensity,importance:importanceScore,impact:impactScore,velocity:velocityScore});
  const riskScore=calculated.score,riskLevel=calculated.level;
- const metadata={engine:'issue-risk-event-v1',assessed:true,validEvidence:valid.length,totalExternalEvidence:all.length,ownedCount,components:calculated.components,sentiment:{...counts,negativePercent:Math.round(counts.negative/valid.length*100),neutralPercent:Math.round(counts.neutral/valid.length*100),positivePercent:Math.round(counts.positive/valid.length*100)},sources:{online:valid.filter(x=>x.source==='online').length,print:valid.filter(x=>x.source==='print').length,social:valid.filter(x=>x.source==='social').length}};
+ const metadata={engine:'issue-risk-event-v1',assessed:true,validEvidence:valid.length,totalExternalEvidence:valid.length,excludedEvidence:linked.length-valid.length,ownedCount,components:calculated.components,sentiment:{...counts,negativePercent:Math.round(counts.negative/valid.length*100),neutralPercent:Math.round(counts.neutral/valid.length*100),positivePercent:Math.round(counts.positive/valid.length*100)},sources:{online:valid.filter(x=>x.source==='online').length,print:valid.filter(x=>x.source==='print').length,social:valid.filter(x=>x.source==='social').length}};
  await db.query(`UPDATE issues SET risk_level=$2,momentum=$3,updated_at=now() WHERE id=$1`,[issueId,riskLevel,level(velocityScore)]);
  await db.query(`INSERT INTO issue_metrics(issue_id,media_volume,social_volume,positive_count,neutral_count,negative_count,velocity_score,influence_score,risk_score,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,[issueId,metadata.sources.online+metadata.sources.print,metadata.sources.social,counts.positive,counts.neutral,counts.negative,velocityScore,impactScore,riskScore,JSON.stringify(metadata)]);
  return {issueId,riskScore,riskLevel,...metadata};
