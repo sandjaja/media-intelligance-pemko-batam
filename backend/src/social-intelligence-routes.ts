@@ -320,6 +320,8 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     const id = z.coerce.number().int().positive().safeParse((request.params as any).id);
     const body = z.object({ issueId: z.coerce.number().int().positive(), relevanceScore: z.coerce.number().min(0).max(100).default(0), linkageSource: z.enum(['rule','ai','manual']).default('manual') }).safeParse(request.body);
     if (!id.success || !body.success) return reply.code(400).send({ error: 'INVALID_REQUEST' });
+    const issue=(await pool.query(`SELECT id FROM issues WHERE id=$1 AND lower(status) IN ('active','watch')`,[body.data.issueId])).rows[0];
+    if(!issue)return reply.code(409).send({error:'TARGET_ISSUE_NOT_OPERATIONAL'});
     const { rows } = await pool.query(`INSERT INTO social_mention_issues(mention_id,issue_id,relevance_score,linkage_source) VALUES($1,$2,$3,$4) ON CONFLICT(mention_id,issue_id) DO UPDATE SET relevance_score=EXCLUDED.relevance_score,linkage_source=EXCLUDED.linkage_source RETURNING *`, [id.data,body.data.issueId,body.data.relevanceScore,body.data.linkageSource]);
     return { data: rows[0] };
   });
