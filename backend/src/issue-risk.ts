@@ -46,10 +46,14 @@ export async function recalculateIssueRisk(db:Db,issueId:number){
    COALESCE(sm.importance_score,0)::float importance,
    COALESCE(sm.influence_score,0)::float impact,
    NULLIF(sm.metadata->'intelligence'->>'velocityScore','')::float velocity,
-   (sm.source_kind='external' AND sm.sentiment IS NOT NULL AND COALESCE(sm.risk_score,0)>0
-    AND (COALESCE(sm.metadata->'intelligence'->>'riskStatus','')='FINAL'
-      OR sm.metadata->'socialVerification'->>'status'='LOCKED'
-      OR sm.metadata->'manualClassification'->>'locked'='true')) valid
+   (sm.source_kind='external'
+    AND sm.metadata->'v16Routing'->>'newsClassification'='UTAMA'
+    AND sm.metadata->'v16Routing'->>'routingStatus'='ROUTED'
+    AND sm.opd_id IS NOT NULL
+    AND (sm.metadata->'socialVerification'->>'status'='LOCKED'
+      OR sm.metadata->'manualClassification'->>'locked'='true')
+    AND COALESCE(sm.metadata->'intelligence'->>'riskStatus','')='FINAL'
+    AND sm.sentiment IS NOT NULL AND COALESCE(sm.risk_score,0)>0) valid
   FROM social_mention_issues x JOIN social_mentions sm ON sm.id=x.mention_id
   WHERE x.issue_id=$1 AND sm.source_kind='external'`,[issueId])).rows;
  const linked=[...online,...print,...social] as Evidence[], valid=linked.filter(x=>x.valid);
