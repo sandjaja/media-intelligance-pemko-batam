@@ -26,8 +26,10 @@ async function compute(client:PoolClient,article:any,analysis:Phase2EAnalysisLik
  const selectedOpd=Number(analysis.entityValidation?.selected?.opdId||analysis.entityValidation?.detected?.opd?.id||article.opd_id||0)||null;
  const keywords=[...(analysis.officialKeywordMatches||[]),...(analysis.operatorKeywordMatches||[])].map(x=>String(x.keyword||'')).filter(Boolean);
  const shared=await matchExistingIssues(client,organizationId,{title:article.title,summary:article.summary,content:article.body_text,opdId:selectedOpd,taxonomyName:analysis.issueCategory||null,keywords});
- const top:IssueLinkageCandidate[]=shared.matches.map(x=>({...x,linkageStatus:'candidate'}));
- return{engine:ENGINE,generatedAt:new Date().toISOString(),candidateCount:top.length,linkedIssueId:null,candidates:top,note:top.length?'Kandidat memiliki issue-specific anchor dan evidence kontekstual. Anchor numerik/tahun tidak dihitung sebagai anchor mandiri. Keputusan akhir tetap Humas/Super Admin.':'Belum ada issue aktif/watch dengan anchor spesifik yang cukup relevan. Kesamaan taxonomy/OPD/tahun saja tidak membentuk kandidat.'};
+ const operational:IssueLinkageCandidate[]=shared.matches.map(x=>({...x,linkageStatus:'candidate'}));
+ const historical:IssueLinkageCandidate[]=(shared.historicalMatches||[]).map(x=>({...x,linkageStatus:'candidate'}));
+ const top=[...operational,...historical].sort((a,b)=>b.score-a.score).filter((x,i,arr)=>arr.findIndex(y=>y.issueId===x.issueId)===i).slice(0,6);
+ return{engine:ENGINE,generatedAt:new Date().toISOString(),candidateCount:top.length,linkedIssueId:null,candidates:top,note:top.length?'Issue Linkage menemukan kecocokan operasional atau historis berdasarkan anchor spesifik dan evidence kontekstual. Keputusan akhir tetap Humas/Super Admin.':'Belum ada issue dengan anchor spesifik yang cukup relevan. Kesamaan taxonomy/OPD/tahun saja tidak membentuk kandidat.'};
 }
 export async function evaluatePrintIssueLinkage(client:PoolClient,article:any,analysis:Phase2EAnalysisLike):Promise<IssueLinkageResult>{try{return await compute(client,article,analysis);}catch(e){console.error('print issue linkage degraded',e);return{engine:ENGINE,generatedAt:new Date().toISOString(),candidateCount:0,linkedIssueId:null,candidates:[],degraded:true,note:'Issue linkage gagal dihitung tetapi tidak memblokir proses analisis utama.'};}}
 
