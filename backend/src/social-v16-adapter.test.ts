@@ -47,7 +47,7 @@ test('Social V17 finds Master Keyword in body and proposes UTAMA',async()=>{
 
 test('Social V17 returns AMBIGU when taxonomy is visible but Master Keyword is absent',async()=>{
  const result=await analyzeSocialRoutingV16(fakePool(),{
-  title:'Pelayanan Pemerintahan menjadi perhatian warga',
+  title:'Pelayanan Publik menjadi perhatian warga',
   content:'Warga meminta tindak lanjut.'
  });
  assert.equal(result.routingStatus,'AMBIGUOUS');
