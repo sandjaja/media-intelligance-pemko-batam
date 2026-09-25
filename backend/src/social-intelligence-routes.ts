@@ -90,22 +90,27 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
           continue;
         }
         const routing=await analyzeSocialRoutingV16(pool,{title:mention.title,content:mention.content});
-        const query=parseKeywordQuery(routing.keyword?[routing.keyword].join(' | '):'');
-        const analysis=analyzeCoreArticle({
+        // Classification and intelligence are separate gates. AUTO routing may propose UTAMA,
+        // but sentiment/risk must wait for explicit Humas verification/correction.
+        const verified=mention.metadata?.socialVerification?.status==='LOCKED'||mention.metadata?.manualClassification?.locked===true;
+        const eligibleForAnalysis=routing.newsClassification==='UTAMA'&&routing.routingStatus==='ROUTED'&&!!routing.primaryOpdId&&verified;
+        const query=eligibleForAnalysis?parseKeywordQuery(routing.keyword?[routing.keyword].join(' | '):''):null;
+        const analysis=eligibleForAnalysis?analyzeCoreArticle({
           id:mention.id,title:String(mention.title||mention.content||'').slice(0,300),
           summary:String(mention.content||'').slice(0,900),content:mention.content??null,
           sourceName:'social',sourceTier:null,mediaKind:'social',opdId:routing.primaryOpdId,publishedAt:null
-        },query,1);
-        const risk=calculateRisk({importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,sentiment:analysis.sentiment,sentimentScore:analysis.sentimentScore});
+        },query!,1):null;
+        const risk=analysis?calculateRisk({importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,sentiment:analysis.sentiment,sentimentScore:analysis.sentimentScore}):null;
         const client=await pool.connect();
         try {
           await client.query('BEGIN');
           const metadata={...(mention.metadata||{}),v16Routing:routing};
-          const intelligence={...analysis,riskLevel:risk.level,riskReasons:risk.reasons,riskStatus:'PROVISIONAL'};
-          const nextMetadata={...metadata,intelligence};
+          const intelligence=analysis&&risk?{...analysis,riskLevel:risk.level,riskReasons:risk.reasons,riskStatus:'FINAL'}:undefined;
+          const {intelligence:_oldIntelligence,...metadataWithoutIntelligence}=metadata;
+          const nextMetadata=intelligence?{...metadataWithoutIntelligence,intelligence}:metadataWithoutIntelligence;
           await client.query(`UPDATE social_mentions SET opd_id=$2,metadata=$3::jsonb,processing_status=$4,sentiment=$5,sentiment_score=$6,importance_score=$7,influence_score=$8,risk_score=$9,risk_level=$10,updated_at=NOW() WHERE id=$1`,[
             mention.id,routing.primaryOpdId,JSON.stringify(nextMetadata),routing.routingStatus==='ROUTED'?'classified':'captured',
-            analysis.sentiment,analysis.sentimentScore,analysis.importanceScore,analysis.impactScore,risk.score,risk.level
+            analysis?.sentiment??null,analysis?.sentimentScore??null,analysis?.importanceScore??null,analysis?.impactScore??null,risk?.score??null,risk?.level??null
           ]);
           await client.query(`DELETE FROM social_mention_keywords WHERE mention_id=$1`,[mention.id]);
           if(routing.keywordId) await client.query(`INSERT INTO social_mention_keywords(mention_id,keyword_id,matched_text,match_count,confidence) VALUES($1,$2,$3,1,$4) ON CONFLICT(mention_id,keyword_id) DO UPDATE SET matched_text=EXCLUDED.matched_text,match_count=1,confidence=EXCLUDED.confidence`,[
