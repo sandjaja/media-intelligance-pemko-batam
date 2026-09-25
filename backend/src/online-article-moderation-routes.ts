@@ -7,6 +7,7 @@ import { collectOnlineSource } from './online-media-collector.js';
 import { classifyArticleOrganizationScope, filterArticlesByOrganizationScope, loadOrganizationMediaScope } from './organization-media-scope.js';
 import { classifyOnlineArticleRole } from './organization-actor-gate.js';
 import { analyzeArticle, CLASSIFICATION_VERSION } from './analyzer-v15.js';
+import { recalculateIssueRisk } from './issue-risk.js';
 
 declare module 'fastify' { interface FastifyRequest { onlineModerationAuth?: AuthorizationContext } }
 const canModerate=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
@@ -104,9 +105,19 @@ export async function registerOnlineArticleModerationRoutes(app:FastifyInstance,
     const staleRequested=articles.filter((a:any)=>a.classification_version!==CLASSIFICATION_VERSION).length;
     let analyzed=0,failed=0;const failures:any[]=[];
     for(const article of articles){try{if(await analyzeArticle(pool,String(article.id)))analyzed++;else failed++;}catch(error){failed++;if(failures.length<20)failures.push({articleId:String(article.id),error:error instanceof Error?error.message:String(error)});}}
+    // Targeted re-analysis is also an evidence-quality event. Refresh every linked Issue
+    // after the selected articles have received their latest sentiment/risk values.
+    const affectedIssueIds=targeted&&selectedIds.length
+      ?(await pool.query(`SELECT DISTINCT issue_id FROM issue_articles WHERE article_id=ANY($1::bigint[])`,[selectedIds])).rows.map((row:any)=>Number(row.issue_id)).filter(Number.isFinite)
+      :[];
+    const issueRiskRefreshes:any[]=[];
+    for(const issueId of affectedIssueIds){
+      try{issueRiskRefreshes.push(await recalculateIssueRisk(pool,issueId));}
+      catch(error){request.log.warn({err:error,issueId,articleIds:selectedIds},'Issue risk refresh after targeted online reanalysis failed');}
+    }
     const mode=targeted?'targeted':'window';
     await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'ONLINE_REANALYSIS_RUN',$2)`,[ctx.id,{mode,days:targeted?null:body.data.days,articleIds:targeted?requestedIds:undefined,skippedArticleIds,requested:articles.length,staleRequested,analyzed,failed,failures,diagnosticBuild:DIAGNOSTIC_BUILD,classificationVersion:CLASSIFICATION_VERSION}]).catch(()=>undefined);
-    return{ok:true,mode,build:DIAGNOSTIC_BUILD,classificationVersion:CLASSIFICATION_VERSION,days:targeted?null:body.data.days,articleIds:targeted?requestedIds:undefined,skippedArticleIds,requested:articles.length,staleRequested,analyzed,failed,failures};
+    return{ok:true,mode,build:DIAGNOSTIC_BUILD,classificationVersion:CLASSIFICATION_VERSION,days:targeted?null:body.data.days,articleIds:targeted?requestedIds:undefined,skippedArticleIds,requested:articles.length,staleRequested,analyzed,failed,failures,issueRiskRefreshes};
   });
 
 
