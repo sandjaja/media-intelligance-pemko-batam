@@ -17,7 +17,7 @@ function fakePool(){
  } as any;
 }
 
-test('Social V16.5 routes normalized public conversation through Master Classification',async()=>{
+test('Social V17 routes normalized public conversation through Master Classification',async()=>{
  const result=await analyzeSocialRoutingV16(fakePool(),{title:'Warga membahas pelayanan publik',content:'Pemko Contoh menindaklanjuti masukan warga.'});
  assert.equal(result.routingStatus,'ROUTED');
  assert.equal(result.primaryOpdId,'20');
@@ -27,8 +27,42 @@ test('Social V16.5 routes normalized public conversation through Master Classifi
  assert.equal(result.needsVerification,false);
 });
 
-test('Social V16.5 does not calculate sentiment or risk in routing adapter',async()=>{
+test('Social V17 does not calculate sentiment or risk in routing adapter',async()=>{
  const result:any=await analyzeSocialRoutingV16(fakePool(),{title:'Keluhan pelayanan publik',content:'Warga menyampaikan kritik.'});
  assert.equal('sentiment' in result,false);
  assert.equal('riskScore' in result,false);
+});
+
+
+test('Social V17 finds Master Keyword in body and proposes UTAMA',async()=>{
+ const result=await analyzeSocialRoutingV16(fakePool(),{
+  title:'Warga menyampaikan aspirasi',
+  content:'Pertemuan berlangsung cukup panjang. Pada bagian akhir warga meminta perbaikan pelayanan publik kepada pemerintah.'
+ });
+ assert.equal(result.routingStatus,'ROUTED');
+ assert.equal(result.newsClassification,'UTAMA');
+ assert.equal(result.keywordId,'100');
+ assert.equal(result.primaryOpdId,'20');
+});
+
+test('Social V17 returns AMBIGU when taxonomy is visible but Master Keyword is absent',async()=>{
+ const result=await analyzeSocialRoutingV16(fakePool(),{
+  title:'Pelayanan Pemerintahan menjadi perhatian warga',
+  content:'Warga meminta tindak lanjut.'
+ });
+ assert.equal(result.routingStatus,'AMBIGUOUS');
+ assert.equal(result.newsClassification,'AMBIGU');
+ assert.equal(result.keywordId,null);
+ assert.equal(result.needsVerification,true);
+});
+
+test('Social V17 returns PENDUKUNG when neither Master Keyword nor taxonomy evidence exists',async()=>{
+ const result=await analyzeSocialRoutingV16(fakePool(),{
+  title:'Warga berkumpul pada akhir pekan',
+  content:'Kegiatan berlangsung tertib.'
+ });
+ assert.equal(result.routingStatus,'UNROUTED');
+ assert.equal(result.newsClassification,'PENDUKUNG');
+ assert.equal(result.keywordId,null);
+ assert.equal(result.primaryOpdId,null);
 });
