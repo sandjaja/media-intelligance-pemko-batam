@@ -26,7 +26,7 @@ function dbFixture(){
  return{pool,inserted};
 }
 
-test('YouTube runner sends relevant and review contextual comments through ingestion',async(t)=>{
+test('YouTube runner stops review contextual comments before classification',async(t)=>{
  const original=globalThis.fetch;
  globalThis.fetch=async(input:any)=>{
   const url=new URL(String(input));
@@ -42,12 +42,15 @@ test('YouTube runner sends relevant and review contextual comments through inges
  const {pool,inserted}=dbFixture();
  const result=await runYouTubeShortsCollection(pool,{apiKey:'fixture-key',query:'parkir Kota Contoh'});
  assert.equal(result.received,3);
- assert.equal(result.skipped,0);
+ assert.equal(result.skipped,2);
  const relevant=result.results.find((r:any)=>r.externalId==='relevant'||r.external_id==='relevant') as any;
  assert.ok(relevant,JSON.stringify(result.results));
  assert.equal(relevant.ok,true,JSON.stringify(relevant));
- assert.deepEqual(inserted,['vid1','relevant','review']);
- assert.equal(result.succeeded,3);
+ assert.deepEqual(inserted,['relevant']);
+ const review=result.results.find((r:any)=>r.externalId==='review'||r.external_id==='review') as any;
+ assert.equal(review?.skipped,true,JSON.stringify(review));
+ assert.equal(review?.reason,'ORGANIZATION_SCOPE_REVIEW_REQUIRED');
+ assert.equal(result.succeeded,1);
 });
 
 test('YouTube runner returns empty summary when provider finds no candidates',async(t)=>{
