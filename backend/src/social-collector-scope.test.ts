@@ -20,7 +20,10 @@ test('Social ingestion keeps generic actor in scope review before classification
   if(sql.includes('INSERT INTO social_mentions'))inserted=true;
   throw new Error('Unexpected query after scope gate: '+sql);
  }} as any;
- await assert.rejects(()=>ingestSocialCandidate(pool,{platform:'instagram',contentType:'comment',content:'Dishub tolong dong parkir ini ditertibkan'}),/Unexpected query after scope gate/);
+ const result:any=await ingestSocialCandidate(pool,{platform:'instagram',contentType:'comment',content:'Dishub tolong dong parkir ini ditertibkan'});
+ assert.equal(result.skipped,true);
+ assert.equal(result.reason,'ORGANIZATION_SCOPE_REVIEW_REQUIRED');
+ assert.equal(result.scopeDecision.status,'REVIEW');
  assert.equal(inserted,false);
 });
 test('Social ingestion skips OUT_OF_SCOPE even when discovery query contains organization area',async()=>{
