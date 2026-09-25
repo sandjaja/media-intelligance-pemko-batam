@@ -20,6 +20,7 @@ function dbFixture(){
   if(sql.includes('FROM keywords k')||sql.includes('FROM keyword_taxonomy'))return{rows:[]};
   if(sql.includes('SELECT id,metadata FROM social_mentions WHERE platform='))return{rows:[]};
   if(sql.includes('INSERT INTO social_mentions')){inserted.push(String(params?.[1]));return{rows:[{id:inserted.length,platform:'youtube',external_id:params?.[1],opd_id:null,sentiment:'neutral',risk_score:0,risk_level:'LOW',processing_status:'captured',curation_status:null}]};}
+  if(sql.includes('DELETE FROM social_mention_keywords')||sql.includes('DELETE FROM social_mention_issues'))return{rows:[]};
   if(sql.includes('INSERT INTO evidence_sources'))return{rows:[]};
   throw new Error('Unexpected DB query: '+sql);
  }} as any;
