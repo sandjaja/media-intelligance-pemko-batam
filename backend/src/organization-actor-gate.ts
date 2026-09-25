@@ -21,7 +21,7 @@ function roundupHeadline(title: string): boolean {
 }
 
 export function organizationScopeTerms(scope: OrganizationMediaScope) {
-  const strong = uniqueTerms([scope.cityName, scope.organizationName, scope.governmentName, scope.shortName, ...scope.governmentAliases, ...scope.districts]);
+  const strong = uniqueTerms([scope.cityName, scope.organizationName, scope.governmentName, scope.shortName, ...scope.governmentAliases, ...scope.districts, ...(scope.villages ?? []), ...(scope.areaAliases ?? [])]);
   const supporting = uniqueTerms([scope.tagline, scope.organizationCode?.replace(/_/g, ' ')]);
   return { strong, supporting };
 }
@@ -39,11 +39,11 @@ export function classifyArticleOrganizationScope(article: OnlineArticle, scope: 
   const strongHits = strong.filter(term => containsTerm(context, term));
   const supportingHits = supporting.filter(term => containsTerm(context, term));
   if (roundupHeadline(title)) return { status: 'REVIEW', reason: 'roundup/list headline requires editorial review', matchedTerms: [...strongHits, ...supportingHits] };
-  if (strongHits.length) return { status: 'RELEVANT', reason: 'title or lead contains organization/city/district scope term', matchedTerms: strongHits };
+  if (strongHits.length) return { status: 'RELEVANT', reason: 'title or lead contains organization/city/district/village/area scope term', matchedTerms: strongHits };
   if (supportingHits.length) return { status: 'REVIEW', reason: 'title or lead contains only supporting organization term', matchedTerms: supportingHits };
   const contextActorHits = scope.actors.flatMap(actor => actor.aliases.filter(term => containsTerm(context, normalize(term))));
   if (contextActorHits.length) return { status: 'REVIEW', reason: 'title or lead contains a known organization unit actor but no Batam-specific scope evidence', matchedTerms: uniqueTerms(contextActorHits) };
-  return { status: 'OUT_OF_SCOPE', reason: 'title and lead have no organization/city/district scope term or known organization unit actor', matchedTerms: [] };
+  return { status: 'OUT_OF_SCOPE', reason: 'title and lead have no organization/city/district/village/area scope term or known organization unit actor', matchedTerms: [] };
 }
 
 function matchUnitActor(title: string, actor: OrganizationUnitActor): ActorMatch | null {
