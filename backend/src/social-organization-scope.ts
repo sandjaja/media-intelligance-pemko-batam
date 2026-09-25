@@ -33,10 +33,8 @@ export function classifySocialOrganizationScope(input:SocialOrganizationScopeInp
  if(currentOrg.length)return{status:'RELEVANT',reason:'social content explicitly identifies the active organization',matchedTerms:currentOrg};
  if(currentActors.length&&contextEvidence.length)return{status:'RELEVANT',reason:'social content names an internal actor and the conversation context confirms organization/area scope',matchedTerms:[...new Set([...currentActors,...contextEvidence])]};
  if(currentArea.length||contextArea.length)return{status:'REVIEW',reason:'social conversation has database-backed local geographic evidence but no explicit active-organization/internal-actor evidence',matchedTerms:[...new Set([...currentArea,...contextArea])]};
- // External social discovery is intentionally stricter than editorial review after ingestion:
- // generic government aliases (for example "pemkot") and generic OPD names are not enough
- // to persist a public mention when no database-backed Batam organization/area evidence exists.
- // This prevents another city's Pemkot/Dishub/etc. from entering the active social dataset.
- if(currentActors.length||currentSupportingOrg.length)return{status:'OUT_OF_SCOPE',reason:'social content contains only generic government/internal-actor terms without database-backed local organization or area evidence',matchedTerms:[...new Set([...currentActors,...currentSupportingOrg])]};
+ // Generic government/OPD terms are ambiguous location evidence, not proof that the
+ // conversation belongs to another city. Keep them in REVIEW until Batam scope is confirmed.
+ if(currentActors.length||currentSupportingOrg.length)return{status:'REVIEW',reason:'social content contains a known government/internal-actor term but lacks database-backed Batam organization or area evidence',matchedTerms:[...new Set([...currentActors,...currentSupportingOrg])]};
  return{status:'OUT_OF_SCOPE',reason:'social conversation has no database-backed organization, area, or internal-actor evidence',matchedTerms:[]};
 }
