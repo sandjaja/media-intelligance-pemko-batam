@@ -1,7 +1,7 @@
 import type { Pool } from 'pg';
 import { getV16HeadlineTaxonomies, getV16PrimaryEvidenceForInput, type V16HeadlineTaxonomy, type V16PrimaryEvidence } from './context-dominance-v16.js';
 
-export const SOCIAL_CLASSIFICATION_VERSION='social-opd-v16.5-20260918';
+export const SOCIAL_CLASSIFICATION_VERSION='social-opd-v17-20260926-master-keyword-gate';
 
 export type SocialV16Input={
  title?:string|null;
@@ -15,7 +15,7 @@ export type SocialV16RoutingResult={
  engine:typeof SOCIAL_CLASSIFICATION_VERSION;
  generatedAt:string;
  routingStatus:'ROUTED'|'AMBIGUOUS'|'UNROUTED';
- newsClassification:'UTAMA'|'PENDUKUNG';
+ newsClassification:'UTAMA'|'AMBIGU'|'PENDUKUNG';
  newsClassificationSource:'AUTO'|'MANUAL';
  primaryOpdId:string|null;
  primaryOpdName:string|null;
@@ -46,22 +46,24 @@ export async function analyzeSocialRoutingV16(pool:Pool,input:SocialV16Input):Pr
  const manualKeywordIds=input.manualKeywordId==null?[]:[input.manualKeywordId];
  const keywordSource:SocialV16RoutingResult['keywordSource']=manualKeywordIds.length?'MANUAL':'AUTO';
  const headlineTaxonomies=await getV16HeadlineTaxonomies(pool,title);
- const evidence=await getV16PrimaryEvidenceForInput(pool,{title,summary:lead,content:'',manualKeywordIds});
+ const evidence=await getV16PrimaryEvidenceForInput(pool,{title,summary:lead,content,manualKeywordIds});
 
  if(!evidence){
+  // Machine 2 parity with Media Online: taxonomy/OPD context without a Master Keyword
+  // is AMBIGUOUS and must be resolved by Humas; no evidence at all is PENDUKUNG.
   const routingStatus:SocialV16RoutingResult['routingStatus']=headlineTaxonomies.length?'AMBIGUOUS':'UNROUTED';
   return{
    engine:SOCIAL_CLASSIFICATION_VERSION,generatedAt:new Date().toISOString(),routingStatus,
-   newsClassification:headlineTaxonomies.length?'UTAMA':'PENDUKUNG',newsClassificationSource:keywordSource,
+   newsClassification:headlineTaxonomies.length?'AMBIGU':'PENDUKUNG',newsClassificationSource:keywordSource,
    primaryOpdId:null,primaryOpdName:null,primaryOpdCode:null,supportingOpdIds:[],supportingOpds:[],
    keywordId:null,keyword:null,keywordSource,
    taxonomyId:headlineTaxonomies[0]?.id||null,taxonomyName:headlineTaxonomies[0]?.name||null,
    matchType:null,score:0,headlineTaxonomies,needsVerification:true,
    note:manualKeywordIds.length
-    ?'Master Keyword pilihan tidak memiliki mapping aktif yang cukup untuk routing V16.5.'
+    ?'Master Keyword pilihan tidak memiliki mapping aktif yang cukup untuk routing V17.'
     :headlineTaxonomies.length
-     ?'Taxonomy terdeteksi, tetapi belum ada Master Classification evidence yang cukup untuk Primary OPD.'
-     :'Tidak ada Master Classification evidence yang cukup untuk menentukan Primary OPD.'
+     ?'Taxonomy/OPD context terdeteksi tetapi Master Keyword belum ditemukan; perlu koreksi Humas.'
+     :'Tidak ada Master Keyword maupun evidence OPD yang cukup; diklasifikasikan sebagai PENDUKUNG.'
   };
  }
 
@@ -79,6 +81,6 @@ export async function analyzeSocialRoutingV16(pool:Pool,input:SocialV16Input):Pr
   keywordId:evidence.keywordId,keyword:evidence.keyword,keywordSource,
   taxonomyId:evidence.taxonomyId,taxonomyName:evidence.taxonomyName,
   matchType:evidence.matchType,score:evidence.score,headlineTaxonomies,needsVerification:false,
-  note:'Routing Media Sosial menggunakan Master Classification dan Context Dominance V16.5. Identitas akun/author bukan Primary OPD evidence.'
+  note:'Routing Media Sosial menggunakan Master Classification V17. Master Keyword adalah evidence UTAMA; identitas akun/author bukan Primary OPD evidence.'
  };
 }
