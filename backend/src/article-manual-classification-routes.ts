@@ -110,10 +110,10 @@ export async function registerArticleManualClassificationRoutes(app:FastifyInsta
    await client.query(`UPDATE articles SET news_classification='PENDUKUNG',news_classification_source='MANUAL',news_classification_changed_by=$2,news_classification_changed_at=NOW() WHERE id=$1`,[articleId,actor.id]);
    await clearSupportingIntelligenceLinks(client as unknown as Pool,String(articleId));
    for(const issueId of affectedIssueIds)await recalculateIssueRisk(client,issueId);
-   const supportingAnalysis=await analyzeArticle(client as unknown as Pool,String(articleId));
-   await audit(client,actor.id,'ARTICLE_CLASSIFICATION_SET_SUPPORTING',{organizationId,articleId:String(articleId),title:article.title,before,after:{classification:'PENDUKUNG',source:'MANUAL'},reason:p.data.reason,riskStatus:'FINAL',riskScore:supportingAnalysis?.risk?.score??null,riskLevel:supportingAnalysis?.risk?.level??null,riskFinalizedAt:new Date().toISOString()});
+   await client.query(`UPDATE articles SET sentiment=NULL,sentiment_score=NULL,risk_score=NULL,risk_level=NULL,importance_score=NULL,impact_score=NULL,velocity_score=NULL,updated_at=NOW() WHERE id=$1`,[articleId]);
+   await audit(client,actor.id,'ARTICLE_CLASSIFICATION_SET_SUPPORTING',{organizationId,articleId:String(articleId),title:article.title,before,after:{classification:'PENDUKUNG',source:'MANUAL'},reason:p.data.reason,riskStatus:'NOT_ANALYZED',riskScore:null,riskLevel:null});
    await client.query('COMMIT');
-   return{ok:true,data:{articleId:String(articleId),action:'SET_SUPPORTING',verificationStatus:'SUPPORTING_CONFIRMED',riskStatus:'FINAL',risk:supportingAnalysis?.risk??null,classification:'PENDUKUNG',source:'MANUAL'}};
+   return{ok:true,data:{articleId:String(articleId),action:'SET_SUPPORTING',verificationStatus:'SUPPORTING_CONFIRMED',riskStatus:'NOT_ANALYZED',risk:null,classification:'PENDUKUNG',source:'MANUAL'}};
   }catch(e){await client.query('ROLLBACK');request.log.error({err:e,articleId},'classification verification failed');return reply.code(409).send({error:'CLASSIFICATION_VERIFICATION_FAILED',message:e instanceof Error?e.message:String(e)});}finally{client.release();}
  });
 }
