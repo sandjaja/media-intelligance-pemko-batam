@@ -30,9 +30,9 @@ test('internal actor in comment inherits area context from parent content',()=>{
  assert.equal(d.status,'RELEVANT');
 });
 
-test('generic internal actor without organization or area context is out of scope',()=>{
+test('generic internal actor without organization or area context requires review',()=>{
  const d=classifySocialOrganizationScope({content:'Dishub tolong dong parkir ini ditertibkan'},scope);
- assert.equal(d.status,'OUT_OF_SCOPE');
+ assert.equal(d.status,'REVIEW');
 });
 
 test('area-only conversation requires review instead of automatic relevance',()=>{
