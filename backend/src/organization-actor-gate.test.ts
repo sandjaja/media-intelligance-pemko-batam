@@ -13,7 +13,7 @@ const scope:OrganizationMediaScope={
 const article=(title:string,excerpt?:string):OnlineArticle=>({sourceId:'test',title,url:'https://example.test/a',publishedAt:new Date(),excerpt});
 
 test('generic Dishub headline alone does not prove Batam scope',()=>{
- const d=classifyArticleOrganizationScope(article('Dishub mengecek feeder bus'));
+ const d=classifyArticleOrganizationScope(article('Dishub mengecek feeder bus'),scope);
  assert.equal(d.status,'OUT_OF_SCOPE');
  const role=classifyOnlineArticleRole(article('Dishub mengecek feeder bus'),scope);
  assert.equal(role.role,'OUT_OF_SCOPE');
