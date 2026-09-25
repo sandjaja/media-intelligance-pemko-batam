@@ -37,8 +37,13 @@ export async function recalculateIssueRisk(db:Db,issueId:number){
    COALESCE(pa.importance_score,0)::float importance,
    NULLIF(pa.ai_metadata->'intelligence'->>'impactScore','')::float impact,
    NULLIF(pa.ai_metadata->'intelligence'->>'velocityScore','')::float velocity,
-   (lower(pa.status)='analyzed' AND pa.sentiment IS NOT NULL AND COALESCE(pa.risk_score,0)>0
-    AND COALESCE(pa.ai_metadata->'intelligence'->>'riskStatus',pa.ai_metadata->'phase2e'->>'riskStatus','FINAL')='FINAL') valid
+   (lower(pa.status)='analyzed'
+    AND pa.opd_id IS NOT NULL
+    AND pa.ai_metadata->'v16Routing'->>'routingStatus'='ROUTED'
+    AND COALESCE(pa.ai_metadata->'v16Routing'->>'keywordId','')<>''
+    AND pa.ai_metadata->'v16Routing'->>'keywordVerification'='ACCEPTED'
+    AND pa.ai_metadata->'intelligence'->>'riskStatus'='FINAL'
+    AND pa.sentiment IS NOT NULL AND COALESCE(pa.risk_score,0)>0) valid
   FROM issue_print_articles x JOIN print_articles pa ON pa.id=x.print_article_id
   WHERE x.issue_id=$1 AND x.linkage_status='linked'`,[issueId])).rows;
  const social=(await db.query(`
