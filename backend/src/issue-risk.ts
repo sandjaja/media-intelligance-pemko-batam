@@ -25,7 +25,12 @@ export async function recalculateIssueRisk(db:Db,issueId:number){
   SELECT 'online' source,a.sentiment,COALESCE(a.risk_score,0)::float risk,
    COALESCE(a.importance_score,0)::float importance,
    a.impact_score::float impact,a.velocity_score::float velocity,
-   (a.sentiment IS NOT NULL AND COALESCE(a.risk_score,0)>0) valid
+   (a.news_classification='UTAMA'
+    AND (SELECT al.action FROM audit_logs al
+         WHERE al.action IN ('ARTICLE_CLASSIFICATION_VERIFIED','ARTICLE_CLASSIFICATION_REOPENED')
+           AND al.metadata->>'articleId'=a.id::text
+         ORDER BY al.created_at DESC,al.id DESC LIMIT 1)='ARTICLE_CLASSIFICATION_VERIFIED'
+    AND a.sentiment IS NOT NULL AND COALESCE(a.risk_score,0)>0) valid
   FROM issue_articles x JOIN articles a ON a.id=x.article_id WHERE x.issue_id=$1`,[issueId])).rows;
  const print=(await db.query(`
   SELECT 'print' source,pa.sentiment,COALESCE(pa.risk_score,0)::float risk,
