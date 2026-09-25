@@ -41,7 +41,9 @@ export function classifyArticleOrganizationScope(article: OnlineArticle, scope: 
   if (roundupHeadline(title)) return { status: 'REVIEW', reason: 'roundup/list headline requires editorial review', matchedTerms: [...strongHits, ...supportingHits] };
   if (strongHits.length) return { status: 'RELEVANT', reason: 'title or lead contains organization/city/district scope term', matchedTerms: strongHits };
   if (supportingHits.length) return { status: 'REVIEW', reason: 'title or lead contains only supporting organization term', matchedTerms: supportingHits };
-  return { status: 'OUT_OF_SCOPE', reason: 'title and lead have no organization/city/district scope term', matchedTerms: [] };
+  const contextActorHits = scope.actors.flatMap(actor => actor.aliases.filter(term => containsTerm(context, normalize(term))));
+  if (contextActorHits.length) return { status: 'REVIEW', reason: 'title or lead contains a known organization unit actor but no Batam-specific scope evidence', matchedTerms: uniqueTerms(contextActorHits) };
+  return { status: 'OUT_OF_SCOPE', reason: 'title and lead have no organization/city/district scope term or known organization unit actor', matchedTerms: [] };
 }
 
 function matchUnitActor(title: string, actor: OrganizationUnitActor): ActorMatch | null {
