@@ -169,8 +169,15 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     if(!manualLocked&&!socialLocked)return reply.code(409).send({error:'SOCIAL_CLASSIFICATION_NOT_LOCKED'});
     const metadata={...(mention.metadata||{}),socialVerification:{status:'REOPENED',reopenedBy:actor.id,reopenedAt:new Date().toISOString(),reason:p.data.reason}};
     if(metadata.manualClassification)metadata.manualClassification={...metadata.manualClassification,locked:false,reopenedBy:actor.id,reopenedAt:new Date().toISOString()};
-    await pool.query(`UPDATE social_mentions SET metadata=$2::jsonb,updated_at=NOW() WHERE id=$1`,[mentionId,JSON.stringify(metadata)]);
-    await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'SOCIAL_CLASSIFICATION_REOPENED',$2::jsonb)`,[actor.id,JSON.stringify({mentionId:String(mentionId),reason:p.data.reason})]);
+    const client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      const {intelligence:_staleIntelligence,...metadataWithoutIntelligence}=metadata;
+      await client.query(`UPDATE social_mentions SET metadata=$2::jsonb,sentiment=NULL,sentiment_score=NULL,importance_score=NULL,influence_score=NULL,risk_score=NULL,risk_level=NULL,updated_at=NOW() WHERE id=$1`,[mentionId,JSON.stringify(metadataWithoutIntelligence)]);
+      await client.query(`DELETE FROM social_mention_issues WHERE mention_id=$1`,[mentionId]);
+      await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'SOCIAL_CLASSIFICATION_REOPENED',$2::jsonb)`,[actor.id,JSON.stringify({mentionId:String(mentionId),reason:p.data.reason})]);
+      await client.query('COMMIT');
+    }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
     return{ok:true,data:{mentionId:String(mentionId),verificationStatus:'REOPENED'}};
   });
 
