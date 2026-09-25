@@ -13,9 +13,15 @@ type Db=Pick<Pool,'query'>|Pick<PoolClient,'query'>;
 export async function checkIssueEvidenceEligibility(db:Db,source:IssueEvidenceSource,id:number):Promise<IssueEvidenceEligibility>{
  if(!Number.isInteger(id)||id<=0)return{eligible:false,source,reason:'INVALID_EVIDENCE_ID'};
  if(source==='PRINT'){
-  const row=(await db.query(`SELECT status FROM print_articles WHERE id=$1`,[id])).rows[0];
+  const row=(await db.query(`SELECT status,opd_id,sentiment,risk_score,ai_metadata FROM print_articles WHERE id=$1`,[id])).rows[0];
   if(!row)return{eligible:false,source,reason:'EVIDENCE_NOT_FOUND'};
-  return{eligible:String(row.status||'').toLowerCase()==='analyzed',source,reason:String(row.status||'').toLowerCase()==='analyzed'?'PRINT_ANALYZED':'PRINT_NOT_ANALYZED'};
+  const routing=row.ai_metadata?.v16Routing,intelligence=row.ai_metadata?.intelligence;
+  const analyzed=String(row.status||'').toLowerCase()==='analyzed';
+  const primary=String(routing?.routingStatus||'')==='ROUTED'&&Boolean(routing?.keywordId)&&Boolean(row.opd_id);
+  const verified=String(routing?.keywordVerification||'')==='ACCEPTED';
+  const final=String(intelligence?.riskStatus||'')==='FINAL'&&row.sentiment!=null&&Number(row.risk_score||0)>0;
+  const eligible=analyzed&&primary&&verified&&final;
+  return{eligible,source,reason:eligible?'PRINT_PRIMARY_VERIFIED_FINAL':!analyzed?'PRINT_NOT_ANALYZED':!primary?'PRINT_REQUIRES_PRIMARY':!verified?'PRINT_REQUIRES_KEYWORD_VERIFICATION':'PRINT_REQUIRES_FINAL_ANALYSIS',classification:primary?'UTAMA':null,verificationStatus:verified?'LOCKED':'UNLOCKED'};
  }
  if(source==='OWNED'){
   const row=(await db.query(`SELECT source_kind,curation_status,metadata FROM social_mentions WHERE id=$1`,[id])).rows[0];
