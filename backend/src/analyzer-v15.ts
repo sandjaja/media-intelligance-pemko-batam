@@ -7,7 +7,7 @@ import { loadOrganizationMediaScope } from './organization-media-scope.js';
 import { classifyOnlineArticleRole } from './organization-actor-gate.js';
 import { recalculateIssueRisk } from './issue-risk.js';
 
-export const CLASSIFICATION_VERSION='article-opd-v16.5-20260924-scope-hard-gate';
+export const CLASSIFICATION_VERSION='article-opd-v17-20260926-human-analysis-gate';
 export type AnalysisOptions={onlineGateRole?:'UTAMA'|'PENDUKUNG'|null;onlineGateReason?:string|null;onlineGateSignals?:string[]};
 
 async function detachIneligibleIssueLinks(pool:Pool,articleId:string,reason:string){
@@ -76,35 +76,24 @@ export async function analyzeArticle(pool:Pool,articleId:string,options:Analysis
  if(news.classification==='PENDUKUNG'){
   await clearSupportingIntelligenceLinks(pool,articleId);
   await detachIneligibleIssueLinks(pool,articleId,'ONLINE_CLASSIFICATION_PENDUKUNG');
-  const peerResult=await pool.query(`SELECT COUNT(*)::int count FROM articles WHERE id<>$1 AND (title ILIKE $2 OR summary ILIKE $2)`,[articleId,`%${String(article.title).slice(0,80)}%`]);
-  const peerCount=Number(peerResult.rows[0]?.count??1)+1;
-  const analysis=analyzeCoreArticle({id:article.id,title:article.title,summary:article.summary,content:article.content,sourceName:article.source_name,sourceTier:Number(article.tier??2),mediaKind:article.media_kind==='print'?'print':article.media_kind==='social'?'social':'online',opdId:null,publishedAt:article.published_at},parseKeywordQuery(''),peerCount);
-  await pool.query(`UPDATE articles SET opd_id=NULL,sentiment=$2,importance_score=$3,impact_score=$4,velocity_score=$5,risk_score=$6,risk_level=$7,is_highlight=$8,summary=COALESCE(NULLIF(summary,''),$9),classified_at=NOW(),classification_version=$10 WHERE id=$1`,[articleId,analysis.sentiment,analysis.importanceScore,analysis.impactScore,analysis.velocityScore,analysis.riskScore,analysis.riskLevel,analysis.importanceScore>=65||analysis.riskLevel==='high'||analysis.riskLevel==='critical',String(article.content??article.title).slice(0,300),CLASSIFICATION_VERSION]);
-  await pool.query(`DELETE FROM article_entities WHERE article_id=$1 AND entity_type='entity'`,[articleId]);
-  for(const entity of analysis.entities.slice(0,20))await pool.query(`INSERT INTO article_entities(article_id,entity_type,entity_name) VALUES($1,'entity',$2) ON CONFLICT DO NOTHING`,[articleId,entity]);
-  return{articleId,newsClassification:news.classification,newsClassificationSource:news.source,newsClassificationReason:news.reason,newsClassificationSignals:news.signals,classificationVersion:CLASSIFICATION_VERSION,opdId:null,supportingOpdIds:[],districtId:null,uptdId:null,uptdName:null,uptdMatches:0,taxonomyId:null,taxonomyName:null,taxonomyScore:0,issueId:null,issueMatchScore:0,issueAssignmentSource:null,sentiment:analysis.sentiment,importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,highlight:false,keywordMatches:0,matchedKeywords:[],entities:analysis.entities,risk:{score:analysis.riskScore,level:analysis.riskLevel,reasons:[],alertType:null}};
+  await pool.query(`UPDATE articles SET opd_id=NULL,sentiment=NULL,importance_score=0,impact_score=NULL,velocity_score=NULL,risk_score=0,risk_level=NULL,is_highlight=false,classified_at=NOW(),classification_version=$2 WHERE id=$1`,[articleId,CLASSIFICATION_VERSION]);
+  return{articleId,newsClassification:'PENDUKUNG',newsClassificationSource:news.source,newsClassificationReason:news.reason,newsClassificationSignals:news.signals,routingStatus:'UNROUTED',needsVerification:true,classificationVersion:CLASSIFICATION_VERSION,opdId:null,supportingOpdIds:[],districtId:null,uptdId:null,uptdName:null,uptdMatches:0,taxonomyId:null,taxonomyName:null,taxonomyScore:0,issueId:null,issueMatchScore:0,issueAssignmentSource:null,sentiment:null,importance:0,impact:null,velocity:null,highlight:false,keywordMatches:0,matchedKeywords:[],entities:[],risk:null};
  }
  const opdId=routing?.opdId??null;
  if(!opdId){
   if(news.source==='MANUAL')throw new Error('MANUAL_UTAMA_REQUIRES_PRIMARY_OPD_ROUTING');
-  const gateUtama=gateRole==='UTAMA';
-  if(routing?.routingStatus==='AMBIGUOUS'||gateUtama){
-   await pool.query(`DELETE FROM issue_articles WHERE article_id=$1 AND assignment_source='AUTO'`,[articleId]);
-   const peerResult=await pool.query(`SELECT COUNT(*)::int count FROM articles WHERE id<>$1 AND (title ILIKE $2 OR summary ILIKE $2)`,[articleId,`%${String(article.title).slice(0,80)}%`]);
-   const peerCount=Number(peerResult.rows[0]?.count??1)+1;
-   const analysis=analyzeCoreArticle({id:article.id,title:article.title,summary:article.summary,content:article.content,sourceName:article.source_name,sourceTier:Number(article.tier??2),mediaKind:'online',opdId:null,publishedAt:article.published_at},parseKeywordQuery(''),peerCount);
-   await pool.query(`UPDATE articles SET opd_id=NULL,news_classification='UTAMA',news_classification_source='AUTO',sentiment=$2,importance_score=$3,impact_score=$4,velocity_score=$5,risk_score=$6,risk_level=$7,is_highlight=$8,classified_at=NOW(),classification_version=$9 WHERE id=$1`,[articleId,analysis.sentiment,analysis.importanceScore,analysis.impactScore,analysis.velocityScore,analysis.riskScore,analysis.riskLevel,analysis.importanceScore>=65||analysis.riskLevel==='high'||analysis.riskLevel==='critical',CLASSIFICATION_VERSION]);
-   const reason=gateUtama?(gateReason||'online actor gate classified article as UTAMA; Primary OPD requires verification'):'relevant headline taxonomy detected but Primary OPD routing is ambiguous';
-   const signals=gateUtama?gateSignals:(routing?.headlineTaxonomyNames??[]).map((t:string)=>`AMBIGUOUS_HEADLINE_TAXONOMY:${t}`);
-   return{articleId,newsClassification:'UTAMA',newsClassificationSource:'AUTO',newsClassificationReason:reason,newsClassificationSignals:signals,classificationSource:gateUtama?'AUTO_ACTOR_GATE_AMBIGUOUS':'AUTO_AMBIGUOUS',routingStatus:'AMBIGUOUS',needsVerification:true,classificationVersion:CLASSIFICATION_VERSION,opdId:null,supportingOpdIds:[],districtId:null,uptdId:null,uptdName:null,uptdMatches:0,taxonomyId:routing?.taxonomyId??null,taxonomyName:routing?.taxonomyName??null,taxonomyScore:0,issueId:null,issueMatchScore:0,issueAssignmentSource:null,sentiment:analysis.sentiment,importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,risk:{score:analysis.riskScore,level:analysis.riskLevel,reasons:[],alertType:null}};
-  }
-  await clearSupportingIntelligenceLinks(pool,articleId);
-  await detachIneligibleIssueLinks(pool,articleId,'ONLINE_NO_PRIMARY_OPD_ROUTING');
-  const peerResult=await pool.query(`SELECT COUNT(*)::int count FROM articles WHERE id<>$1 AND (title ILIKE $2 OR summary ILIKE $2)`,[articleId,`%${String(article.title).slice(0,80)}%`]);
-  const peerCount=Number(peerResult.rows[0]?.count??1)+1;
-  const analysis=analyzeCoreArticle({id:article.id,title:article.title,summary:article.summary,content:article.content,sourceName:article.source_name,sourceTier:Number(article.tier??2),mediaKind:'online',opdId:null,publishedAt:article.published_at},parseKeywordQuery(''),peerCount);
-  await pool.query(`UPDATE articles SET news_classification='PENDUKUNG',news_classification_source='AUTO',sentiment=$2,importance_score=$3,impact_score=$4,velocity_score=$5,risk_score=$6,risk_level=$7,is_highlight=$8,classified_at=NOW(),classification_version=$9 WHERE id=$1`,[articleId,analysis.sentiment,analysis.importanceScore,analysis.impactScore,analysis.velocityScore,analysis.riskScore,analysis.riskLevel,analysis.importanceScore>=65||analysis.riskLevel==='high'||analysis.riskLevel==='critical',CLASSIFICATION_VERSION]);
-  return{articleId,newsClassification:'PENDUKUNG',newsClassificationSource:'AUTO',newsClassificationReason:'no v16 Master PRIMARY OPD routing',newsClassificationSignals:[],classificationVersion:CLASSIFICATION_VERSION,opdId:null,supportingOpdIds:[],districtId:null,uptdId:null,uptdName:null,uptdMatches:0,taxonomyId:null,taxonomyName:null,taxonomyScore:0,issueId:null,issueMatchScore:0,issueAssignmentSource:null,sentiment:analysis.sentiment,importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,risk:{score:analysis.riskScore,level:analysis.riskLevel,reasons:[],alertType:null}};
+  await detachIneligibleIssueLinks(pool,articleId,'ONLINE_CLASSIFICATION_AMBIGUOUS');
+  await pool.query(`UPDATE articles SET opd_id=NULL,news_classification='UTAMA',news_classification_source='AUTO',sentiment=NULL,importance_score=0,impact_score=NULL,velocity_score=NULL,risk_score=0,risk_level=NULL,is_highlight=false,classified_at=NOW(),classification_version=$2 WHERE id=$1`,[articleId,CLASSIFICATION_VERSION]);
+  const reason=gateRole==='UTAMA'?(gateReason||'organization/OPD evidence found but Master Keyword requires Humas review'):'Master Classification requires Humas keyword review';
+  const signals=gateRole==='UTAMA'?gateSignals:(routing?.headlineTaxonomyNames??[]).map((t:string)=>`AMBIGUOUS_HEADLINE_TAXONOMY:${t}`);
+  return{articleId,newsClassification:'UTAMA',newsClassificationSource:'AUTO',newsClassificationReason:reason,newsClassificationSignals:signals,classificationSource:'AUTO_AMBIGUOUS',routingStatus:'AMBIGUOUS',needsVerification:true,classificationVersion:CLASSIFICATION_VERSION,opdId:null,supportingOpdIds:[],districtId:null,uptdId:null,uptdName:null,uptdMatches:0,taxonomyId:routing?.taxonomyId??null,taxonomyName:routing?.taxonomyName??null,taxonomyScore:0,issueId:null,issueMatchScore:0,issueAssignmentSource:null,sentiment:null,importance:0,impact:null,velocity:null,risk:null};
+ }
+ // AUTO UTAMA is a classification proposal only. Intelligence starts after Humas verifies/locks it.
+ const verified=(await pool.query(`SELECT al.action FROM audit_logs al WHERE al.action IN ('ARTICLE_CLASSIFICATION_VERIFIED','ARTICLE_CLASSIFICATION_REOPENED') AND al.metadata->>'articleId'=$1 ORDER BY al.created_at DESC,al.id DESC LIMIT 1`,[articleId])).rows[0]?.action==='ARTICLE_CLASSIFICATION_VERIFIED';
+ if(!verified){
+  await detachIneligibleIssueLinks(pool,articleId,'ONLINE_PRIMARY_AWAITING_VERIFICATION');
+  await pool.query(`UPDATE articles SET sentiment=NULL,importance_score=0,impact_score=NULL,velocity_score=NULL,risk_score=0,risk_level=NULL,is_highlight=false,classified_at=NOW(),classification_version=$2 WHERE id=$1`,[articleId,CLASSIFICATION_VERSION]);
+  return{articleId,newsClassification:'UTAMA',newsClassificationSource:news.source,newsClassificationReason:news.reason,newsClassificationSignals:news.signals,routingStatus:'ROUTED',needsVerification:true,classificationVersion:CLASSIFICATION_VERSION,opdId,supportingOpdIds:routing?.supportingOpdIds??[],taxonomyId:routing?.taxonomyId??null,taxonomyName:routing?.taxonomyName??null,keywordMatches:routing?.keywordMatches??0,matchedKeywords:routing?.matchedKeywords??[],sentiment:null,importance:0,impact:null,velocity:null,risk:null};
  }
  const matchedNames=routing?.matchedKeywords??[],query=parseKeywordQuery(matchedNames.join(' | '));
  const peerResult=await pool.query(`SELECT COUNT(*)::int count FROM articles WHERE id<>$1 AND (title ILIKE $2 OR summary ILIKE $2)`,[articleId,`%${String(article.title).slice(0,80)}%`]);
