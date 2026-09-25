@@ -14,9 +14,10 @@ const article=(title:string,excerpt?:string):OnlineArticle=>({sourceId:'test',ti
 
 test('generic Dishub headline alone does not prove Batam scope',()=>{
  const d=classifyArticleOrganizationScope(article('Dishub mengecek feeder bus'),scope);
- assert.equal(d.status,'OUT_OF_SCOPE');
+ assert.equal(d.status,'REVIEW');
  const role=classifyOnlineArticleRole(article('Dishub mengecek feeder bus'),scope);
- assert.equal(role.role,'OUT_OF_SCOPE');
+ assert.equal(role.scope.status,'REVIEW');
+ assert.equal(role.role,'PENDUKUNG');
 });
 
 test('Batam evidence in headline confirms organization scope',()=>{
