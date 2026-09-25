@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
 import { getV16HeadlineTaxonomies, getV16PrimaryEvidenceForInput, type V16HeadlineTaxonomy, type V16PrimaryEvidence } from './context-dominance-v16.js';
+import { loadOrganizationMediaScope } from './organization-media-scope.js';
 
 export const SOCIAL_CLASSIFICATION_VERSION='social-opd-v17-20260926-master-keyword-gate';
 
@@ -34,6 +35,20 @@ export type SocialV16RoutingResult={
  note:string;
 };
 
+
+function norm(value:unknown){return String(value??'').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu,' ').replace(/\s+/g,' ').trim();}
+function hasTerm(text:string,term:string){return !!text&&!!term&&(` ${text} `).includes(` ${term} `);}
+async function detectSocialOpdContext(pool:Pool,text:string){
+ const scope=await loadOrganizationMediaScope(pool);
+ if(!scope)return null;
+ const normalized=norm(text);
+ const matches=scope.actors.filter(actor=>actor.aliases.some(alias=>hasTerm(normalized,norm(alias))));
+ const opdIds=[...new Set(matches.map(actor=>actor.kind==='OPD'?actor.id:actor.opdId).filter((id):id is number=>Number.isInteger(id)&&Number(id)>0))];
+ if(opdIds.length!==1)return null;
+ const actor=scope.actors.find(a=>(a.kind==='OPD'?a.id:a.opdId)===opdIds[0]);
+ return actor?{id:String(opdIds[0]),name:actor.kind==='OPD'?actor.name:(scope.actors.find(a=>a.kind==='OPD'&&a.id===opdIds[0])?.name||actor.name),code:actor.kind==='OPD'?(actor.code??null):(scope.actors.find(a=>a.kind==='OPD'&&a.id===opdIds[0])?.code??null)}:null;
+}
+
 /**
  * Decision-only adapter for external/public social-media conversation.
  * It deliberately performs no sentiment/risk calculation and no persistence:
@@ -49,20 +64,21 @@ export async function analyzeSocialRoutingV16(pool:Pool,input:SocialV16Input):Pr
  const evidence=await getV16PrimaryEvidenceForInput(pool,{title,summary:lead,content,manualKeywordIds});
 
  if(!evidence){
-  // Machine 2 parity with Media Online: taxonomy/OPD context without a Master Keyword
-  // is AMBIGUOUS and must be resolved by Humas; no evidence at all is PENDUKUNG.
-  const routingStatus:SocialV16RoutingResult['routingStatus']=headlineTaxonomies.length?'AMBIGUOUS':'UNROUTED';
+  // No Master Keyword: OPD evidence decides AMBIGU vs PENDUKUNG. Taxonomy alone
+  // is descriptive context and must never substitute for an OPD actor.
+  const opdContext=await detectSocialOpdContext(pool,[title,content].filter(Boolean).join(' '));
+  const routingStatus:SocialV16RoutingResult['routingStatus']=opdContext?'AMBIGUOUS':'UNROUTED';
   return{
    engine:SOCIAL_CLASSIFICATION_VERSION,generatedAt:new Date().toISOString(),routingStatus,
-   newsClassification:headlineTaxonomies.length?'AMBIGU':'PENDUKUNG',newsClassificationSource:keywordSource,
-   primaryOpdId:null,primaryOpdName:null,primaryOpdCode:null,supportingOpdIds:[],supportingOpds:[],
+   newsClassification:opdContext?'AMBIGU':'PENDUKUNG',newsClassificationSource:keywordSource,
+   primaryOpdId:opdContext?.id||null,primaryOpdName:opdContext?.name||null,primaryOpdCode:opdContext?.code||null,supportingOpdIds:[],supportingOpds:[],
    keywordId:null,keyword:null,keywordSource,
    taxonomyId:headlineTaxonomies[0]?.id||null,taxonomyName:headlineTaxonomies[0]?.name||null,
    matchType:null,score:0,headlineTaxonomies,needsVerification:true,
    note:manualKeywordIds.length
     ?'Master Keyword pilihan tidak memiliki mapping aktif yang cukup untuk routing V17.'
-    :headlineTaxonomies.length
-     ?'Taxonomy/OPD context terdeteksi tetapi Master Keyword belum ditemukan; perlu koreksi Humas.'
+    :opdContext
+     ?'OPD terdeteksi tetapi Master Keyword belum ditemukan; perlu koreksi/pemilihan keyword oleh Humas.'
      :'Tidak ada Master Keyword maupun evidence OPD yang cukup; diklasifikasikan sebagai PENDUKUNG.'
   };
  }
