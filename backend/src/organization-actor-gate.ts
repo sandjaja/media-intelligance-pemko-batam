@@ -35,12 +35,13 @@ export function classifyArticleOrganizationScope(article: OnlineArticle, scope: 
   const { strong, supporting } = organizationScopeTerms(scope);
   if (!strong.length) return { status: 'OUT_OF_SCOPE', reason: 'organization scope has no strong terms', matchedTerms: [] };
   const title = normalize(article.title);
-  const strongHits = strong.filter(term => containsTerm(title, term));
-  const supportingHits = supporting.filter(term => containsTerm(title, term));
+  const context = normalize(`${article.title} ${article.excerpt ?? ''}`);
+  const strongHits = strong.filter(term => containsTerm(context, term));
+  const supportingHits = supporting.filter(term => containsTerm(context, term));
   if (roundupHeadline(title)) return { status: 'REVIEW', reason: 'roundup/list headline requires editorial review', matchedTerms: [...strongHits, ...supportingHits] };
-  if (strongHits.length) return { status: 'RELEVANT', reason: 'headline contains organization/city/district scope term', matchedTerms: strongHits };
-  if (supportingHits.length) return { status: 'REVIEW', reason: 'headline contains only supporting organization term', matchedTerms: supportingHits };
-  return { status: 'OUT_OF_SCOPE', reason: 'headline has no organization/city/district scope term', matchedTerms: [] };
+  if (strongHits.length) return { status: 'RELEVANT', reason: 'title or lead contains organization/city/district scope term', matchedTerms: strongHits };
+  if (supportingHits.length) return { status: 'REVIEW', reason: 'title or lead contains only supporting organization term', matchedTerms: supportingHits };
+  return { status: 'OUT_OF_SCOPE', reason: 'title and lead have no organization/city/district scope term', matchedTerms: [] };
 }
 
 function matchUnitActor(title: string, actor: OrganizationUnitActor): ActorMatch | null {
@@ -51,21 +52,22 @@ function matchUnitActor(title: string, actor: OrganizationUnitActor): ActorMatch
 export function classifyOnlineArticleRole(article: OnlineArticle, scope: OrganizationMediaScope): OnlineNewsRoleDecision {
   const scopeDecision = classifyArticleOrganizationScope(article, scope);
   const title = normalize(article.title);
+  const context = normalize(`${article.title} ${article.excerpt ?? ''}`);
   const actorMatches: ActorMatch[] = [];
 
   // An internal actor is sufficient even when the event itself occurs outside the organization's city.
   const organizationTerms = uniqueTerms([scope.organizationName, scope.governmentName, scope.shortName, ...scope.governmentAliases]);
-  if (organizationTerms.some(term => containsTerm(title, term))) {
+  if (organizationTerms.some(term => containsTerm(context, term))) {
     actorMatches.push({ kind: 'ORGANIZATION', id: scope.organizationId, name: scope.shortName || scope.governmentName || scope.organizationName, opdId: null });
   }
   for (const actor of scope.actors) {
-    const match = matchUnitActor(title, actor);
+    const match = matchUnitActor(context, actor);
     if (match) actorMatches.push(match);
   }
   // Bare district names are locations, not actors. Require the administrative form "Kecamatan <name>".
   for (const district of scope.districts) {
     const d = normalize(district);
-    if (d && containsTerm(title, `kecamatan ${d}`)) actorMatches.push({ kind: 'DISTRICT', id: null, name: `Kecamatan ${district}`, opdId: null });
+    if (d && containsTerm(context, `kecamatan ${d}`)) actorMatches.push({ kind: 'DISTRICT', id: null, name: `Kecamatan ${district}`, opdId: null });
   }
 
   // A generic OPD/UPTD name (for example a common agency acronym) is not enough by itself.\n  // The headline must first carry database-backed Batam organization/geographic scope.\n  if (actorMatches.length && scopeDecision.status === 'RELEVANT') return { role: 'UTAMA', reason: 'headline contains a database-backed internal government actor within confirmed organization scope', scope: scopeDecision, actorMatches };
