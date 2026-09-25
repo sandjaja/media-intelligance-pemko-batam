@@ -25,7 +25,21 @@ export async function ingestSocialCandidate(pool:Pool,candidate:SocialCandidate,
  if(!scope)throw new Error('ACTIVE_ORGANIZATION_UNRESOLVED');
  const scopeDecision=classifySocialOrganizationScope({title:candidate.title,content:candidate.content,context:candidate.context},scope);
  if(candidate.sourceKind!=='owned'&&scopeDecision.status==='OUT_OF_SCOPE')return{skipped:true,reason:'ORGANIZATION_SCOPE_OUT_OF_SCOPE',scopeDecision,platform:candidate.platform,externalId:candidate.externalId??null};
- if(candidate.sourceKind!=='owned'&&scopeDecision.status==='REVIEW')return{skipped:true,reason:'ORGANIZATION_SCOPE_REVIEW_REQUIRED',scopeDecision,platform:candidate.platform,externalId:candidate.externalId??null};
+ if(candidate.sourceKind!=='owned'&&scopeDecision.status==='REVIEW'){
+  const contentHash=socialContentHash(candidate),publishedAt=candidate.publishedAt?new Date(candidate.publishedAt):null;
+  const metadata={...(candidate.metadata&&typeof candidate.metadata==='object'&&!Array.isArray(candidate.metadata)?candidate.metadata as Record<string,unknown>:{}),socialContext:candidate.context??null,organizationScope:scopeDecision};
+  const values=[candidate.platform,candidate.externalId??null,candidate.contentType??'post',candidate.sourceKind??'external',candidate.ownedAccountId??null,null,candidate.authorName??null,candidate.authorHandle??null,candidate.authorProfileUrl??null,candidate.canonicalUrl??null,candidate.title??null,candidate.content??null,candidate.language??null,publishedAt,null,null,null,null,null,null,contentHash,candidate.collector??defaultCollector,JSON.stringify(candidate.rawPayload??{}),JSON.stringify(metadata),'captured',null];
+  const columns=`platform,external_id,content_type,source_kind,owned_account_id,opd_id,author_name,author_handle,author_profile_url,canonical_url,title,content,language,published_at,sentiment,sentiment_score,importance_score,influence_score,risk_score,risk_level,content_hash,collector,raw_payload,metadata,processing_status,curation_status`,placeholders=values.map((_,i)=>`${i+1}`).join(',');
+  const update=`content_type=EXCLUDED.content_type,source_kind=EXCLUDED.source_kind,owned_account_id=EXCLUDED.owned_account_id,author_name=EXCLUDED.author_name,author_handle=EXCLUDED.author_handle,author_profile_url=EXCLUDED.author_profile_url,canonical_url=EXCLUDED.canonical_url,title=EXCLUDED.title,content=EXCLUDED.content,language=EXCLUDED.language,published_at=EXCLUDED.published_at,collector=EXCLUDED.collector,raw_payload=EXCLUDED.raw_payload,metadata=EXCLUDED.metadata,processing_status='captured',opd_id=NULL,sentiment=NULL,sentiment_score=NULL,importance_score=NULL,influence_score=NULL,risk_score=NULL,risk_level=NULL,updated_at=now()`;
+  const contentConflict=candidate.ownedAccountId!=null?`ON CONFLICT(platform,owned_account_id,content_hash) WHERE content_hash IS NOT NULL AND owned_account_id IS NOT NULL`:`ON CONFLICT(platform,content_hash) WHERE content_hash IS NOT NULL AND owned_account_id IS NULL`;
+  const sql=candidate.externalId?`INSERT INTO social_mentions(${columns}) VALUES(${placeholders}) ON CONFLICT(platform,external_id) WHERE external_id IS NOT NULL DO UPDATE SET ${update} RETURNING id,platform,external_id,processing_status`:`INSERT INTO social_mentions(${columns}) VALUES(${placeholders}) ${contentConflict} DO UPDATE SET ${update} RETURNING id,platform,external_id,processing_status`;
+  const existing=candidate.externalId?(await pool.query(`SELECT id,metadata FROM social_mentions WHERE platform=$1 AND external_id=$2 LIMIT 1`,[candidate.platform,candidate.externalId])).rows[0]:null;
+  if(existing?.metadata?.manualClassification?.locked===true||existing?.metadata?.socialVerification?.status==='LOCKED')return{...existing,skipped:true,reason:'CLASSIFICATION_LOCKED',scopeDecision};
+  const mention=(await pool.query(sql,values)).rows[0];
+  await pool.query(`DELETE FROM social_mention_keywords WHERE mention_id=$1`,[mention.id]);
+  await pool.query(`DELETE FROM social_mention_issues WHERE mention_id=$1 AND COALESCE(linkage_source,'rule')<>'manual'`,[mention.id]);
+  return{...mention,skipped:true,reason:'ORGANIZATION_SCOPE_REVIEW_REQUIRED',scopeDecision};
+ }
  const routingContent=[candidate.context?.parentContent?.title,candidate.context?.parentContent?.content,candidate.context?.parentComment?.content,candidate.content].filter(Boolean).join(' ');
  const routing=await analyzeSocialRoutingV16(pool,{title:candidate.title,content:routingContent});
  const matchedKeywords=routing.keyword?[routing.keyword]:[];
