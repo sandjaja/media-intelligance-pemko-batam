@@ -1,0 +1,332 @@
+import 'dotenv/config';
+import Fastify, { FastifyReply, FastifyRequest } from 'fastify';
+import cookie from '@fastify/cookie';
+import cors from '@fastify/cors';
+import helmet from '@fastify/helmet';
+import rateLimit from '@fastify/rate-limit';
+import argon2 from 'argon2';
+import jwt from 'jsonwebtoken';
+import { Pool } from 'pg';
+import { randomBytes, createHash } from 'node:crypto';
+import { z } from 'zod';
+import { ingestEnabledSources } from './ingestion.js';
+import { registerAskIntelligence } from './ask-intelligence.js';
+import { registerCollectionSchedulerRoutes } from './collection-scheduler-routes.js';
+import { registerAdminRoutes } from './admin-routes.js';
+import { registerDistrictRoutes } from './district-routes.js';
+import { runYouTubeShortsCollection } from './youtube-shorts-runner.js';
+import { decryptIntegrationCredential, encryptIntegrationCredential, integrationCredentialHint } from './integration-credentials.js';
+import { probeInstagramPublicProfile } from './instagram-public-profile.js';
+
+const env = { port: Number(process.env.PORT ?? 8080), databaseUrl: process.env.DATABASE_URL ?? '', jwtSecret: process.env.JWT_SECRET ?? '', accessTtl: process.env.ACCESS_TOKEN_TTL ?? '15m', refreshDays: Number(process.env.REFRESH_TOKEN_DAYS ?? 7), corsOrigin: process.env.CORS_ORIGIN ?? 'http://localhost:3000', cookieSecure: process.env.COOKIE_SECURE === 'true' };
+if (!env.databaseUrl || !env.jwtSecret) throw new Error('DATABASE_URL and JWT_SECRET are required');
+const pool = new Pool({ connectionString: env.databaseUrl, max: 10 });
+const app = Fastify({ logger: true, bodyLimit: 2 * 1024 * 1024 });
+await app.register(helmet); await app.register(cors, { origin: env.corsOrigin, credentials: true }); await app.register(cookie); await app.register(rateLimit, { max: 120, timeWindow: '1 minute' });
+const authSchema = z.object({ email: z.string().email(), password: z.string().min(8).max(200) });
+type AuthUser = { id: string; email: string; role: 'admin'|'operator'|'viewer'; opdId: string | null };
+declare module 'fastify' { interface FastifyRequest { user?: AuthUser } }
+function accessToken(user: AuthUser) { return jwt.sign({ sub:user.id,email:user.email,role:user.role,opdId:user.opdId }, env.jwtSecret, { expiresIn: env.accessTtl as jwt.SignOptions['expiresIn'] }); }
+function hashRefresh(token:string) { return createHash('sha256').update(token).digest('hex'); }
+async function requireAuth(request:FastifyRequest, reply:FastifyReply) { const token=request.cookies.access_token; if(!token) return reply.code(401).send({error:'UNAUTHENTICATED'}); try { const decoded=jwt.verify(token,env.jwtSecret) as jwt.JwtPayload; if(typeof decoded.sub!=='string'||!['admin','operator','viewer'].includes(String(decoded.role))) throw new Error('invalid'); request.user={id:decoded.sub,email:String(decoded.email),role:decoded.role as AuthUser['role'],opdId:decoded.opdId?String(decoded.opdId):null}; } catch { return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'}); } }
+function requireRole(...roles:AuthUser['role'][]) { return async (request:FastifyRequest,reply:FastifyReply)=>{ if(!request.user||!roles.includes(request.user.role)) return reply.code(403).send({error:'FORBIDDEN'}); }; }
+app.get('/health', async()=>({ok:true,service:'media-intelligence-api'}));
+app.post('/api/auth/login',async(request,reply)=>{ const parsed=authSchema.safeParse(request.body); if(!parsed.success) return reply.code(400).send({error:'INVALID_REQUEST'}); const row=(await pool.query(`SELECT id,email,password_hash,role,opd_id,active FROM users WHERE lower(email)=lower($1) LIMIT 1`,[parsed.data.email])).rows[0]; if(!row||!row.active||!(await argon2.verify(row.password_hash,parsed.data.password))) return reply.code(401).send({error:'INVALID_CREDENTIALS'}); const user:AuthUser={id:String(row.id),email:row.email,role:row.role,opdId:row.opd_id==null?null:String(row.opd_id)}; const refresh=randomBytes(48).toString('base64url'); await pool.query(`INSERT INTO refresh_tokens(user_id,token_hash,expires_at) VALUES($1,$2,$3)`,[user.id,hashRefresh(refresh),new Date(Date.now()+env.refreshDays*86400000)]); reply.setCookie('access_token',accessToken(user),{httpOnly:true,secure:env.cookieSecure,sameSite:'lax',path:'/'}); reply.setCookie('refresh_token',refresh,{httpOnly:true,secure:env.cookieSecure,sameSite:'lax',path:'/api/auth'}); return {user}; });
+app.post('/api/auth/refresh',async(request,reply)=>{ const old=request.cookies.refresh_token; if(!old) return reply.code(401).send({error:'NO_REFRESH_TOKEN'}); const row=(await pool.query(`SELECT rt.id,u.id user_id,u.email,u.role,u.opd_id,rt.expires_at FROM refresh_tokens rt JOIN users u ON u.id=rt.user_id WHERE rt.token_hash=$1 AND rt.revoked_at IS NULL AND u.active=true LIMIT 1`,[hashRefresh(old)])).rows[0]; if(!row||new Date(row.expires_at)<=new Date()) return reply.code(401).send({error:'INVALID_REFRESH_TOKEN'}); await pool.query(`UPDATE refresh_tokens SET revoked_at=NOW() WHERE id=$1`,[row.id]); const user:AuthUser={id:String(row.user_id),email:row.email,role:row.role,opdId:row.opd_id==null?null:String(row.opd_id)}; const refresh=randomBytes(48).toString('base64url'); await pool.query(`INSERT INTO refresh_tokens(user_id,token_hash,expires_at) VALUES($1,$2,$3)`,[user.id,hashRefresh(refresh),new Date(Date.now()+env.refreshDays*86400000)]); reply.setCookie('access_token',accessToken(user),{httpOnly:true,secure:env.cookieSecure,sameSite:'lax',path:'/'}); reply.setCookie('refresh_token',refresh,{httpOnly:true,secure:env.cookieSecure,sameSite:'lax',path:'/api/auth'}); return {ok:true}; });
+app.post('/api/auth/logout',async(request,reply)=>{const token=request.cookies.refresh_token;if(token) await pool.query(`UPDATE refresh_tokens SET revoked_at=NOW() WHERE token_hash=$1 AND revoked_at IS NULL`,[hashRefresh(token)]);reply.clearCookie('access_token',{path:'/'});reply.clearCookie('refresh_token',{path:'/api/auth'});return{ok:true};});
+app.get('/api/me',{preHandler:requireAuth},async request=>({user:request.user}));
+app.get('/api/opd',{preHandler:requireAuth},async()=>{ const {rows}=await pool.query(`SELECT id,code,name,active FROM opd WHERE active=true ORDER BY name`); return {data:rows}; });
+const filterOpd=(user:AuthUser|undefined,requested?:string)=> user?.role==='admin'?requested:(user?.opdId ?? null);
+app.get('/api/articles',{preHandler:requireAuth},async(request,reply)=>{ const q=z.object({opdId:z.string().regex(/^\d+$/).optional(),from:z.string().optional(),to:z.string().optional(),limit:z.coerce.number().int().min(1).max(100).default(25)}).safeParse(request.query); if(!q.success)return reply.code(400).send({error:'INVALID_QUERY'}); const params:unknown[]=[]; const where:string[]=[]; const opdId=filterOpd(request.user,q.data.opdId); if(opdId){params.push(opdId);where.push(`a.opd_id=$${params.length}`);} if(q.data.from){params.push(q.data.from);where.push(`a.published_at >= $${params.length}`);} if(q.data.to){params.push(q.data.to);where.push(`a.published_at < $${params.length}`);} params.push(q.data.limit); const {rows}=await pool.query(`SELECT a.id,a.title,a.url,a.published_at,a.sentiment,a.importance_score,a.impact_score,a.velocity_score,a.risk_score,a.risk_level,a.is_highlight,a.summary,ms.name source_name FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id ${where.length?'WHERE '+where.join(' AND '):''} ORDER BY a.importance_score DESC,a.published_at DESC NULLS LAST LIMIT $${params.length}`,params); return {data:rows}; });
+app.get('/api/highlights',{preHandler:requireAuth},async(request,reply)=>{ const q=z.object({opdId:z.string().regex(/^\d+$/).optional(),limit:z.coerce.number().int().min(1).max(50).default(10)}).safeParse(request.query);if(!q.success)return reply.code(400).send({error:'INVALID_QUERY'});const params:unknown[]=[];const where=['a.is_highlight=true'];const opdId=filterOpd(request.user,q.data.opdId);if(opdId){params.push(opdId);where.push(`a.opd_id=$${params.length}`);}params.push(q.data.limit);const {rows}=await pool.query(`SELECT a.id,a.title,a.url,a.published_at,a.sentiment,a.importance_score,a.impact_score,a.velocity_score,a.risk_score,a.risk_level,a.summary,ms.name source_name FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE ${where.join(' AND ')} ORDER BY a.risk_score DESC,a.importance_score DESC,a.published_at DESC NULLS LAST LIMIT $${params.length}`,params);return{data:rows};});
+app.get('/api/alerts',{preHandler:requireAuth},async(request,reply)=>{const q=z.object({opdId:z.string().regex(/^\d+$/).optional(),status:z.enum(['open','acknowledged','resolved']).default('open'),limit:z.coerce.number().int().min(1).max(100).default(25)}).safeParse(request.query);if(!q.success)return reply.code(400).send({error:'INVALID_QUERY'});const params:unknown[]=[q.data.status];const where=['aa.status=$1'];const opdId=filterOpd(request.user,q.data.opdId);if(opdId){params.push(opdId);where.push(`a.opd_id=$${params.length}`);}params.push(q.data.limit);const {rows}=await pool.query(`SELECT aa.id,aa.article_id,aa.alert_type,aa.severity,aa.reason,aa.status,aa.created_at,a.title,a.url,a.published_at,a.risk_score,a.risk_level,ms.name source_name FROM article_alerts aa JOIN articles a ON a.id=aa.article_id LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE ${where.join(' AND ')} ORDER BY aa.created_at DESC LIMIT $${params.length}`,params);return{data:rows};});
+app.patch('/api/alerts/:id',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{const parsed=z.object({status:z.enum(['acknowledged','resolved'])}).safeParse(request.body);const id=z.coerce.number().int().positive().safeParse((request.params as any).id);if(!parsed.success||!id.success)return reply.code(400).send({error:'INVALID_REQUEST'});const opdId=filterOpd(request.user);const params:unknown[]=[id.data,parsed.data.status];const scope=opdId?(params.push(opdId),` AND EXISTS (SELECT 1 FROM articles a WHERE a.id=article_alerts.article_id AND a.opd_id=$${params.length})`):'';const {rows}=await pool.query(`UPDATE article_alerts SET status=$2,acknowledged_at=CASE WHEN $2='acknowledged' THEN COALESCE(acknowledged_at,NOW()) ELSE acknowledged_at END WHERE id=$1${scope} RETURNING id,article_id,alert_type,severity,reason,status,acknowledged_at`,params);if(!rows[0])return reply.code(404).send({error:'ALERT_NOT_FOUND'});await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'ALERT_STATUS_CHANGED',$2)`,[request.user?.id,{alertId:id.data,status:parsed.data.status}]);return{data:rows[0]};});
+app.get('/api/dashboard',{preHandler:requireAuth},async(request,reply)=>{const q=z.object({opdId:z.string().regex(/^\d+$/).optional()}).safeParse(request.query);if(!q.success)return reply.code(400).send({error:'INVALID_QUERY'});const params:unknown[]=[];const opdId=filterOpd(request.user,q.data.opdId);const filter=opdId?(params.push(opdId),`WHERE opd_id=$1`):'';const {rows}=await pool.query(`SELECT COUNT(*)::int total_articles,COUNT(*) FILTER(WHERE is_highlight)::int highlights,COUNT(*) FILTER(WHERE sentiment='negative')::int negative,COUNT(*) FILTER(WHERE risk_level IN ('high','critical'))::int critical,COUNT(*) FILTER(WHERE risk_level='critical')::int critical_alerts,COALESCE(ROUND(AVG(importance_score)),0)::int momentum FROM articles ${filter}`,params);const sources=await pool.query(`SELECT COUNT(*)::int count FROM media_sources WHERE active=true`);return{metrics:{...rows[0],sources:Number(sources.rows[0].count)}};});
+app.get('/api/ingestion/status',{preHandler:requireAuth},async()=>{const {rows}=await pool.query(`SELECT COUNT(*)::int sources,COUNT(*) FILTER(WHERE active=true)::int active_sources,COUNT(*) FILTER(WHERE active=true AND url IS NOT NULL)::int feed_sources,COUNT(*) FILTER(WHERE active=true AND url IS NOT NULL AND last_success_at IS NOT NULL)::int healthy_feeds,COUNT(*) FILTER(WHERE active=true AND url IS NOT NULL AND last_error IS NOT NULL)::int failed_feeds,MAX(last_success_at) last_success_at FROM media_sources`);const sources=await pool.query(`SELECT id,name,category,tier,url,active,last_checked_at,last_success_at,last_error,last_fetched_count,last_inserted_count FROM media_sources ORDER BY tier ASC,name ASC`);return{status:rows[0],sources:sources.rows};});
+app.get('/api/ingestion/history',{preHandler:requireAuth},async(request,reply)=>{const q=z.object({limit:z.coerce.number().int().min(1).max(100).default(20)}).safeParse(request.query);if(!q.success)return reply.code(400).send({error:'INVALID_QUERY'});const {rows}=await pool.query(`SELECT id,started_at,finished_at,status,source_count,successful_sources,failed_sources,fetched_count,inserted_count,details,error_message FROM ingestion_runs ORDER BY started_at DESC LIMIT $1`,[q.data.limit]);return{data:rows};});
+app.post('/api/ingestion/run',{preHandler:[requireAuth,requireRole('admin','operator')]},async()=>({results:await ingestEnabledSources(pool)}));
+app.get('/api/admin/integrations',{preHandler:[requireAuth,requireRole('admin')]},async()=>{
+ const {rows}=await pool.query(`SELECT p.id,p.code,p.name,p.auth_type,p.active,
+   c.enabled,c.credential_hint,c.app_id,c.app_secret_hint,c.expires_at,c.last_test_at,c.last_status,c.last_error,c.updated_at,
+   COALESCE(s.settings,'{}'::jsonb) settings
+  FROM integration_providers p
+  LEFT JOIN organizations o ON o.active=true
+  LEFT JOIN integration_credentials c ON c.provider_id=p.id AND c.organization_id=o.id
+  LEFT JOIN integration_settings s ON s.provider_id=p.id AND s.organization_id=o.id
+  WHERE p.active=true ORDER BY p.name`);
+ return{data:rows};
+});
+app.put('/api/admin/integrations/:code/app-credentials',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
+ const code=z.enum(['instagram','threads']).safeParse((request.params as any).code);
+ const body=z.object({appId:z.string().trim().min(3).max(300),appSecret:z.string().trim().min(8).max(2000)}).safeParse(request.body);
+ if(!code.success||!body.success)return reply.code(400).send({error:'INVALID_APP_CREDENTIALS'});
+ const org=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 1`)).rows[0];
+ if(!org)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ const provider=(await pool.query(`SELECT id,code FROM integration_providers WHERE code=$1 AND active=true LIMIT 1`,[code.data])).rows[0];
+ if(!provider)return reply.code(404).send({error:'INTEGRATION_PROVIDER_NOT_FOUND'});
+ const encrypted=encryptIntegrationCredential(body.data.appSecret);
+ const hint=integrationCredentialHint(body.data.appSecret);
+ const existing=(await pool.query(`SELECT id FROM integration_credentials WHERE organization_id=$1 AND provider_id=$2`,[org.id,provider.id])).rows[0];
+ if(existing){
+  await pool.query(`UPDATE integration_credentials SET app_id=$1,app_secret_ciphertext=$2,app_secret_hint=$3,updated_by=$4,updated_at=NOW() WHERE id=$5`,[body.data.appId,encrypted,hint,request.user?.id,existing.id]);
+ }else{
+  const placeholder=encryptIntegrationCredential('not-configured');
+  await pool.query(`INSERT INTO integration_credentials(organization_id,provider_id,credential_ciphertext,credential_hint,enabled,last_status,created_by,updated_by,app_id,app_secret_ciphertext,app_secret_hint) VALUES($1,$2,$3,NULL,false,'disabled',$4,$4,$5,$6,$7)`,[org.id,provider.id,placeholder,request.user?.id,body.data.appId,encrypted,hint]);
+ }
+ await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'INTEGRATION_APP_CREDENTIALS_UPDATED',$2::jsonb)`,[request.user?.id,JSON.stringify({provider:provider.code,organizationId:org.id,appIdConfigured:true,appSecretConfigured:true})]);
+ return{data:{provider:provider.code,appId:body.data.appId,appSecretHint:hint}};
+});
+app.put('/api/admin/integrations/:code/settings',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
+ const code=z.string().regex(/^[a-z0-9_-]+$/).safeParse((request.params as any).code);
+ const body=z.object({query:z.string().trim().min(2).max(120).refine(v=>!/^\d+$/.test(v),{message:'Query must contain text'}),maxResults:z.coerce.number().int().min(1).max(25)}).safeParse(request.body);
+ if(!code.success||!body.success)return reply.code(400).send({error:'INVALID_INTEGRATION_SETTINGS'});
+ const orgs=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 2`)).rows;
+ if(orgs.length!==1)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ const provider=(await pool.query(`SELECT id,code FROM integration_providers WHERE code=$1 AND active=true LIMIT 1`,[code.data])).rows[0];
+ if(!provider)return reply.code(404).send({error:'INTEGRATION_PROVIDER_NOT_FOUND'});
+ const settings={query:body.data.query,maxResults:body.data.maxResults};
+ const {rows}=await pool.query(`INSERT INTO integration_settings(organization_id,provider_id,settings,updated_by) VALUES($1,$2,$3::jsonb,$4) ON CONFLICT(organization_id,provider_id) DO UPDATE SET settings=EXCLUDED.settings,updated_by=EXCLUDED.updated_by,updated_at=NOW() RETURNING settings,updated_at`,[orgs[0].id,provider.id,JSON.stringify(settings),request.user?.id]);
+ await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'INTEGRATION_SETTINGS_UPDATED',$2::jsonb)`,[request.user?.id,JSON.stringify({provider:provider.code,organizationId:orgs[0].id,settings})]);
+ return{data:rows[0]};
+});
+app.put('/api/admin/integrations/:code/credential',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
+ const code=z.string().regex(/^[a-z0-9_-]+$/).safeParse((request.params as any).code);
+ const body=z.object({credential:z.string().trim().min(8).max(8000),enabled:z.boolean().default(false),expiresAt:z.string().datetime().nullable().optional()}).safeParse(request.body);
+ if(!code.success||!body.success)return reply.code(400).send({error:'INVALID_INTEGRATION_CREDENTIAL'});
+ const org=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 1`)).rows[0];
+ if(!org)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ const provider=(await pool.query(`SELECT id,code,name FROM integration_providers WHERE code=$1 AND active=true LIMIT 1`,[code.data])).rows[0];
+ if(!provider)return reply.code(404).send({error:'INTEGRATION_PROVIDER_NOT_FOUND'});
+ const encrypted=encryptIntegrationCredential(body.data.credential);
+ const hint=integrationCredentialHint(body.data.credential);
+ const {rows}=await pool.query(`INSERT INTO integration_credentials(organization_id,provider_id,credential_ciphertext,credential_hint,enabled,expires_at,last_status,created_by,updated_by)
+ VALUES($1,$2,$3,$4,$5,$6,CASE WHEN $5 THEN 'untested' ELSE 'disabled' END,$7,$7)
+ ON CONFLICT(organization_id,provider_id) DO UPDATE SET credential_ciphertext=EXCLUDED.credential_ciphertext,credential_hint=EXCLUDED.credential_hint,enabled=EXCLUDED.enabled,expires_at=EXCLUDED.expires_at,last_status=CASE WHEN EXCLUDED.enabled THEN 'untested' ELSE 'disabled' END,last_error=NULL,updated_by=EXCLUDED.updated_by,updated_at=NOW()
+ RETURNING id,organization_id,provider_id,credential_hint,enabled,expires_at,last_status,updated_at`,[org.id,provider.id,encrypted,hint,body.data.enabled,body.data.expiresAt??null,request.user?.id]);
+ await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'INTEGRATION_CREDENTIAL_UPDATED',$2)`,[request.user?.id,{provider:provider.code,organizationId:org.id,enabled:body.data.enabled}]);
+ return{data:rows[0]};
+});
+app.post('/api/admin/integrations/:code/test',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
+ const code=z.string().regex(/^[a-z0-9_-]+$/).safeParse((request.params as any).code);
+ if(!code.success)return reply.code(400).send({error:'INVALID_INTEGRATION_PROVIDER'});
+ const orgs=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 2`)).rows;
+ if(orgs.length!==1)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ const row=(await pool.query(`SELECT c.id,c.credential_ciphertext,p.code FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id WHERE c.organization_id=$1 AND p.code=$2 LIMIT 1`,[orgs[0].id,code.data])).rows[0];
+ if(!row)return reply.code(404).send({error:'INTEGRATION_CREDENTIAL_NOT_FOUND'});
+ if(!['youtube','threads','tiktok'].includes(row.code))return reply.code(501).send({error:'INTEGRATION_TEST_NOT_IMPLEMENTED',provider:row.code});
+ let status:'healthy'|'error'='error'; let lastError:string|null=null;
+ const safeApiError=async(response:Response,prefix:string)=>{
+  const payload:any=await response.json().catch(()=>null);
+  const apiError=payload?.error;
+  const code=apiError?.code||apiError?.error_subcode||payload?.error_code||payload?.code;
+  const type=apiError?.type||payload?.error;
+  const message=apiError?.message||payload?.error_description||payload?.message;
+  const parts=[prefix+'_HTTP_'+response.status,code?String(code):'',type?String(type):'',message?String(message).slice(0,240):''].filter(Boolean);
+  return parts.join(' | ');
+ };
+ try{
+  const credential=decryptIntegrationCredential(row.credential_ciphertext);
+  if(row.code==='threads'){
+   const url=new URL('https://graph.threads.net/v1.0/me');
+   url.searchParams.set('fields','id,username');
+   url.searchParams.set('access_token',credential);
+   const response=await fetch(url,{headers:{accept:'application/json'}});
+   if(!response.ok)throw new Error(await safeApiError(response,'THREADS_API'));
+   const payload:any=await response.json();
+   if(!payload?.id)throw new Error('THREADS_API_INVALID_RESPONSE');
+   status='healthy';
+  }else if(row.code==='tiktok'){
+   // TikTok Research API uses a client access token and research.data.basic.
+   // A minimal public-video query validates both token type and Research API authorization.
+   const endDate=new Date();
+   const startDate=new Date(endDate.getTime()-24*60*60*1000);
+   const ymd=(d:Date)=>d.toISOString().slice(0,10).replace(/-/g,'');
+   const url=new URL('https://open.tiktokapis.com/v2/research/video/query/');
+   url.searchParams.set('fields','id');
+   const response=await fetch(url,{
+    method:'POST',
+    headers:{accept:'application/json','content-type':'application/json',authorization:'Bearer '+credential},
+    body:JSON.stringify({query:{and:[{operation:'EQ',field_name:'keyword',field_values:['test']}]},max_count:1,start_date:ymd(startDate),end_date:ymd(endDate)})
+   });
+   const payload:any=await response.json().catch(()=>null);
+   if(!response.ok)throw new Error(await safeApiError(new Response(JSON.stringify(payload),{status:response.status,headers:{'content-type':'application/json'}}),'TIKTOK_RESEARCH_API'));
+   if(payload?.error?.code&&payload.error.code!=='ok')throw new Error(['TIKTOK_RESEARCH_API',String(payload.error.code),String(payload.error.message||'')].filter(Boolean).join(' | '));
+   status='healthy';
+  }else{
+   const url=new URL('https://www.googleapis.com/youtube/v3/videos');
+   url.searchParams.set('part','id'); url.searchParams.set('id','dQw4w9WgXcQ'); url.searchParams.set('key',credential);
+   const response=await fetch(url,{headers:{accept:'application/json'}});
+   if(!response.ok)throw new Error('YOUTUBE_API_HTTP_'+response.status);
+   status='healthy';
+  }
+ }catch(error){lastError=error instanceof Error?error.message:(row.code.toUpperCase()+'_API_TEST_FAILED');}
+ await pool.query(`UPDATE integration_credentials SET last_test_at=NOW(),last_status=$1,last_error=$2,updated_at=NOW() WHERE id=$3`,[status,lastError,row.id]);
+ await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'INTEGRATION_CONNECTION_TESTED',$2)`,[request.user?.id,{provider:row.code,organizationId:orgs[0].id,status}]);
+ if(status==='error')return reply.code(422).send({data:{provider:row.code,status,lastError}});
+ return{data:{provider:row.code,status}};
+});
+app.patch('/api/admin/integrations/:code',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
+ const code=z.string().regex(/^[a-z0-9_-]+$/).safeParse((request.params as any).code);
+ const body=z.object({enabled:z.boolean()}).safeParse(request.body);
+ if(!code.success||!body.success)return reply.code(400).send({error:'INVALID_INTEGRATION_SETTING'});
+ const org=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 1`)).rows[0];
+ if(!org)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ const {rows}=await pool.query(`UPDATE integration_credentials c SET enabled=$1,last_status=CASE WHEN $1 THEN 'untested' ELSE 'disabled' END,updated_by=$2,updated_at=NOW() FROM integration_providers p WHERE c.provider_id=p.id AND c.organization_id=$3 AND p.code=$4 RETURNING c.id,c.credential_hint,c.enabled,c.last_status,c.updated_at`,[body.data.enabled,request.user?.id,org.id,code.data]);
+ if(!rows[0])return reply.code(404).send({error:'INTEGRATION_CREDENTIAL_NOT_FOUND'});
+ return{data:rows[0]};
+});
+app.post('/api/social/threads/smoke-search',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
+ const parsed=z.object({query:z.string().trim().min(2).max(120).default('Batam'),searchType:z.enum(['TOP','RECENT']).default('RECENT'),limit:z.coerce.number().int().min(1).max(10).default(5)}).safeParse(request.body??{});
+ if(!parsed.success)return reply.code(400).send({error:'INVALID_THREADS_SMOKE_REQUEST'});
+ const org=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 1`)).rows[0];
+ if(!org)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ const row=(await pool.query(`SELECT c.credential_ciphertext,c.enabled FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id WHERE c.organization_id=$1 AND p.code='threads' LIMIT 1`,[org.id])).rows[0];
+ if(!row)return reply.code(503).send({error:'THREADS_CREDENTIAL_NOT_CONFIGURED'});
+ if(!row.enabled)return reply.code(409).send({error:'THREADS_INTEGRATION_DISABLED'});
+ let credential:string;
+ try{credential=decryptIntegrationCredential(row.credential_ciphertext);}catch{return reply.code(503).send({error:'THREADS_CREDENTIAL_DECRYPT_FAILED'});}
+ const url=new URL('https://graph.threads.net/v1.0/keyword_search');
+ url.searchParams.set('q',parsed.data.query);
+ url.searchParams.set('search_type',parsed.data.searchType);
+ url.searchParams.set('fields','id,text,username,permalink,timestamp,media_type');
+ url.searchParams.set('limit',String(parsed.data.limit));
+ url.searchParams.set('access_token',credential);
+ const response=await fetch(url,{headers:{accept:'application/json'}});
+ const payload:any=await response.json().catch(()=>null);
+ if(!response.ok){
+  const apiError=payload?.error;
+  const detail=[apiError?.code,apiError?.type,apiError?.message].filter(Boolean).join(' | ').slice(0,500);
+  await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'THREADS_KEYWORD_SMOKE_TEST',$2::jsonb)`,[request.user?.id,JSON.stringify({query:parsed.data.query,searchType:parsed.data.searchType,status:'error',httpStatus:response.status,detail})]);
+  return reply.code(422).send({error:'THREADS_KEYWORD_SEARCH_FAILED',httpStatus:response.status,detail});
+ }
+ const rawData=Array.isArray(payload?.data)?payload.data:[];
+ const items=rawData.slice(0,parsed.data.limit);
+ const normalized=items.map((item:any)=>({externalId:item?.id?String(item.id):null,platform:'threads',contentType:'post',sourceKind:'external',authorHandle:item?.username??null,canonicalUrl:item?.permalink??null,content:item?.text??null,publishedAt:item?.timestamp??null,mediaType:item?.media_type??null}));
+ const diagnostic={httpStatus:response.status,ok:response.ok,dataIsArray:Array.isArray(payload?.data),rawDataCount:rawData.length,topLevelKeys:payload&&typeof payload==='object'?Object.keys(payload).filter((key)=>key!=='access_token').slice(0,20):[],pagingPresent:Boolean(payload?.paging),pagingKeys:payload?.paging&&typeof payload.paging==='object'?Object.keys(payload.paging).slice(0,10):[],errorPresent:Boolean(payload?.error)};
+ await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'THREADS_KEYWORD_SMOKE_TEST',$2::jsonb)`,[request.user?.id,JSON.stringify({query:parsed.data.query,searchType:parsed.data.searchType,status:'healthy',received:normalized.length,diagnostic})]);
+ return{data:{provider:'threads',mode:'keyword_search_smoke',query:parsed.data.query,searchType:parsed.data.searchType,received:normalized.length,items:normalized,paging:Boolean(payload?.paging),diagnostic}};
+});
+app.post('/api/social/threads/smoke-matrix',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
+ const parsed=z.object({query:z.string().trim().min(2).max(120).default('Batam'),limit:z.coerce.number().int().min(1).max(10).default(5)}).safeParse(request.body??{});
+ if(!parsed.success)return reply.code(400).send({error:'INVALID_THREADS_MATRIX_REQUEST'});
+ const org=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 1`)).rows[0];
+ if(!org)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ const row=(await pool.query(`SELECT c.credential_ciphertext,c.enabled FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id WHERE c.organization_id=$1 AND p.code='threads' LIMIT 1`,[org.id])).rows[0];
+ if(!row)return reply.code(503).send({error:'THREADS_CREDENTIAL_NOT_CONFIGURED'});
+ if(!row.enabled)return reply.code(409).send({error:'THREADS_INTEGRATION_DISABLED'});
+ let credential:string;try{credential=decryptIntegrationCredential(row.credential_ciphertext);}catch{return reply.code(503).send({error:'THREADS_CREDENTIAL_DECRYPT_FAILED'});}
+ const tests=[] as any[];
+ for(const searchType of ['TOP','RECENT'] as const){
+  const url=new URL('https://graph.threads.net/v1.0/keyword_search');
+  url.searchParams.set('q',parsed.data.query);url.searchParams.set('search_type',searchType);url.searchParams.set('search_mode','KEYWORD');
+  url.searchParams.set('fields','id,text,username,permalink,timestamp,media_type');url.searchParams.set('limit',String(parsed.data.limit));url.searchParams.set('access_token',credential);
+  const response=await fetch(url,{headers:{accept:'application/json'}});const payload:any=await response.json().catch(()=>null);
+  const data=Array.isArray(payload?.data)?payload.data:[];
+  const apiError=payload?.error;const detail=[apiError?.code,apiError?.type,apiError?.message].filter(Boolean).join(' | ').slice(0,500);
+  tests.push({searchType,searchMode:'KEYWORD',httpStatus:response.status,ok:response.ok,rawDataCount:data.length,pagingPresent:Boolean(payload?.paging),topLevelKeys:payload&&typeof payload==='object'?Object.keys(payload).slice(0,20):[],detail:detail||null,items:data.slice(0,parsed.data.limit).map((item:any)=>({externalId:item?.id?String(item.id):null,authorHandle:item?.username??null,canonicalUrl:item?.permalink??null,content:item?.text??null,publishedAt:item?.timestamp??null,mediaType:item?.media_type??null}))});
+ }
+ await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'THREADS_KEYWORD_MATRIX_TEST',$2::jsonb)`,[request.user?.id,JSON.stringify({query:parsed.data.query,tests:tests.map(t=>({searchType:t.searchType,httpStatus:t.httpStatus,ok:t.ok,rawDataCount:t.rawDataCount,pagingPresent:t.pagingPresent,detail:t.detail}))})]);
+ return{data:{provider:'threads',mode:'keyword_search_matrix',query:parsed.data.query,tests}};
+});
+app.post('/api/social/x/public-profile-smoke-test',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
+ const parsed=z.object({accountId:z.coerce.number().int().positive()}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+ const account=(await pool.query("SELECT a.id,a.account_name,a.handle,a.profile_url,a.opd_id,o.name opd_name FROM owned_social_accounts a LEFT JOIN opd o ON o.id=a.opd_id WHERE a.id=$1 AND a.platform='x' AND a.active=true",[parsed.data.accountId])).rows[0];if(!account)return reply.code(404).send({error:'X_OWNED_ACCOUNT_NOT_FOUND'});
+ const handle=String(account.handle||'').trim().replace(/^@/,'')||String(account.profile_url||'').match(/(?:x[.]com|twitter[.]com)[/]@?([^/?#]+)/i)?.[1]||'';if(!handle)return reply.code(409).send({error:'X_HANDLE_UNRESOLVED'});
+ const profileUrl='https://x.com/'+encodeURIComponent(handle);
+ try{const response=await fetch(profileUrl,{redirect:'follow',headers:{accept:'text/html','user-agent':'Mozilla/5.0 MediaIntelligencePemkoBatam/1.0'}});const html=await response.text();const probe={status:response.ok&&html.length>1000?'public_profile_available':'unavailable',httpStatus:response.status,htmlBytes:html.length,finalUrl:response.url,profileUrl,loginWall:/log in|sign in|login/i.test(html),hasHandle:html.toLowerCase().includes(handle.toLowerCase())};await pool.query("INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'X_PUBLIC_PROFILE_SMOKE_TEST',$2::jsonb)",[request.user?.id,JSON.stringify({accountId:account.id,handle,httpStatus:response.status,status:probe.status,htmlBytes:probe.htmlBytes})]);return{data:{provider:'x',mode:'public_profile_html_smoke_test',account:{id:account.id,opdName:account.opd_name,accountName:account.account_name,handle:'@'+handle},probe,persisted:false,note:'Public profile smoke test only; no performance snapshot is written.'}}}catch(e:any){return reply.code(502).send({error:'X_PUBLIC_FETCH_FAILED',detail:String(e?.message||e).slice(0,300)})}
+});
+app.post('/api/social/threads/public-profile-smoke-test',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
+ const parsed=z.object({accountId:z.coerce.number().int().positive()}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+ const account=(await pool.query("SELECT a.id,a.account_name,a.handle,a.profile_url,a.opd_id,o.name opd_name FROM owned_social_accounts a LEFT JOIN opd o ON o.id=a.opd_id WHERE a.id=$1 AND a.platform='threads' AND a.active=true",[parsed.data.accountId])).rows[0];if(!account)return reply.code(404).send({error:'THREADS_OWNED_ACCOUNT_NOT_FOUND'});
+ const handle=String(account.handle||'').trim().replace(/^@/,'')||String(account.profile_url||'').match(/threads[.]net[/]@?([^/?#]+)/i)?.[1]||'';if(!handle)return reply.code(409).send({error:'THREADS_HANDLE_UNRESOLVED'});
+ const profileUrl='https://www.threads.net/@'+encodeURIComponent(handle);
+ try{const response=await fetch(profileUrl,{redirect:'follow',headers:{accept:'text/html','user-agent':'Mozilla/5.0 MediaIntelligencePemkoBatam/1.0'}});const html=await response.text();const probe={status:response.ok&&html.length>1000?'public_profile_available':'unavailable',httpStatus:response.status,htmlBytes:html.length,finalUrl:response.url,profileUrl,loginWall:/log in|login/i.test(html),hasHandle:html.toLowerCase().includes(handle.toLowerCase())};await pool.query("INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'THREADS_PUBLIC_PROFILE_SMOKE_TEST',$2::jsonb)",[request.user?.id,JSON.stringify({accountId:account.id,handle,httpStatus:response.status,status:probe.status,htmlBytes:probe.htmlBytes})]);return{data:{provider:'threads',mode:'public_profile_html_smoke_test',account:{id:account.id,opdName:account.opd_name,accountName:account.account_name,handle:'@'+handle},probe,persisted:false,note:'Public profile smoke test only; no performance snapshot is written.'}}}catch(e:any){return reply.code(502).send({error:'THREADS_PUBLIC_FETCH_FAILED',detail:String(e?.message||e).slice(0,300)})}
+});
+app.post('/api/social/facebook/public-page-smoke-test',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
+ const parsed=z.object({accountId:z.coerce.number().int().positive()}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+ const account=(await pool.query("SELECT a.id,a.account_name,a.handle,a.profile_url,a.opd_id,o.name opd_name FROM owned_social_accounts a LEFT JOIN opd o ON o.id=a.opd_id WHERE a.id=$1 AND a.platform='facebook' AND a.active=true",[parsed.data.accountId])).rows[0];if(!account)return reply.code(404).send({error:'FACEBOOK_OWNED_ACCOUNT_NOT_FOUND'});
+ const raw=String(account.profile_url||'').trim();const handle=String(account.handle||'').trim().replace(/^@/,'');const pageUrl=raw||('https://www.facebook.com/'+encodeURIComponent(handle));if(!pageUrl)return reply.code(409).send({error:'FACEBOOK_PAGE_URL_UNRESOLVED'});
+ try{const plugin=new URL('https://www.facebook.com/plugins/page.php');plugin.searchParams.set('href',pageUrl);plugin.searchParams.set('tabs','timeline');plugin.searchParams.set('width','500');plugin.searchParams.set('height','650');plugin.searchParams.set('small_header','false');plugin.searchParams.set('adapt_container_width','true');plugin.searchParams.set('hide_cover','false');plugin.searchParams.set('show_facepile','false');const response=await fetch(plugin,{redirect:'follow',headers:{accept:'text/html','user-agent':'Mozilla/5.0 MediaIntelligencePemkoBatam/1.0'}});const html=await response.text();const probe={status:response.ok&&html.length>1000?'page_plugin_available':'unavailable',httpStatus:response.status,htmlBytes:html.length,finalUrl:response.url,pageUrl,pluginUrl:plugin.toString(),loginWall:/log in|login/i.test(html),hasPagePlugin:/pagelet|facebook|timeline/i.test(html)};await pool.query("INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'FACEBOOK_PUBLIC_PAGE_SMOKE_TEST',$2::jsonb)",[request.user?.id,JSON.stringify({accountId:account.id,pageUrl,httpStatus:response.status,status:probe.status,htmlBytes:probe.htmlBytes})]);return{data:{provider:'facebook',mode:'official_page_plugin_smoke_test',account:{id:account.id,opdName:account.opd_name,accountName:account.account_name,handle:account.handle},probe,persisted:false,note:'Public Page Plugin smoke test only; no performance snapshot is written.'}}}catch(e:any){return reply.code(502).send({error:'FACEBOOK_PUBLIC_FETCH_FAILED',detail:String(e?.message||e).slice(0,300)})}
+});
+app.post('/api/social/tiktok/public-profile-smoke-test',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
+ const parsed=z.object({accountId:z.coerce.number().int().positive()}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+ const account=(await pool.query("SELECT a.id,a.account_name,a.handle,a.profile_url,a.opd_id,o.name opd_name FROM owned_social_accounts a LEFT JOIN opd o ON o.id=a.opd_id WHERE a.id=$1 AND a.platform='tiktok' AND a.active=true",[parsed.data.accountId])).rows[0];if(!account)return reply.code(404).send({error:'TIKTOK_OWNED_ACCOUNT_NOT_FOUND'});
+ const handle=String(account.handle||'').trim().replace(/^@/,'')||String(account.profile_url||'').match(/tiktok[.]com[/]@([^/?#]+)/i)?.[1]||'';if(!handle)return reply.code(409).send({error:'TIKTOK_HANDLE_UNRESOLVED'});
+ const profileUrl='https://www.tiktok.com/@'+encodeURIComponent(handle);
+ try{const url='https://www.tiktok.com/oembed?url='+encodeURIComponent(profileUrl);const response=await fetch(url,{headers:{accept:'application/json'}});const payload:any=await response.json().catch(()=>null);const html=String(payload?.html||'');const safeEmbedHtml=response.ok&&payload&&html.includes('tiktok-embed')&&html.includes('creator')?html:null;const probe={status:response.ok&&payload?'embed_available':'unavailable',httpStatus:response.status,title:payload?.title??null,authorName:payload?.author_name??null,authorUrl:payload?.author_url??null,providerName:payload?.provider_name??null,embedBytes:html.length,hasCreatorEmbed:html.includes('creator'),embedHtml:safeEmbedHtml,publicMetrics:{followers:null,following:null,likes:null,videos:null}};await pool.query("INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'TIKTOK_PUBLIC_PROFILE_SMOKE_TEST',$2::jsonb)",[request.user?.id,JSON.stringify({accountId:account.id,handle,httpStatus:response.status,status:probe.status,embedBytes:probe.embedBytes})]);return{data:{provider:'tiktok',mode:'official_oembed_smoke_test',account:{id:account.id,opdName:account.opd_name,accountName:account.account_name,handle:'@'+handle},probe,persisted:false,note:'Smoke test only; no performance snapshot is written.'}}}catch(e:any){return reply.code(502).send({error:'TIKTOK_PUBLIC_FETCH_FAILED',detail:String(e?.message||e).slice(0,300)})}
+});
+app.post('/api/social/instagram/public-profile-smoke-test',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
+ const parsed=z.object({accountId:z.coerce.number().int().positive()}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+ const account=(await pool.query("SELECT a.id,a.account_name,a.handle,a.profile_url,a.opd_id,o.name opd_name FROM owned_social_accounts a LEFT JOIN opd o ON o.id=a.opd_id WHERE a.id=$1 AND a.platform='instagram' AND a.active=true",[parsed.data.accountId])).rows[0];if(!account)return reply.code(404).send({error:'INSTAGRAM_OWNED_ACCOUNT_NOT_FOUND'});
+ const handle=String(account.handle||'').trim().replace(/^@/,'')||String(account.profile_url||'').match(/instagram\.com\/([^/?#]+)/i)?.[1]||'';if(!handle)return reply.code(409).send({error:'INSTAGRAM_HANDLE_UNRESOLVED'});
+ try{const probe=await probeInstagramPublicProfile(handle);await pool.query("INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'INSTAGRAM_PUBLIC_PROFILE_SMOKE_TEST',$2::jsonb)",[request.user?.id,JSON.stringify({accountId:account.id,handle,httpStatus:probe.httpStatus,status:probe.status,bytes:probe.htmlBytes,finalUrl:probe.finalUrl})]);return{data:{provider:'instagram',mode:'public_html_smoke_test',account:{id:account.id,opdName:account.opd_name,accountName:account.account_name,handle:'@'+handle},probe,persisted:false,note:'Smoke test only; no performance snapshot is written.'}}}catch(e:any){return reply.code(502).send({error:'INSTAGRAM_PUBLIC_FETCH_FAILED',detail:String(e?.message||e).slice(0,300)})}
+});
+app.post('/api/social/youtube/account-smoke-test',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
+ const parsed=z.object({handle:z.string().trim().min(2).max(100)}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_YOUTUBE_HANDLE'});
+ const org=(await pool.query('SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 1')).rows[0];if(!org)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ const credential=(await pool.query("SELECT c.credential_ciphertext,c.enabled FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id WHERE c.organization_id=$1 AND p.code='youtube' LIMIT 1",[org.id])).rows[0];if(!credential)return reply.code(503).send({error:'YOUTUBE_CREDENTIAL_NOT_CONFIGURED'});if(!credential.enabled)return reply.code(409).send({error:'YOUTUBE_INTEGRATION_DISABLED'});
+ let apiKey:string;try{apiKey=decryptIntegrationCredential(credential.credential_ciphertext);}catch{return reply.code(503).send({error:'YOUTUBE_CREDENTIAL_DECRYPT_FAILED'});}const handle=parsed.data.handle.replace(/^@/,'');
+ const url=new URL('https://www.googleapis.com/youtube/v3/channels');url.searchParams.set('part','snippet,statistics,contentDetails');url.searchParams.set('forHandle',handle);url.searchParams.set('key',apiKey);const response=await fetch(url,{headers:{accept:'application/json'}});const payload:any=await response.json().catch(()=>null);
+ if(!response.ok){const detail=[payload?.error?.code,payload?.error?.status,payload?.error?.message].filter(Boolean).join(' | ').slice(0,500);return reply.code(response.status).send({error:'YOUTUBE_API_ERROR',httpStatus:response.status,detail:detail||null});}
+ const item=Array.isArray(payload?.items)?payload.items[0]:null;const data=item?{handle:'@'+handle,channelId:String(item.id),title:item.snippet?.title??null,customUrl:item.snippet?.customUrl??null,publishedAt:item.snippet?.publishedAt??null,statistics:{viewCount:item.statistics?.viewCount!=null?Number(item.statistics.viewCount):null,subscriberCount:item.statistics?.hiddenSubscriberCount?null:(item.statistics?.subscriberCount!=null?Number(item.statistics.subscriberCount):null),hiddenSubscriberCount:Boolean(item.statistics?.hiddenSubscriberCount),videoCount:item.statistics?.videoCount!=null?Number(item.statistics.videoCount):null},uploadsPlaylistId:item.contentDetails?.relatedPlaylists?.uploads??null}:null;
+ await pool.query("INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'YOUTUBE_ACCOUNT_SMOKE_TEST',$2::jsonb)",[request.user?.id,JSON.stringify({handle,status:data?'found':'not_found',channelId:data?.channelId??null})]);return{data:{provider:'youtube',mode:'public_handle_lookup',found:Boolean(data),account:data}};
+});
+app.post('/api/social/youtube/account-performance/collect',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
+ const parsed=z.object({accountId:z.coerce.number().int().positive(),maxVideos:z.coerce.number().int().min(1).max(50).default(20)}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+ const account=(await pool.query("SELECT a.*,o.organization_id FROM owned_social_accounts a LEFT JOIN opd o ON o.id=a.opd_id WHERE a.id=$1 AND a.platform='youtube' AND a.active=true",[parsed.data.accountId])).rows[0];if(!account)return reply.code(404).send({error:'YOUTUBE_OWNED_ACCOUNT_NOT_FOUND'});
+ const orgId=account.organization_id||(await pool.query('SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 1')).rows[0]?.id;if(!orgId)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ const credential=(await pool.query("SELECT c.credential_ciphertext,c.enabled FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id WHERE c.organization_id=$1 AND p.code='youtube' LIMIT 1",[orgId])).rows[0];if(!credential||!credential.enabled)return reply.code(503).send({error:'YOUTUBE_CREDENTIAL_NOT_AVAILABLE'});let key:string;try{key=decryptIntegrationCredential(credential.credential_ciphertext)}catch{return reply.code(503).send({error:'YOUTUBE_CREDENTIAL_DECRYPT_FAILED'})}
+ const get=async(url:URL)=>{url.searchParams.set('key',key);const r=await fetch(url,{headers:{accept:'application/json'}}),j:any=await r.json().catch(()=>null);if(!r.ok)throw Object.assign(new Error(j?.error?.message||'YouTube API error'),{statusCode:502});return j};
+ const h=String(account.handle||'').replace(/^@/,'');const cu=new URL('https://www.googleapis.com/youtube/v3/channels');cu.searchParams.set('part','snippet,statistics,contentDetails');cu.searchParams.set('forHandle',h);const cj=await get(cu),ch=cj?.items?.[0];if(!ch)return reply.code(404).send({error:'YOUTUBE_CHANNEL_NOT_FOUND'});
+ const subscribers=ch.statistics?.hiddenSubscriberCount?null:Number(ch.statistics?.subscriberCount||0),totalPosts=Number(ch.statistics?.videoCount||0),channelViews=Number(ch.statistics?.viewCount||0);
+ const pu=new URL('https://www.googleapis.com/youtube/v3/playlistItems');pu.searchParams.set('part','contentDetails,snippet');pu.searchParams.set('playlistId',ch.contentDetails.relatedPlaylists.uploads);pu.searchParams.set('maxResults',String(parsed.data.maxVideos));const pj=await get(pu),ids=(pj.items||[]).map((x:any)=>x.contentDetails?.videoId).filter(Boolean);
+ let videos:any[]=[];if(ids.length){const vu=new URL('https://www.googleapis.com/youtube/v3/videos');vu.searchParams.set('part','snippet,statistics');vu.searchParams.set('id',ids.join(','));videos=(await get(vu)).items||[]}
+ let likes=0,comments=0,views=0;const content=videos.map((v:any)=>{const vv=Number(v.statistics?.viewCount||0),l=Number(v.statistics?.likeCount||0),co=Number(v.statistics?.commentCount||0),eng=l+co;views+=vv;likes+=l;comments+=co;return{id:v.id,title:v.snippet?.title,publishedAt:v.snippet?.publishedAt,views:vv,likes:l,comments:co,engagement:eng,engagementRateByViews:vv?Number(((eng/vv)*100).toFixed(4)):0,url:'https://www.youtube.com/watch?v='+v.id}});
+ const engagement=likes+comments,er=views?Number(((engagement/views)*100).toFixed(4)):0;
+ await pool.query("INSERT INTO owned_social_account_metrics(account_id,measured_at,subscribers,total_posts,video_views,likes,comments,engagement_count,engagement_rate,data_scope,source,raw_payload) VALUES($1,NOW(),$2,$3,$4,$5,$6,$7,$8,'snapshot','youtube_public_api',$9::jsonb)",[account.id,subscribers,totalPosts,channelViews,likes,comments,engagement,er,JSON.stringify({channelId:ch.id,windowVideos:content.length,windowViews:views})]);
+ return{data:{accountId:account.id,channelId:ch.id,title:ch.snippet?.title,handle:account.handle,subscribers,totalVideos:totalPosts,totalChannelViews:channelViews,window:{videos:content.length,views,likes,comments,engagement,engagementRateByViews:er,averageEngagementPerVideo:content.length?Number((engagement/content.length).toFixed(2)):0},content}};
+});
+app.get('/api/social/youtube/account-performance/:accountId',{preHandler:[requireAuth]},async(request,reply)=>{const id=Number((request.params as any).accountId);if(!Number.isInteger(id)||id<1)return reply.code(400).send({error:'INVALID_ACCOUNT_ID'});const a=(await pool.query("SELECT a.id,a.opd_id,a.account_name,a.handle,o.name opd_name FROM owned_social_accounts a LEFT JOIN opd o ON o.id=a.opd_id WHERE a.id=$1 AND a.platform='youtube'",[id])).rows[0];if(!a)return reply.code(404).send({error:'YOUTUBE_OWNED_ACCOUNT_NOT_FOUND'});const history=(await pool.query("SELECT measured_at,subscribers,total_posts,video_views,likes,comments,engagement_count,engagement_rate,source FROM owned_social_account_metrics WHERE account_id=$1 ORDER BY measured_at DESC LIMIT 90",[id])).rows;return{data:{account:a,latest:history[0]||null,history}}});
+app.post('/api/social/youtube-shorts/run',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
+ const parsed=z.object({
+  query:z.string().trim().min(2).max(120),
+  maxResults:z.coerce.number().int().min(1).max(5).default(3),
+  publishedAfter:z.string().datetime().optional()
+ }).safeParse(request.body);
+ if(!parsed.success)return reply.code(400).send({error:'INVALID_YOUTUBE_SHORTS_REQUEST'});
+ const org=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 1`)).rows[0];
+ if(!org)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ const credential=(await pool.query(`SELECT c.credential_ciphertext,c.enabled FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id WHERE c.organization_id=$1 AND p.code='youtube' LIMIT 1`,[org.id])).rows[0];
+ if(!credential)return reply.code(503).send({error:'YOUTUBE_CREDENTIAL_NOT_CONFIGURED'});
+ if(!credential.enabled)return reply.code(409).send({error:'YOUTUBE_INTEGRATION_DISABLED'});
+ let apiKey:string;
+ try{apiKey=decryptIntegrationCredential(credential.credential_ciphertext);}catch{return reply.code(503).send({error:'YOUTUBE_CREDENTIAL_DECRYPT_FAILED'});}
+ const result=await runYouTubeShortsCollection(pool,{
+  apiKey,
+  query:parsed.data.query,
+  maxResults:parsed.data.maxResults,
+  publishedAfter:parsed.data.publishedAfter
+ });
+ await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'YOUTUBE_SHORTS_MANUAL_COLLECTION',$2)`,[
+  request.user?.id,
+  {query:parsed.data.query,maxResults:parsed.data.maxResults,publishedAfter:parsed.data.publishedAfter??null,received:result.received,succeeded:result.succeeded,failed:result.failed,skipped:result.skipped}
+ ]);
+ return{data:result};
+});
+app.post('/api/media-scan/analyze',{preHandler:requireAuth},async(request,reply)=>{const parsed=z.object({text:z.string().min(20).max(50000),filename:z.string().max(255).optional(),opdId:z.string().regex(/^\d+$/).optional()}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_OCR_TEXT'});const text=parsed.data.text.replace(/\s+/g,' ').trim();const negative=['gagal','korupsi','suap','kriminal','kecelakaan','banjir','macet','protes','keluhan','kritik','masalah','terlambat','lambat','kebakaran','ancaman','sengketa'];const positive=['berhasil','sukses','prestasi','penghargaan','meningkat','investasi','terobosan','apresiasi','aman','lancar','kolaborasi','pertumbuhan'];const lower=text.toLowerCase();const neg=negative.filter(k=>lower.includes(k)).length;const pos=positive.filter(k=>lower.includes(k)).length;const sentiment=neg>pos?'negative':pos>neg?'positive':'neutral';const risk=Math.min(100,20+neg*12+(text.length>1200?15:0));const risk_level=risk>=80?'critical':risk>=60?'high':risk>=35?'medium':'low';const headline=text.split(/[.!?]/)[0].slice(0,180)||parsed.data.filename||'Media cetak terdeteksi';const summary=text.slice(0,500);const recommendation=risk_level==='critical'||risk_level==='high'?'Validasi fakta segera, koordinasikan OPD terkait, tetapkan juru bicara dan siapkan holding statement.':'Monitor perkembangan dan siapkan data pendukung bila isu berkembang.';const key_message=sentiment==='negative'?'Pemko sedang melakukan verifikasi fakta dan koordinasi penanganan serta akan menyampaikan perkembangan melalui kanal resmi.':'Pemko terus menyampaikan informasi berbasis data yang dapat diverifikasi publik.';return{data:{mode:'deterministic-ocr',filename:parsed.data.filename||null,analysis:{headline,summary,sentiment,risk_score:risk,risk_level,impact_score:Math.min(100,20+Math.floor(text.length/80)),opd_name:parsed.data.opdId?'OPD terpilih':'Belum dipetakan',recommendation,key_message}}};});
+app.post('/api/media-scans',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{const parsed=z.object({text:z.string().min(20).max(50000),filename:z.string().max(255).optional(),opdId:z.string().regex(/^\d+$/).optional(),analysis:z.record(z.string(),z.any())}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_MEDIA_SCAN'});const opdId=filterOpd(request.user,parsed.data.opdId);const {rows}=await pool.query(`INSERT INTO media_scans(source_id,opd_id,file_name,ocr_text,analysis,status,processed_at) VALUES(NULL,$1,$2,$3,$4,'completed',NOW()) RETURNING id,opd_id,file_name,analysis,status,created_at,processed_at`,[opdId,parsed.data.filename||null,parsed.data.text,parsed.data.analysis]);await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'MEDIA_SCAN_SAVED',$2)`,[request.user?.id,{mediaScanId:rows[0].id,opdId}]);return{data:rows[0]};});
+app.get('/api/media-scans',{preHandler:requireAuth},async(request,reply)=>{const q=z.object({from:z.string().optional(),to:z.string().optional(),opdId:z.string().regex(/^\d+$/).optional(),limit:z.coerce.number().int().min(1).max(100).default(50)}).safeParse(request.query);if(!q.success)return reply.code(400).send({error:'INVALID_QUERY'});const params:unknown[]=[];const where:string[]=[];const opdId=filterOpd(request.user,q.data.opdId);if(opdId){params.push(opdId);where.push(`m.opd_id=$${params.length}`);}if(q.data.from){params.push(q.data.from);where.push(`m.created_at >= $${params.length}`);}if(q.data.to){params.push(q.data.to);where.push(`m.created_at < $${params.length}`);}params.push(q.data.limit);const {rows}=await pool.query(`SELECT m.id,m.opd_id,m.file_name,m.analysis,m.status,m.created_at,m.processed_at,o.name opd_name FROM media_scans m LEFT JOIN opd o ON o.id=m.opd_id ${where.length?'WHERE '+where.join(' AND '):''} ORDER BY m.created_at DESC LIMIT $${params.length}`,params);return{data:rows};});
+const incidentId=z.coerce.number().int().positive();
+app.get('/api/incidents',{preHandler:requireAuth},async(request,reply)=>{const q=z.object({opdId:z.string().regex(/^\d+$/).optional(),status:z.enum(['MONITORING','ESCALATED','RESOLVED']).optional(),limit:z.coerce.number().int().min(1).max(100).default(50)}).safeParse(request.query);if(!q.success)return reply.code(400).send({error:'INVALID_QUERY'});const params:unknown[]=[];const where:string[]=[];const opdId=filterOpd(request.user,q.data.opdId);if(opdId){params.push(opdId);where.push(`i.opd_id=$${params.length}`);}if(q.data.status){params.push(q.data.status);where.push(`i.status=$${params.length}`);}params.push(q.data.limit);const {rows}=await pool.query(`SELECT i.*,o.name opd_name FROM incidents i LEFT JOIN opd o ON o.id=i.opd_id ${where.length?'WHERE '+where.join(' AND '):''} ORDER BY i.updated_at DESC LIMIT $${params.length}`,params);return{data:rows};});
+app.post('/api/incidents',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{const parsed=z.object({opdId:z.string().regex(/^\d+$/).optional(),title:z.string().min(3).max(255),severity:z.enum(['LOW','MEDIUM','HIGH','CRITICAL']).default('MEDIUM'),trigger:z.string().max(2000).optional(),commandOwnerId:z.string().regex(/^\d+$/).nullable().optional()}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_INCIDENT'});const opdId=filterOpd(request.user,parsed.data.opdId);const owner=parsed.data.commandOwnerId===undefined?null:parsed.data.commandOwnerId;const {rows}=await pool.query(`INSERT INTO incidents(opd_id,title,severity,status,trigger,command_owner_id) VALUES($1,$2,$3,'MONITORING',$4,$5) RETURNING *`,[opdId,parsed.data.title,parsed.data.severity,parsed.data.trigger||null,owner]);await pool.query(`INSERT INTO incident_events(incident_id,event_type,payload,created_by) VALUES($1,'INCIDENT_CREATED',$2,$3)`,[rows[0].id,{severity:rows[0].severity},request.user?.id]);await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'INCIDENT_CREATED',$2)`,[request.user?.id,{incidentId:rows[0].id,opdId}]);return reply.code(201).send({data:rows[0]});});
+app.patch('/api/incidents/:id',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{const id=incidentId.safeParse((request.params as any).id);if(!id.success)return reply.code(400).send({error:'INVALID_INCIDENT_ID'});const parsed=z.object({title:z.string().min(3).max(255).optional(),severity:z.enum(['LOW','MEDIUM','HIGH','CRITICAL']).optional(),status:z.enum(['MONITORING','ESCALATED','RESOLVED']).optional(),commandOwnerId:z.string().regex(/^\d+$/).nullable().optional(),decisionRequired:z.string().max(2000).nullable().optional()}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_REQUEST'});const current=(await pool.query(`SELECT * FROM incidents WHERE id=$1 AND ($2::text IS NULL OR opd_id=$2::bigint)`,[id.data,request.user?.role==='admin'?null:request.user?.opdId])).rows[0];if(!current)return reply.code(404).send({error:'INCIDENT_NOT_FOUND'});const owner=parsed.data.commandOwnerId===undefined?current.command_owner_id:parsed.data.commandOwnerId;const values=[parsed.data.title??current.title,parsed.data.severity??current.severity,parsed.data.status??current.status,owner,parsed.data.decisionRequired===undefined?current.decision_required:parsed.data.decisionRequired,id.data];const {rows}=await pool.query(`UPDATE incidents SET title=$1,severity=$2,status=$3,command_owner_id=$4,decision_required=$5,updated_at=NOW(),resolved_at=CASE WHEN $3='RESOLVED' THEN COALESCE(resolved_at,NOW()) ELSE resolved_at END WHERE id=$6 AND ($7::text IS NULL OR opd_id=$7::bigint) RETURNING *`,[...values,request.user?.role==='admin'?null:request.user?.opdId]);await pool.query(`INSERT INTO incident_events(incident_id,event_type,payload,created_by) VALUES($1,'INCIDENT_UPDATED',$2,$3)`,[id.data,{status:rows[0].status,severity:rows[0].severity},request.user?.id]);return{data:rows[0]};});
+app.post('/api/incidents/:id/tasks',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{const id=incidentId.safeParse((request.params as any).id);if(!id.success)return reply.code(400).send({error:'INVALID_INCIDENT_ID'});const parsed=z.object({type:z.enum(['VERIFY','COORDINATE','MESSAGE','MONITOR']),title:z.string().min(3).max(255),ownerId:z.string().regex(/^\d+$/).nullable().optional(),dueAt:z.string().datetime().nullable().optional()}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_TASK'});const exists=(await pool.query(`SELECT id FROM incidents WHERE id=$1 AND ($2::text IS NULL OR opd_id=$2::bigint)`,[id.data,request.user?.role==='admin'?null:request.user?.opdId])).rows[0];if(!exists)return reply.code(404).send({error:'INCIDENT_NOT_FOUND'});const {rows}=await pool.query(`INSERT INTO incident_tasks(incident_id,type,title,status,owner_id,due_at) VALUES($1,$2,$3,'OPEN',$4,$5) RETURNING *`,[id.data,parsed.data.type,parsed.data.title,parsed.data.ownerId??null,parsed.data.dueAt??null]);return reply.code(201).send({data:rows[0]});});
+app.patch('/api/incidents/:id/tasks/:taskId',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{const id=incidentId.safeParse((request.params as any).id);const task=incidentId.safeParse((request.params as any).taskId);if(!id.success||!task.success)return reply.code(400).send({error:'INVALID_ID'});const parsed=z.object({status:z.enum(['OPEN','IN_PROGRESS','DONE','BLOCKED'])}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_TASK'});const isAdmin=request.user?.role==='admin';const params:unknown[]=[parsed.data.status,task.data,id.data];const scope=isAdmin?'':` AND i.opd_id=$4`;if(!isAdmin)params.push(request.user?.opdId);const {rows}=await pool.query(`UPDATE incident_tasks t SET status=$1,updated_at=NOW() FROM incidents i WHERE t.id=$2 AND t.incident_id=$3${scope} RETURNING t.*`,params);if(!rows[0])return reply.code(404).send({error:'TASK_NOT_FOUND'});return{data:rows[0]};});
+app.get('/api/incidents/:id/events',{preHandler:requireAuth},async(request,reply)=>{const id=incidentId.safeParse((request.params as any).id);if(!id.success)return reply.code(400).send({error:'INVALID_INCIDENT_ID'});const scope=request.user?.role==='admin'?'':` AND i.opd_id=$2`;const params:unknown[]=[id.data];if(request.user?.role!=='admin')params.push(request.user?.opdId);const {rows}=await pool.query(`SELECT e.* FROM incident_events e JOIN incidents i ON i.id=e.incident_id WHERE e.incident_id=$1${scope} ORDER BY e.created_at DESC LIMIT 200`,params);return{data:rows};});
+app.post('/api/incidents/:id/decisions',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{const id=incidentId.safeParse((request.params as any).id);if(!id.success)return reply.code(400).send({error:'INVALID_INCIDENT_ID'});const parsed=z.object({decision:z.string().min(3).max(4000),status:z.enum(['DRAFT','APPROVED','REJECTED']).default('DRAFT')}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_DECISION'});const exists=(await pool.query(`SELECT i.id FROM incidents i WHERE i.id=$1 AND ($2::text IS NULL OR i.opd_id=$2::bigint)`,[id.data,request.user?.role==='admin'?null:request.user?.opdId])).rows[0];if(!exists)return reply.code(404).send({error:'INCIDENT_NOT_FOUND'});const {rows}=await pool.query(`INSERT INTO incident_decisions(incident_id,decision,status,created_by) VALUES($1,$2,$3,$4) RETURNING *`,[id.data,parsed.data.decision,parsed.data.status,request.user?.id]);return reply.code(201).send({data:rows[0]});});
+app.post('/api/incidents/:id/decisions/:decisionId/approve',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{const id=incidentId.safeParse((request.params as any).id);const decision=incidentId.safeParse((request.params as any).decisionId);if(!id.success||!decision.success)return reply.code(400).send({error:'INVALID_ID'});const scope=request.user?.role==='admin'?'':` AND i.opd_id=$4`;const params:unknown[]=[request.user?.id,decision.data,id.data];if(request.user?.role!=='admin')params.push(request.user?.opdId);const {rows}=await pool.query(`UPDATE incident_decisions d SET status='APPROVED',approved_by=$1,approved_at=NOW() FROM incidents i WHERE d.id=$2 AND d.incident_id=$3${scope} RETURNING d.*`,params);if(!rows[0])return reply.code(404).send({error:'DECISION_NOT_FOUND'});return{data:rows[0]};});
+app.post('/api/incidents/:id/escalate',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{const id=incidentId.safeParse((request.params as any).id);if(!id.success)return reply.code(400).send({error:'INVALID_INCIDENT_ID'});const parsed=z.object({reason:z.string().min(3).max(1000).optional()}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_REQUEST'});const scope=request.user?.role==='admin'?'':` AND opd_id=$2`;const params:unknown[]=[id.data];if(request.user?.role!=='admin')params.push(request.user?.opdId);const {rows}=await pool.query(`UPDATE incidents SET status='ESCALATED',updated_at=NOW() WHERE id=$1${scope} RETURNING *`,params);if(!rows[0])return reply.code(404).send({error:'INCIDENT_NOT_FOUND'});await pool.query(`INSERT INTO incident_events(incident_id,event_type,payload,created_by) VALUES($1,'INCIDENT_ESCALATED',$2,$3)`,[id.data,{reason:parsed.data.reason||'Manual escalation'},request.user?.id]);await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'INCIDENT_ESCALATED',$2)`,[request.user?.id,{incidentId:id.data,reason:parsed.data.reason||'Manual escalation'}]);return{data:rows[0]};});
+await registerCollectionSchedulerRoutes(app,pool,env.jwtSecret);
+await registerAskIntelligence(app,pool,env.jwtSecret);
+app.setErrorHandler((error,_request,reply)=>{app.log.error(error);const statusCode=typeof (error as any)?.statusCode==='number'?(error as any).statusCode:500;return reply.code(statusCode).send({error:'INTERNAL_SERVER_ERROR'});});
+app.addHook('onClose',async()=>pool.end()); await app.listen({port:env.port,host:'0.0.0.0'});
