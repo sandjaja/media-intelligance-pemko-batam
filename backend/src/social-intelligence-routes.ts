@@ -225,6 +225,20 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     return{ok:true,data:{requested:ids.length,locked,skipped,failed:errors.length,errors:errors.slice(0,20)}};
   });
 
+  app.post('/api/admin/social/finalize-locked-intelligence',{preHandler:manager},async(request,reply)=>{
+    const p=z.object({mentionIds:z.array(z.number().int().positive()).min(1).max(100).optional()}).safeParse(request.body||{});
+    if(!p.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+    const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
+    const params:any[]=[];let idFilter='';
+    if(p.data.mentionIds?.length){params.push([...new Set(p.data.mentionIds)]);idFilter=' AND sm.id=ANY($1::bigint[])';}
+    const mentions=(await pool.query(`SELECT sm.id,sm.metadata,sm.opd_id FROM social_mentions sm LEFT JOIN opd o ON o.id=sm.opd_id WHERE sm.source_kind='external' AND o.organization_id=${p.data.mentionIds?.length?'$2':'$1'} AND sm.metadata->'v16Routing'->>'newsClassification'='UTAMA' AND sm.metadata->'v16Routing'->>'routingStatus'='ROUTED' AND sm.opd_id IS NOT NULL AND (sm.metadata->'socialVerification'->>'status'='LOCKED' OR sm.metadata->'manualClassification'->>'locked'='true') AND COALESCE(sm.metadata->'intelligence'->>'riskStatus','')<>'FINAL'${idFilter} ORDER BY sm.id LIMIT 100`,p.data.mentionIds?.length?[params[0],organizationId]:[organizationId])).rows;
+    let finalized=0,failed=0;const errors:Array<{id:number;error:string}>=[];const affectedIssueIds=new Set<number>();
+    for(const mention of mentions){try{const ok=await analyzeLockedSocialMention(pool,Number(mention.id));if(!ok)continue;finalized++;const linked=(await pool.query('SELECT issue_id FROM social_mention_issues WHERE mention_id=$1',[mention.id])).rows;for(const x of linked)affectedIssueIds.add(Number(x.issue_id));}catch(e){failed++;if(errors.length<20)errors.push({id:Number(mention.id),error:e instanceof Error?e.message:String(e)});}}
+    for(const issueId of affectedIssueIds){try{await recalculateIssueRisk(pool,issueId);}catch(e){request.log.warn({err:e,issueId},'Issue risk refresh after locked social intelligence finalization failed');}}
+    await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'SOCIAL_LOCKED_INTELLIGENCE_FINALIZED',$2::jsonb)`,[request.socialAuth!.id,JSON.stringify({organizationId,requested:p.data.mentionIds?.length||null,eligible:mentions.length,finalized,failed,affectedIssues:[...affectedIssueIds]})]).catch(()=>undefined);
+    return{ok:true,data:{eligible:mentions.length,finalized,failed,affectedIssues:[...affectedIssueIds],errors}};
+  });
+
   app.get('/api/social/mentions', { preHandler: auth }, async (request, reply) => {
     const parsed = z.object({
       platform: platformSchema.optional(),
