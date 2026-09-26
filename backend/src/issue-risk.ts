@@ -65,8 +65,10 @@ export async function recalculateIssueRisk(db:Db,issueId:number){
  const ownedCount=Number((await db.query(`SELECT COUNT(*)::int n FROM social_mention_issues x JOIN social_mentions sm ON sm.id=x.mention_id WHERE x.issue_id=$1 AND sm.source_kind='owned'`,[issueId])).rows[0]?.n||0);
 
  if(!valid.length){
-  await db.query(`UPDATE issues SET risk_level=NULL,updated_at=now() WHERE id=$1`,[issueId]);
-  return {issueId,assessed:false,externalEvidence:0,validEvidence:0,excludedEvidence:linked.length,ownedCount};
+  const metadata={engine:'issue-risk-event-v2',assessed:false,validEvidence:0,totalExternalEvidence:0,excludedEvidence:linked.length,ownedCount,sources:{online:0,print:0,social:0},reason:'NO_VALID_EXTERNAL_EVIDENCE'};
+  await db.query(`UPDATE issues SET risk_level=NULL,momentum=NULL,updated_at=now() WHERE id=$1`,[issueId]);
+  await db.query(`INSERT INTO issue_metrics(issue_id,media_volume,social_volume,positive_count,neutral_count,negative_count,velocity_score,influence_score,risk_score,metadata) VALUES($1,0,0,0,0,0,0,0,0,$2::jsonb)`,[issueId,JSON.stringify(metadata)]);
+  return {issueId,...metadata};
  }
  const counts={positive:0,neutral:0,negative:0};
  for(const e of valid){const s=String(e.sentiment||'').toLowerCase();if(s==='positive')counts.positive++;else if(s==='negative')counts.negative++;else counts.neutral++;}
