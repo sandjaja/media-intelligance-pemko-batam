@@ -4,7 +4,7 @@ export type IssueAngle={key:string;label:string;evidenceCount:number;evidence:Ar
 const ANGLES=[
  ['DEMAND_COMPLAINT','Tuntutan / Keluhan',['tuntut','tuntutan','menuntut','keluh','keluhan','aduan','protes','keberatan']],
  ['DISRUPTION','Gangguan / Hambatan',['gangguan','terganggu','terhambat','hambatan','terputus','macet','tergenang']],
- ['IMPACT','Dampak',['dampak','terdampak','akibat','kerugian','merugikan']],
+ ['IMPACT','Dampak',['dampak','berdampak','terdampak','akibat','kerugian','merugikan']],
  ['CAUSE','Penyebab',['penyebab','disebabkan','karena','pemicu']],
  ['HANDLING','Penanganan / Tindak Lanjut',['penanganan','ditangani','tindak lanjut','menindaklanjuti','perbaikan','diperbaiki','solusi','penyelesaian']],
  ['TARGET_PROGRESS','Target / Capaian',['target','capaian','realisasi','progres','perkembangan']],
