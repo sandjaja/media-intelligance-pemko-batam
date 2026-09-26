@@ -9,7 +9,7 @@ const ANGLES=[
  ['HANDLING','Penanganan / Tindak Lanjut',['penanganan','ditangani','tindak lanjut','menindaklanjuti','perbaikan','diperbaiki','solusi','penyelesaian']],
  ['TARGET_PROGRESS','Target / Capaian',['target','capaian','realisasi','progres','perkembangan']],
  ['TIMING_CERTAINTY','Jadwal / Kepastian',['jadwal','kapan','kepastian','dipastikan','batas waktu','tenggat']],
- ['RISK_THREAT','Risiko / Ancaman',['risiko','ancaman','darurat','bahaya','rawan']]
+ ['RISK_THREAT','Risiko / Ancaman',['risiko','berisiko','ancaman','darurat','bahaya','rawan']]
 ] as const;
 
 const norm=(v:any)=>String(v??'').toLocaleLowerCase('id-ID').replace(/https?:\/\/\S+/g,' ').replace(/[^a-z0-9\s]/g,' ').replace(/\s+/g,' ').trim();
