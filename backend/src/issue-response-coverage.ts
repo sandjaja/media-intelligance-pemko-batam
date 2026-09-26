@@ -1,4 +1,4 @@
-export type CoverageAngle={key:string;label:string;evidence:Array<{id:string;source:string;title:string|null}>};
+export type CoverageAngle={key:string;label:string;anchors?:string[];evidence:Array<{id:string;source:string;title:string|null}>};
 export type OwnedResponse={id:string|number;title?:string|null;content?:string|null;owned_account_id?:string|number|null;owned_account_name?:string|null};
 
 const STOP=new Set(['yang','dan','dengan','untuk','dari','pada','dalam','oleh','atau','ini','itu','akan','telah','sudah','kota','batam','pemko','pemerintah','berita','terkait','mengenai']);
@@ -8,7 +8,7 @@ const tokens=(v:any)=>[...new Set(norm(v).split(' ').filter(x=>x.length>=4&&!STO
 export function matchOfficialResponseCoverage(angles:CoverageAngle[],owned:OwnedResponse[]){
  const official=owned.map(o=>({id:String(o.id),title:o.title??null,account:o.owned_account_name??null,text:tokens([o.title,o.content].filter(Boolean).join(' '))}));
  const coverage=angles.map(angle=>{
-  const anchors=[...new Set(angle.evidence.flatMap(e=>tokens(e.title)))];
+  const anchors=angle.anchors?.length?[...new Set(angle.anchors)]:[...new Set(angle.evidence.flatMap(e=>tokens(e.title)))];
   let best:{id:string;title:string|null;account:string|null;shared:string[];score:number}|null=null;
   for(const o of official){
    const set=new Set(o.text),shared=anchors.filter(x=>set.has(x));
