@@ -15,7 +15,7 @@ export function calculateIssueRiskComponents(input:{negativeShare:number;negativ
  return {score,level:level(score),components:{sentiment:Math.round(sentiment),importance:Math.round(importance),impact:Math.round(impact),velocity:Math.round(velocity)}};
 }
 
-type Evidence={source:'online'|'print'|'social';sentiment:string|null;risk:number;importance:number;impact:number|null;velocity:number|null;valid:boolean};
+type Evidence={source:'online'|'print'|'social';sentiment:string|null;risk:number;importance:number;impact:number|null;velocity:number|null;occurredAt:string|Date|null;valid:boolean};
 
 export async function recalculateIssueRisk(db:Db,issueId:number){
  const issue=(await db.query(`SELECT id,status FROM issues WHERE id=$1`,[issueId])).rows[0];
@@ -24,7 +24,7 @@ export async function recalculateIssueRisk(db:Db,issueId:number){
  const online=(await db.query(`
   SELECT 'online' source,a.sentiment,COALESCE(a.risk_score,0)::float risk,
    COALESCE(a.importance_score,0)::float importance,
-   a.impact_score::float impact,a.velocity_score::float velocity,
+   a.impact_score::float impact,a.velocity_score::float velocity,a.published_at "occurredAt",
    (a.news_classification='UTAMA'
     AND (SELECT al.action FROM audit_logs al
          WHERE al.action IN ('ARTICLE_CLASSIFICATION_VERIFIED','ARTICLE_CLASSIFICATION_REOPENED')
@@ -36,7 +36,7 @@ export async function recalculateIssueRisk(db:Db,issueId:number){
   SELECT 'print' source,pa.sentiment,COALESCE(pa.risk_score,0)::float risk,
    COALESCE(pa.importance_score,0)::float importance,
    NULLIF(pa.ai_metadata->'intelligence'->>'impactScore','')::float impact,
-   NULLIF(pa.ai_metadata->'intelligence'->>'velocityScore','')::float velocity,
+   NULLIF(pa.ai_metadata->'intelligence'->>'velocityScore','')::float velocity,pe.edition_date "occurredAt",
    (lower(pa.status)='analyzed'
     AND pa.opd_id IS NOT NULL
     AND pa.ai_metadata->'v16Routing'->>'routingStatus'='ROUTED'
@@ -44,13 +44,13 @@ export async function recalculateIssueRisk(db:Db,issueId:number){
     AND pa.ai_metadata->'v16Routing'->>'keywordVerification'='ACCEPTED'
     AND pa.ai_metadata->'intelligence'->>'riskStatus'='FINAL'
     AND pa.sentiment IS NOT NULL AND COALESCE(pa.risk_score,0)>0) valid
-  FROM issue_print_articles x JOIN print_articles pa ON pa.id=x.print_article_id
+  FROM issue_print_articles x JOIN print_articles pa ON pa.id=x.print_article_id JOIN print_editions pe ON pe.id=pa.edition_id
   WHERE x.issue_id=$1 AND x.linkage_status='linked'`,[issueId])).rows;
  const social=(await db.query(`
   SELECT 'social' source,sm.sentiment,COALESCE(sm.risk_score,0)::float risk,
    COALESCE(sm.importance_score,0)::float importance,
    COALESCE(sm.influence_score,0)::float impact,
-   NULLIF(sm.metadata->'intelligence'->>'velocityScore','')::float velocity,
+   NULLIF(sm.metadata->'intelligence'->>'velocityScore','')::float velocity,COALESCE(sm.published_at,sm.captured_at) "occurredAt",
    (sm.source_kind='external'
     AND sm.metadata->'v16Routing'->>'newsClassification'='UTAMA'
     AND sm.metadata->'v16Routing'->>'routingStatus'='ROUTED'
@@ -76,11 +76,18 @@ export async function recalculateIssueRisk(db:Db,issueId:number){
  const importanceScore=clamp(avg(valid.map(e=>e.importance)));
  const impactValues=valid.map(e=>e.impact).filter((x):x is number=>x!=null&&Number.isFinite(x));
  const impactScore=clamp(impactValues.length?avg(impactValues):avg(valid.map(e=>e.risk)));
- const velocityValues=valid.map(e=>e.velocity).filter((x):x is number=>x!=null&&Number.isFinite(x));
- const velocityScore=clamp(velocityValues.length?avg(velocityValues):Math.min(100,valid.length*10));
+ const now=Date.now(),dayMs=24*60*60*1000;
+ const times=valid.map(e=>e.occurredAt?new Date(e.occurredAt).getTime():NaN).filter(Number.isFinite);
+ const recent24=times.filter(t=>t>=now-dayMs).length,previous24=times.filter(t=>t<now-dayMs&&t>=now-2*dayMs).length;
+ // Issue velocity measures publication acceleration, not the per-item text-analysis velocity.
+ // 50 = stable volume, >50 accelerating, <50 decelerating. A newly emerging issue with
+ // no prior-day baseline starts conservatively from its current 24h volume.
+ const velocityScore=clamp(previous24>0
+   ?50+(recent24-previous24)/Math.max(previous24,1)*25
+   :recent24>0?Math.min(75,25+recent24*10):0);
  const calculated=calculateIssueRiskComponents({negativeShare,negativeIntensity,importance:importanceScore,impact:impactScore,velocity:velocityScore});
  const riskScore=calculated.score,riskLevel=calculated.level;
- const metadata={engine:'issue-risk-event-v1',assessed:true,validEvidence:valid.length,totalExternalEvidence:valid.length,excludedEvidence:linked.length-valid.length,ownedCount,components:calculated.components,sentiment:{...counts,negativePercent:Math.round(counts.negative/valid.length*100),neutralPercent:Math.round(counts.neutral/valid.length*100),positivePercent:Math.round(counts.positive/valid.length*100)},sources:{online:valid.filter(x=>x.source==='online').length,print:valid.filter(x=>x.source==='print').length,social:valid.filter(x=>x.source==='social').length}};
+ const metadata={engine:'issue-risk-event-v1',assessed:true,validEvidence:valid.length,totalExternalEvidence:valid.length,excludedEvidence:linked.length-valid.length,ownedCount,components:calculated.components,sentiment:{...counts,negativePercent:Math.round(counts.negative/valid.length*100),neutralPercent:Math.round(counts.neutral/valid.length*100),positivePercent:Math.round(counts.positive/valid.length*100)},sources:{online:valid.filter(x=>x.source==='online').length,print:valid.filter(x=>x.source==='print').length,social:valid.filter(x=>x.source==='social').length},velocityWindow:{recent24,previous24,method:'24h_vs_previous_24h'}};
  await db.query(`UPDATE issues SET risk_level=$2,momentum=$3,updated_at=now() WHERE id=$1`,[issueId,riskLevel,level(velocityScore)]);
  await db.query(`INSERT INTO issue_metrics(issue_id,media_volume,social_volume,positive_count,neutral_count,negative_count,velocity_score,influence_score,risk_score,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb)`,[issueId,metadata.sources.online+metadata.sources.print,metadata.sources.social,counts.positive,counts.neutral,counts.negative,velocityScore,impactScore,riskScore,JSON.stringify(metadata)]);
  return {issueId,riskScore,riskLevel,...metadata};
