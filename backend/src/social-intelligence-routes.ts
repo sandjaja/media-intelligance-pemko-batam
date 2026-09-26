@@ -85,7 +85,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
             const metadata={...restMetadata,organizationScope:scopeDecision};
             await client.query(`UPDATE social_mentions SET opd_id=NULL,metadata=$2::jsonb,processing_status='captured',updated_at=NOW() WHERE id=$1`,[mention.id,JSON.stringify(metadata)]);
             await client.query(`DELETE FROM social_mention_keywords WHERE mention_id=$1`,[mention.id]);
-            await client.query(`DELETE FROM social_mention_issues WHERE mention_id=$1 AND COALESCE(linkage_source,'rule')<>'manual'`,[mention.id]);
+            const affectedIssueIds=(await client.query(`SELECT issue_id FROM social_mention_issues WHERE mention_id=$1 AND COALESCE(linkage_source,'rule')<>'manual'`,[mention.id])).rows.map((x:any)=>Number(x.issue_id));await client.query(`DELETE FROM social_mention_issues WHERE mention_id=$1 AND COALESCE(linkage_source,'rule')<>'manual'`,[mention.id]);for(const issueId of [...new Set(affectedIssueIds)])await recalculateIssueRisk(client,issueId);
             await client.query('COMMIT');
           }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
           if(scopeDecision.status==='OUT_OF_SCOPE')outOfScope++;else reviewScope++;
@@ -121,7 +121,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
           // Issue evidence is intentionally not created during re-analysis.
           // External social becomes eligible only after explicit socialVerification=LOCKED,
           // where the Issue Monitor applies period/source/topic matching.
-          await client.query(`DELETE FROM social_mention_issues WHERE mention_id=$1 AND COALESCE(linkage_source,'rule')<>'manual'`,[mention.id]);
+          const affectedIssueIds=(await client.query(`SELECT issue_id FROM social_mention_issues WHERE mention_id=$1 AND COALESCE(linkage_source,'rule')<>'manual'`,[mention.id])).rows.map((x:any)=>Number(x.issue_id));await client.query(`DELETE FROM social_mention_issues WHERE mention_id=$1 AND COALESCE(linkage_source,'rule')<>'manual'`,[mention.id]);for(const issueId of [...new Set(affectedIssueIds)])await recalculateIssueRisk(client,issueId);
           await client.query('COMMIT');
         } catch(e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
         analyzed++; if(routing.routingStatus==='AMBIGUOUS')ambigu++;else if(routing.newsClassification==='UTAMA')utama++;else pendukung++;
@@ -157,7 +157,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
       await client.query(`UPDATE social_mentions SET opd_id=$2,metadata=$3::jsonb,processing_status=$4,sentiment=NULL,sentiment_score=NULL,importance_score=NULL,influence_score=NULL,risk_score=NULL,risk_level=NULL,updated_at=NOW() WHERE id=$1`,[mentionId,routing.primaryOpdId,JSON.stringify(metadata),routing.routingStatus==='ROUTED'?'classified':'captured']);
       await client.query(`DELETE FROM social_mention_keywords WHERE mention_id=$1`,[mentionId]);
       if(routing.keywordId)await client.query(`INSERT INTO social_mention_keywords(mention_id,keyword_id,matched_text,match_count,confidence) VALUES($1,$2,$3,1,$4) ON CONFLICT(mention_id,keyword_id) DO UPDATE SET matched_text=EXCLUDED.matched_text,match_count=1,confidence=EXCLUDED.confidence`,[mentionId,routing.keywordId,routing.keyword??'',routing.score>0?Math.min(1,routing.score/100):0]);
-      await client.query(`DELETE FROM social_mention_issues WHERE mention_id=$1 AND COALESCE(linkage_source,'rule')<>'manual'`,[mentionId]);
+      const affectedIssueIds=(await client.query(`SELECT issue_id FROM social_mention_issues WHERE mention_id=$1 AND COALESCE(linkage_source,'rule')<>'manual'`,[mentionId])).rows.map((x:any)=>Number(x.issue_id));await client.query(`DELETE FROM social_mention_issues WHERE mention_id=$1 AND COALESCE(linkage_source,'rule')<>'manual'`,[mentionId]);for(const issueId of [...new Set(affectedIssueIds)])await recalculateIssueRisk(client,issueId);
       await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'SOCIAL_ORGANIZATION_SCOPE_APPROVED',$2::jsonb)`,[actor.id,JSON.stringify({mentionId:String(mentionId),organizationId,routingStatus:routing.routingStatus,newsClassification:routing.newsClassification,keywordId:routing.keywordId??null,opdId:routing.primaryOpdId??null})]);
       await client.query('COMMIT');
       return{ok:true,data:{mentionId:String(mentionId),organizationScope:approvedScope,routing}};
@@ -202,7 +202,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
       await client.query('BEGIN');
       const {intelligence:_staleIntelligence,...metadataWithoutIntelligence}=metadata;
       await client.query(`UPDATE social_mentions SET metadata=$2::jsonb,sentiment=NULL,sentiment_score=NULL,importance_score=NULL,influence_score=NULL,risk_score=NULL,risk_level=NULL,updated_at=NOW() WHERE id=$1`,[mentionId,JSON.stringify(metadataWithoutIntelligence)]);
-      await client.query(`DELETE FROM social_mention_issues WHERE mention_id=$1`,[mentionId]);
+      const affectedIssueIds=(await client.query(`SELECT issue_id FROM social_mention_issues WHERE mention_id=$1`,[mentionId])).rows.map((x:any)=>Number(x.issue_id));await client.query(`DELETE FROM social_mention_issues WHERE mention_id=$1`,[mentionId]);for(const issueId of [...new Set(affectedIssueIds)])await recalculateIssueRisk(client,issueId);
       await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'SOCIAL_CLASSIFICATION_REOPENED',$2::jsonb)`,[actor.id,JSON.stringify({mentionId:String(mentionId),reason:p.data.reason})]);
       await client.query('COMMIT');
     }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
