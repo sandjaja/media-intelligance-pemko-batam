@@ -43,3 +43,24 @@ import { matchOfficialResponseCoverage } from './issue-response-coverage.js';
   assert.notEqual(r.status,'NO_RESPONSE');
   assert.ok(r.coverage.some(x=>x.status==='PARTIAL'||x.status==='COVERED'));
  });
+
+ test('worker evidence exposes payment complaint and handling concerns beyond timing alone',()=>{
+  const r=extractIssueAngles([
+   {id:569,source:'online',title:'Pekerja PT Ghim Li suarakan nasib gaji satu bulan belum dibayar',summary:'Pekerja datang mengadu kepada pemerintah karena upah belum dibayarkan'},
+   {id:688,source:'online',title:'DPRD soroti tanggung jawab dan perlindungan pekerja',summary:'Belum jelas pihak yang bertanggung jawab terhadap hak pekerja dan pesangon'}
+  ]);
+  const keys=r.angles.map(x=>x.key);
+  assert.ok(keys.includes('DEMAND_COMPLAINT'));
+  assert.ok(keys.includes('TIMING_CERTAINTY'));
+ });
+ test('haze evidence exposes health impact and disruption without requiring generic complaint wording',()=>{
+  const r=extractIssueAngles([
+   {id:625,source:'online',title:'Kualitas Udara Batam Tak Sehat, Siswa Belajar dari Rumah'},
+   {id:737,source:'online',title:'Kualitas Udara Batam Mulai Membaik',summary:'Kasus ISPA mencapai 517 kasus dan warga diminta waspada saat beraktivitas di luar ruangan'}
+  ]);
+  const keys=r.angles.map(x=>x.key);
+  assert.ok(keys.includes('IMPACT'));
+  assert.ok(keys.includes('DISRUPTION'));
+  assert.ok(!keys.includes('TARGET_PROGRESS'));
+  assert.ok(!keys.includes('DEMAND_COMPLAINT'));
+ });
