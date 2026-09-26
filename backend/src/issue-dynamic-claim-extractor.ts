@@ -26,8 +26,8 @@ const ref=(e:IssueAngleEvidence)=>`${e.source}:${e.id}`;
 const clip=(v:any,n=2400)=>String(v??'').slice(0,n);
 
 export async function extractDynamicIssueClaims(evidence:IssueAngleEvidence[]){
- const fallback=()=>{const r=extractIssueAngles(evidence);return{...r,mode:'deterministic-fallback' as const,claims:r.angles.map(a=>({...a,claim:a.label,confidence:0,evidenceIds:a.evidence.map(x=>`${x.source}:${x.id}`)}))}};
- const key=process.env.OPENAI_API_KEY;if(!key||!evidence.length)return fallback();
+ const fallback=(reason='UNKNOWN')=>{const r=extractIssueAngles(evidence);return{...r,mode:'deterministic-fallback' as const,fallbackReason:reason,claims:r.angles.map(a=>({...a,claim:a.label,confidence:0,evidenceIds:a.evidence.map(x=>`${x.source}:${x.id}`)}))}};
+ const key=process.env.OPENAI_API_KEY;if(!evidence.length)return fallback('NO_VALID_EVIDENCE');if(!key)return fallback('OPENAI_API_KEY_MISSING');
  const model=process.env.OPENAI_MODEL||'gpt-5-mini';
  const source=evidence.slice(0,40).map(e=>({evidenceId:ref(e),source:e.source,title:clip(e.title,500),text:clip([e.summary,e.content,e.body_text].filter(Boolean).join(' '))}));
  try{
@@ -49,7 +49,7 @@ export async function extractDynamicIssueClaims(evidence:IssueAngleEvidence[]){
    const ev=ids.map((id:string)=>byId.get(id)).filter(Boolean) as IssueAngleEvidence[];
    return{key:type,label:TYPES[type],claim:String(c.claim||'').trim().slice(0,500),confidence:Math.max(0,Math.min(1,Number(c.confidence)||0)),evidenceIds:ids,evidenceCount:ev.length,evidence:ev.map(e=>({id:String(e.id),source:e.source,title:e.title??null})),anchors:[]};
   }).filter((c:DynamicClaim)=>c.claim.length>=8&&c.evidenceIds.length>0&&c.confidence>=0.45);
-  if(!claims.length)return fallback();
-  return{angles:claims,claims,unclassified:[],totalEvidence:evidence.length,mode:'ai-dynamic' as const};
- }catch{return fallback()}
+  if(!claims.length)return fallback('AI_RETURNED_NO_VALID_CLAIMS');
+  return{angles:claims,claims,unclassified:[],totalEvidence:evidence.length,mode:'ai-dynamic' as const,fallbackReason:null};
+ }catch(error:any){const reason=String(error?.message||error||'UNKNOWN').slice(0,180);console.warn('[communication-gap] dynamic claim fallback:',reason);return fallback(reason)}
 }
