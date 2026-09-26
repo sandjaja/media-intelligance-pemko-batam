@@ -70,7 +70,7 @@ export async function analyzeArticle(pool:Pool,articleId:string,options:Analysis
    classification:hasKeyword&&hasPrimary?'UTAMA':ambiguous?'UTAMA':'PENDUKUNG',
    source:'AUTO' as const,
    reason:hasKeyword&&hasPrimary?'Master Keyword found and mapped to Primary OPD':ambiguous?'OPD context found but no Master Keyword; Humas review required':'no Master Keyword and no OPD evidence',
-   signals:hasKeyword&&hasPrimary?[`MASTER_PRIMARY_OPD:${routing.opdId}`,...(routing?.matchedKeywords??[]).slice(0,8).map((k:string)=>`MASTER_KEYWORD:${k}`)]:ambiguous?[...(gateSignals??[]),...(routing?.opdId?[\`AMBIGUOUS_OPD:${routing.opdId}\`]:[])]:[]
+   signals:hasKeyword&&hasPrimary?[`MASTER_PRIMARY_OPD:${routing.opdId}`,...(routing?.matchedKeywords??[]).slice(0,8).map((k:string)=>`MASTER_KEYWORD:${k}`)]:ambiguous?[...(gateSignals??[]),...(routing?.opdId?[`AMBIGUOUS_OPD:${routing.opdId}`]:[])]:[]
   };
   await pool.query(`UPDATE articles SET news_classification=$2,news_classification_source='AUTO',news_classification_changed_by=NULL,news_classification_changed_at=NOW() WHERE id=$1 AND news_classification_source<>'MANUAL'`,[articleId,news.classification]);
  }else if(news.classification==='UTAMA'){
