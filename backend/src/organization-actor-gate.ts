@@ -16,6 +16,10 @@ function uniqueTerms(values: Array<string | null | undefined>): string[] {
 function containsTerm(text: string, term: string): boolean {
   return !!text && !!term && (` ${text} `).includes(` ${term} `);
 }
+const ORGANIZATION_SCOPE_EARLY_BODY_CHARS = 2000;
+function scopeContext(article: OnlineArticle): string {
+  return normalize(article.title + ' ' + String(article.excerpt ?? '').slice(0, ORGANIZATION_SCOPE_EARLY_BODY_CHARS));
+}
 function roundupHeadline(title: string): boolean {
   return /\b(?:daftar\s+\d+\s+berita|berita\s+pilihan|rangkuman\s+berita|berita\s+terpopuler|berita\s+populer|top\s+\d+\s+berita)\b/i.test(normalize(title));
 }
@@ -35,7 +39,7 @@ export function classifyArticleOrganizationScope(article: OnlineArticle, scope: 
   const { strong, supporting } = organizationScopeTerms(scope);
   if (!strong.length) return { status: 'OUT_OF_SCOPE', reason: 'organization scope has no strong terms', matchedTerms: [] };
   const title = normalize(article.title);
-  const context = normalize(`${article.title} ${article.excerpt ?? ''}`);
+  const context = scopeContext(article);
   const strongHits = strong.filter(term => containsTerm(context, term));
   const supportingHits = supporting.filter(term => containsTerm(context, term));
   if (roundupHeadline(title)) return { status: 'REVIEW', reason: 'roundup/list headline requires editorial review', matchedTerms: [...strongHits, ...supportingHits] };
@@ -54,7 +58,7 @@ function matchUnitActor(title: string, actor: OrganizationUnitActor): ActorMatch
 export function classifyOnlineArticleRole(article: OnlineArticle, scope: OrganizationMediaScope): OnlineNewsRoleDecision {
   const scopeDecision = classifyArticleOrganizationScope(article, scope);
   const title = normalize(article.title);
-  const context = normalize(`${article.title} ${article.excerpt ?? ''}`);
+  const context = scopeContext(article);
   const actorMatches: ActorMatch[] = [];
 
   // An internal actor is sufficient even when the event itself occurs outside the organization's city.
