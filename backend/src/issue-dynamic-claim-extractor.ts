@@ -27,20 +27,14 @@ const clip=(v:any,n=2400)=>String(v??'').slice(0,n);
 
 export async function extractDynamicIssueClaims(evidence:IssueAngleEvidence[]){
  const fallback=(reason='UNKNOWN')=>{const r=extractIssueAngles(evidence);return{...r,mode:'deterministic-fallback' as const,fallbackReason:reason,claims:r.angles.map(a=>({...a,claim:a.label,confidence:0,evidenceIds:a.evidence.map(x=>`${x.source}:${x.id}`)}))}};
- const key=process.env.OPENAI_API_KEY;if(!evidence.length)return fallback('NO_VALID_EVIDENCE');if(!key)return fallback('OPENAI_API_KEY_MISSING');
- const model=process.env.OPENAI_MODEL||'gpt-5-mini';
+ const key=process.env.GEMINI_API_KEY;if(!evidence.length)return fallback('NO_VALID_EVIDENCE');if(!key)return fallback('GEMINI_API_KEY_MISSING');
+ const model=process.env.GEMINI_MODEL||'gemini-2.5-flash-lite';
  const source=evidence.slice(0,40).map(e=>({evidenceId:ref(e),source:e.source,title:clip(e.title,500),text:clip([e.summary,e.content,e.body_text].filter(Boolean).join(' '))}));
  try{
-  const response=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${key}`},body:JSON.stringify({
-   model,
-   input:[
-    {role:'system',content:[{type:'input_text',text:`Anda mengekstrak concern/claim faktual dari evidence media untuk Communication Gap pemerintah. Jangan menambah fakta yang tidak ada. Gabungkan claim yang semakna. Claim harus spesifik dan singkat, bukan label generik. Setiap claim WAJIB menunjuk evidenceIds yang diberikan. angleType hanya salah satu: ${Object.keys(TYPES).join(', ')}. Gunakan OTHER bila tidak cocok; jangan memaksa kategori. confidence 0..1. Jangan menilai apakah pemerintah sudah menjawab claim. Output JSON object {"claims":[{"claim":"...","angleType":"...","confidence":0.0,"evidenceIds":["online:1"]}]}. Maksimal 12 claim.`}]},
-    {role:'user',content:[{type:'input_text',text:JSON.stringify(source)}]}
-   ],
-   text:{format:{type:'json_object'}},max_output_tokens:1800
-  })});
-  if(!response.ok)throw new Error(`AI provider HTTP ${response.status}`);
-  const payload=await response.json() as any,raw=payload.output_text||payload.output?.flatMap((x:any)=>x.content||[]).find((x:any)=>x.type==='output_text')?.text;
+  const prompt=`Anda mengekstrak concern/claim faktual dari evidence media untuk Communication Gap pemerintah. Jangan menambah fakta yang tidak ada. Gabungkan claim yang semakna. Claim harus spesifik dan singkat, bukan label generik. Setiap claim WAJIB menunjuk evidenceIds yang diberikan. angleType hanya salah satu: ${Object.keys(TYPES).join(', ')}. Gunakan OTHER bila tidak cocok; jangan memaksa kategori. confidence 0..1. Jangan menilai apakah pemerintah sudah menjawab claim. Output JSON object {"claims":[{"claim":"...","angleType":"...","confidence":0.0,"evidenceIds":["online:1"]}]}. Maksimal 12 claim.\\n\\nEVIDENCE:\\n${JSON.stringify(source)}`;
+  const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}})});
+  if(!response.ok)throw new Error(`Gemini HTTP ${response.status}`);
+  const payload=await response.json() as any,raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');
   if(!raw)throw new Error('AI provider returned no text');
   const parsed=JSON.parse(raw),validIds=new Set(source.map(x=>x.evidenceId)),byId=new Map(evidence.map(e=>[ref(e),e]));
   const claims:DynamicClaim[]=(Array.isArray(parsed.claims)?parsed.claims:[]).slice(0,12).map((c:any)=>{
