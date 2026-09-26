@@ -38,3 +38,10 @@ test('district evidence in lead can establish Batam geographic scope',()=>{
  const d=classifyArticleOrganizationScope(article('Dishub mengecek feeder bus','Pengecekan dilakukan di Sekupang pada pagi hari.'),scope);
  assert.equal(d.status,'RELEVANT');
 });
+
+
+test('Batam evidence beyond early body does not automatically confirm organization scope',()=>{
+ const excerpt='Dishub mengecek layanan feeder. '+ 'Informasi umum '.repeat(180) +' Batam menjadi pembahasan lain di bagian bawah artikel.';
+ const d=classifyArticleOrganizationScope(article('Dishub mengecek feeder bus',excerpt),scope);
+ assert.equal(d.status,'REVIEW');
+});
