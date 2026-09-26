@@ -1,9 +1,15 @@
 import type { Pool } from 'pg';
 import { getV16PrimaryEvidence, getV16HeadlineTaxonomies } from './context-dominance-v16.js';
+import { loadOrganizationMediaScope } from './organization-media-scope.js';
 
 function normalize(value:string){return String(value||'').toLowerCase().normalize('NFKC').replace(/[^\p{L}\p{N}\s-]/gu,' ').replace(/\s+/g,' ').trim();}
 function containsPhrase(text:string,phrase:string){const t=` ${normalize(text)} `,p=normalize(phrase);return p.length>=2&&t.includes(` ${p} `);}
 function uptdTerms(row:{name?:string;code?:string;aliases?:unknown}){const out=new Set<string>();for(const raw of [row.name,row.code,...(Array.isArray(row.aliases)?row.aliases:[])]){const term=normalize(String(raw||''));if(term.length>=3)out.add(term);}return [...out];}
+async function detectArticleOpdContext(pool:Pool,text:string){
+ const scope=await loadOrganizationMediaScope(pool);if(!scope)return null;
+ const normalizedText=normalize(text),matches=new Map<number,{id:number;name:string;code:string|null}>();
+ for(const actor of scope.actors){const opdId=actor.kind==='OPD'?actor.id:actor.opdId;if(!opdId)continue;if(!actor.aliases.some(term=>containsPhrase(normalizedText,String(term||''))))continue;const existing=matches.get(opdId);matches.set(opdId,{id:opdId,name:actor.kind==='OPD'?actor.name:(existing?.name||actor.name),code:actor.kind==='OPD'?(actor.code??null):(existing?.code??null)});} return matches.size===1?[...matches.values()][0]:null;
+}
 
 export async function routeArticleV16(pool:Pool,articleId:string){
  const article=(await pool.query(`SELECT id,title,summary,content FROM articles WHERE id=$1`,[articleId])).rows[0];if(!article)return null;
@@ -14,10 +20,11 @@ export async function routeArticleV16(pool:Pool,articleId:string){
  await pool.query(`DELETE FROM issue_articles WHERE article_id=$1 AND assignment_source='AUTO'`,[articleId]);
  await pool.query(`DELETE FROM article_entities WHERE article_id=$1 AND entity_type IN ('keyword','taxonomy','uptd')`,[articleId]);
  if(!evidence){
-  await pool.query(`UPDATE articles SET opd_id=NULL WHERE id=$1`,[articleId]);
-  const ambiguous=headlineTaxonomies.length>0;
-  if(ambiguous)for(const taxonomy of headlineTaxonomies.slice(0,3))await pool.query(`INSERT INTO article_entities(article_id,entity_type,entity_name) VALUES($1,'taxonomy',$2) ON CONFLICT DO NOTHING`,[articleId,taxonomy.name]);
-  return{articleId:String(articleId),classificationSource:ambiguous?'AUTO_AMBIGUOUS':'AUTO',routingStatus:ambiguous?'AMBIGUOUS':'UNROUTED',headlineTaxonomyIds:headlineTaxonomies.map(t=>t.id),headlineTaxonomyNames:headlineTaxonomies.map(t=>t.name),opdId:null,supportingOpdIds:[],districtId:null,uptdId:null,uptdName:null,uptdMatches:0,taxonomyId:headlineTaxonomies[0]?.id??null,taxonomyName:headlineTaxonomies[0]?.name??null,taxonomyScore:0,issueId:null,issueMatchScore:0,issueAssignmentSource:null,keywordMatches:0,matchedKeywords:[]};
+  const opdContext=await detectArticleOpdContext(pool,String(article.title||'')+' '+String(article.summary||'')+' '+String(article.content||''));
+  await pool.query(`UPDATE articles SET opd_id=$2 WHERE id=$1`,[articleId,opdContext?.id??null]);
+  if(headlineTaxonomies.length)for(const taxonomy of headlineTaxonomies.slice(0,3))await pool.query(`INSERT INTO article_entities(article_id,entity_type,entity_name) VALUES($1,'taxonomy',$2) ON CONFLICT DO NOTHING`,[articleId,taxonomy.name]);
+  const ambiguous=!!opdContext;
+  return{articleId:String(articleId),classificationSource:ambiguous?'AUTO_AMBIGUOUS':'AUTO',routingStatus:ambiguous?'AMBIGUOUS':'UNROUTED',headlineTaxonomyIds:headlineTaxonomies.map(t=>t.id),headlineTaxonomyNames:headlineTaxonomies.map(t=>t.name),opdId:opdContext?.id??null,opdName:opdContext?.name??null,opdCode:opdContext?.code??null,supportingOpdIds:[],districtId:null,uptdId:null,uptdName:null,uptdMatches:0,taxonomyId:headlineTaxonomies[0]?.id??null,taxonomyName:headlineTaxonomies[0]?.name??null,taxonomyScore:0,issueId:null,issueMatchScore:0,issueAssignmentSource:null,keywordMatches:0,matchedKeywords:[]};
  }
  const routingEvidence=JSON.stringify({keywordId:evidence.keywordId,keyword:evidence.keyword,matchType:evidence.matchType,engine:'context-dominance-v16'});
  await pool.query(`UPDATE articles SET opd_id=$2 WHERE id=$1`,[articleId,evidence.opdId]);
