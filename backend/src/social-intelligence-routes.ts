@@ -179,6 +179,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     const mention=(await pool.query(`SELECT id,title,source_kind,metadata,opd_id FROM social_mentions WHERE id=$1`,[mentionId])).rows[0];
     if(!mention)return reply.code(404).send({error:'MENTION_NOT_FOUND'});
     if(mention.source_kind!=='external')return reply.code(409).send({error:'EXTERNAL_SOCIAL_REQUIRED'});
+    if(p.data.action==='APPROVE'&&mention.metadata?.organizationScope?.status!=='RELEVANT')return reply.code(409).send({error:'SOCIAL_SCOPE_APPROVAL_REQUIRED'});
     const manualLocked=mention.metadata?.manualClassification?.locked===true,socialLocked=mention.metadata?.socialVerification?.status==='LOCKED';
     if(p.data.action==='APPROVE'){
       if(manualLocked||socialLocked)return reply.code(409).send({error:'SOCIAL_CLASSIFICATION_ALREADY_LOCKED'});
@@ -214,7 +215,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     const actor=request.socialAuth!,organizationId=await resolveOrganizationId(actor);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});const ids=[...new Set(p.data.mentionIds)];let locked=0,skipped=0;const errors:Array<{id:number;error:string}>=[];
     for(const mentionId of ids){try{
       const mention=(await pool.query(`SELECT id,source_kind,metadata,opd_id FROM social_mentions WHERE id=$1`,[mentionId])).rows[0];
-      if(!mention||mention.source_kind!=='external'||mention.metadata?.manualClassification?.locked===true||mention.metadata?.socialVerification?.status==='LOCKED'){skipped++;continue;}
+      if(!mention||mention.source_kind!=='external'||mention.metadata?.organizationScope?.status!=='RELEVANT'||mention.metadata?.manualClassification?.locked===true||mention.metadata?.socialVerification?.status==='LOCKED'){skipped++;continue;}
       const routing=mention.metadata?.v16Routing||{},classification=routing.newsClassification||(routing.routingStatus==='ROUTED'?'UTAMA':routing.routingStatus==='AMBIGUOUS'?'UTAMA':'PENDUKUNG');
       if(classification!=='UTAMA'||routing.routingStatus!=='ROUTED'||!mention.opd_id){skipped++;continue;}
       const verification={status:'LOCKED',verifiedBy:actor.id,verifiedAt:new Date().toISOString(),reason:'Persetujuan massal Media Sosial'};
