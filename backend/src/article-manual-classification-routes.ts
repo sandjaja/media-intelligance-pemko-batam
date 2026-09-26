@@ -88,6 +88,8 @@ export async function registerArticleManualClassificationRoutes(app:FastifyInsta
   if(p.data.action==='REOPEN'){
    if(!locked)return reply.code(409).send({error:'ARTICLE_CLASSIFICATION_NOT_LOCKED'});
    await audit(pool,actor.id,'ARTICLE_CLASSIFICATION_REOPENED',{organizationId,articleId:String(articleId),title:article.title,before,reason:p.data.reason,riskStatus:'PROVISIONAL'});
+   const affectedIssueIds=(await pool.query(`SELECT DISTINCT issue_id FROM issue_articles WHERE article_id=$1`,[articleId])).rows.map((row:any)=>Number(row.issue_id)).filter(Number.isFinite);
+   for(const issueId of affectedIssueIds)await recalculateIssueRisk(pool,issueId);
    return{ok:true,data:{articleId:String(articleId),action:'REOPEN',verificationStatus:'REOPENED',riskStatus:'PROVISIONAL',classification:article.news_classification,source:article.news_classification_source}};
   }
   if(p.data.action==='APPROVE'){
