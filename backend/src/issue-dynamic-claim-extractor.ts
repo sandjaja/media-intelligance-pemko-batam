@@ -12,6 +12,8 @@ export type DynamicClaim={
 };
 
 const TYPES:Record<string,string>={
+ INFORMATION_FACT:'Informasi / Fakta',
+ ACHIEVEMENT_SUCCESS:'Capaian / Prestasi',
  DEMAND_COMPLAINT:'Tuntutan / Keluhan',
  DISRUPTION:'Gangguan / Hambatan',
  IMPACT:'Dampak',
@@ -31,7 +33,41 @@ export async function extractDynamicIssueClaims(evidence:IssueAngleEvidence[]){
  const model=process.env.GEMINI_MODEL||'gemini-3.5-flash-lite';
  const source=evidence.slice(0,40).map(e=>({evidenceId:ref(e),source:e.source,title:clip(e.title,500),text:clip([e.summary,e.content,e.body_text].filter(Boolean).join(' '))}));
  try{
-  const prompt=`Anda adalah Dynamic External Concern Extractor untuk Communication Gap pemerintah. Tujuan Anda BUKAN merangkum semua fakta berita, melainkan menemukan concern eksternal yang masih perlu dijelaskan, dijawab, diklarifikasi, atau ditangani dalam komunikasi pemerintah.\n\nINCLUDE hanya bila evidence menunjukkan substansi seperti: masalah/keluhan/tuntutan; dampak atau gangguan yang menjadi perhatian; penyebab yang dipersoalkan atau perlu dijelaskan; risiko/ancaman; ketidakpastian jadwal/status/tanggung jawab; target/capaian yang dipertanyakan atau belum terpenuhi; atau penanganan yang dipersoalkan, belum selesai, belum jelas hasilnya, atau dinilai belum memadai.\n\nEXCLUDE fakta yang hanya menyatakan tindakan/respons pemerintah tanpa gap tersisa, misalnya pejabat menemui warga/pekerja, pemerintah mengimbau memakai masker, menerbitkan surat edaran, membentuk tim, membuka/menutup kegiatan, atau tindakan resmi lain, KECUALI evidence secara eksplisit menunjukkan tindakan tersebut dipersoalkan, belum memadai, belum selesai, belum jelas hasilnya, atau menjadi sumber concern. EXCLUDE pula fakta latar belakang/deskriptif yang tidak memerlukan jawaban komunikasi. Jangan mengubah tindakan pemerintah menjadi tuntutan/keluhan.\n\nUntuk setiap kandidat tentukan include true/false. Jika include=true, claim harus menuliskan substansi concern/gap-nya, bukan sekadar peristiwa. Gabungkan claim yang semakna. Jangan menambah fakta yang tidak ada. Setiap claim WAJIB menunjuk evidenceIds yang diberikan. angleType hanya salah satu: ${Object.keys(TYPES).join(', ')}. Gunakan OTHER bila tidak cocok; jangan memaksa kategori. confidence 0..1 adalah keyakinan bahwa ini benar-benar external concern yang relevan untuk Communication Gap. Jangan menilai apakah Owned Channel sudah menjawabnya; tahap lain yang akan melakukan coverage matching.\n\nOutput JSON object {"claims":[{"claim":"...","angleType":"...","confidence":0.0,"evidenceIds":["online:1"],"include":true,"excludeReason":null}]}. Kandidat yang include=false boleh dikembalikan untuk audit tetapi akan dibuang sistem. Maksimal 16 kandidat; prioritaskan concern substantif.\n\nEVIDENCE:\n${JSON.stringify(source)}`;
+  const prompt=`Anda adalah Dynamic Communication Angle Extractor untuk analisis komunikasi pemerintah. Analisis evidence media dari SUDUT KOMUNIKASI, bukan hanya mencari masalah. Setiap evidence valid dapat membawa informasi, capaian, concern, risiko, dampak, tuntutan, ketidakpastian, atau sudut komunikasi lain yang relevan.
+
+TUJUAN:
+- Representasikan substansi utama pemberitaan yang penting bagi komunikasi pemerintah.
+- Berita positif/netral/informatif TETAP diproses.
+- Berita problematik tetap menghasilkan concern yang perlu dijawab/diklarifikasi/ditangani.
+- Jangan memaksakan kesan masalah bila evidence hanya bersifat informatif atau capaian.
+
+PILIH ANGLE:
+INFORMATION_FACT = informasi/fakta publik yang substantif, kegiatan, keputusan, layanan, hasil acara, atau perkembangan faktual yang tidak dengan sendirinya merupakan masalah.
+ACHIEVEMENT_SUCCESS = capaian, prestasi, keberhasilan, penghargaan, target yang tercapai, atau hasil positif.
+DEMAND_COMPLAINT = tuntutan/keluhan/keberatan.
+DISRUPTION = gangguan/hambatan.
+IMPACT = dampak substantif.
+CAUSE = penyebab yang relevan/dipersoalkan.
+HANDLING = penanganan/tindak lanjut yang menjadi substansi penting; untuk berita problematik, gunakan ini hanya jika penanganannya sendiri dipersoalkan, belum selesai, belum jelas hasilnya, atau penting untuk menjelaskan perkembangan.
+TARGET_PROGRESS = target/capaian/progres yang belum final atau sedang berjalan; jangan gunakan untuk prestasi yang sudah tercapai bila ACHIEVEMENT_SUCCESS lebih tepat.
+TIMING_CERTAINTY = jadwal/kepastian/status/tanggung jawab yang belum jelas.
+RISK_THREAT = risiko/ancaman.
+OTHER = sudut komunikasi substantif yang tidak cocok kategori lain.
+
+ATURAN PENTING:
+1. Untuk berita informatif/positif, ekstrak informasi/capaian utamanya; jangan mengubahnya menjadi keluhan atau gap.
+2. Untuk berita problematik, prioritaskan unresolved concern: apa yang belum jelas, belum selesai, dikeluhkan, berisiko, atau berdampak.
+3. Fakta tindakan pemerintah seperti pejabat menemui warga, mengimbau, menerbitkan SE, membentuk tim, membuka/menutup kegiatan tidak boleh otomatis menjadi concern. Jika itu sekadar informasi netral yang memang merupakan substansi utama berita, boleh INFORMATION_FACT. Jika merupakan respons terhadap problem, jangan biarkan tindakan tersebut menutupi unresolved concern yang sebenarnya.
+4. Jangan menambah fakta. Gabungkan angle/claim yang semakna.
+5. Setiap claim harus spesifik, singkat, dan WAJIB menunjuk evidenceIds yang diberikan.
+6. Setiap evidence valid harus diwakili oleh minimal satu claim yang paling substantif bila memang memiliki isi bermakna; jangan membuat claim hanya dari boilerplate.
+7. angleType hanya salah satu: ${Object.keys(TYPES).join(', ')}. confidence 0..1.
+8. Jangan menilai coverage Owned Channel; tahap lain yang melakukannya.
+
+Output JSON object {"claims":[{"claim":"...","angleType":"...","confidence":0.0,"evidenceIds":["online:1"],"include":true,"excludeReason":null}]}. Maksimal 16 kandidat. Gunakan include=false hanya untuk boilerplate/noise/duplikasi yang tidak substantif.
+
+EVIDENCE:
+${JSON.stringify(source)}`
   const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}})});
   if(!response.ok)throw new Error(`Gemini HTTP ${response.status}`);
   const payload=await response.json() as any,raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');
