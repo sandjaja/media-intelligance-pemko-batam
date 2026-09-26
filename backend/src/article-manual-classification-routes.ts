@@ -92,6 +92,7 @@ export async function registerArticleManualClassificationRoutes(app:FastifyInsta
     await client.query('BEGIN');
     await audit(client,actor.id,'ARTICLE_CLASSIFICATION_REOPENED',{organizationId,articleId:String(articleId),title:article.title,before,reason:p.data.reason,riskStatus:'PROVISIONAL'});
     const affectedIssueIds=(await client.query(`SELECT DISTINCT issue_id FROM issue_articles WHERE article_id=$1`,[articleId])).rows.map((row:any)=>Number(row.issue_id)).filter(Number.isFinite);
+    if(article.news_classification==='PENDUKUNG')await client.query(`DELETE FROM issue_articles WHERE article_id=$1 AND COALESCE(assignment_source,'AUTO')<>'MANUAL'`,[articleId]);
     for(const issueId of affectedIssueIds)await recalculateIssueRisk(client,issueId);
     await client.query('COMMIT');
     return{ok:true,data:{articleId:String(articleId),action:'REOPEN',verificationStatus:'REOPENED',riskStatus:'PROVISIONAL',classification:article.news_classification,source:article.news_classification_source}};
