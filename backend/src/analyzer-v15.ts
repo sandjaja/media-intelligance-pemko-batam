@@ -69,8 +69,8 @@ export async function analyzeArticle(pool:Pool,articleId:string,options:Analysis
   news={
    classification:hasKeyword&&hasPrimary?'UTAMA':ambiguous?'UTAMA':'PENDUKUNG',
    source:'AUTO' as const,
-   reason:hasKeyword&&hasPrimary?'Master Keyword found and mapped to Primary OPD':ambiguous?'OPD/taxonomy context found but no Master Keyword; Humas review required':'no Master Keyword and no OPD evidence',
-   signals:hasKeyword&&hasPrimary?[`MASTER_PRIMARY_OPD:${routing.opdId}`,...(routing?.matchedKeywords??[]).slice(0,8).map((k:string)=>`MASTER_KEYWORD:${k}`)]:ambiguous?[...(gateSignals??[]),...(routing?.headlineTaxonomyNames??[]).map((t:string)=>`AMBIGUOUS_HEADLINE_TAXONOMY:${t}`)]:[]
+   reason:hasKeyword&&hasPrimary?'Master Keyword found and mapped to Primary OPD':ambiguous?'OPD context found but no Master Keyword; Humas review required':'no Master Keyword and no OPD evidence',
+   signals:hasKeyword&&hasPrimary?[`MASTER_PRIMARY_OPD:${routing.opdId}`,...(routing?.matchedKeywords??[]).slice(0,8).map((k:string)=>`MASTER_KEYWORD:${k}`)]:ambiguous?[...(gateSignals??[]),...(routing?.opdId?[\`AMBIGUOUS_OPD:${routing.opdId}\`]:[])]:[]
   };
   await pool.query(`UPDATE articles SET news_classification=$2,news_classification_source='AUTO',news_classification_changed_by=NULL,news_classification_changed_at=NOW() WHERE id=$1 AND news_classification_source<>'MANUAL'`,[articleId,news.classification]);
  }else if(news.classification==='UTAMA'){
@@ -89,7 +89,7 @@ export async function analyzeArticle(pool:Pool,articleId:string,options:Analysis
   await detachIneligibleIssueLinks(pool,articleId,'ONLINE_CLASSIFICATION_AMBIGUOUS');
   await pool.query(`UPDATE articles SET opd_id=NULL,news_classification='UTAMA',news_classification_source='AUTO',sentiment=NULL,importance_score=0,impact_score=NULL,velocity_score=NULL,risk_score=0,risk_level=NULL,is_highlight=false,classified_at=NOW(),classification_version=$2 WHERE id=$1`,[articleId,CLASSIFICATION_VERSION]);
   const reason=gateRole==='UTAMA'?(gateReason||'organization/OPD evidence found but Master Keyword requires Humas review'):'Master Classification requires Humas keyword review';
-  const signals=gateRole==='UTAMA'?gateSignals:(routing?.headlineTaxonomyNames??[]).map((t:string)=>`AMBIGUOUS_HEADLINE_TAXONOMY:${t}`);
+  const signals=gateRole==='UTAMA'?gateSignals:(routing?.opdId?[`AMBIGUOUS_OPD:${routing.opdId}`]:[]);
   return{articleId,newsClassification:'UTAMA',newsClassificationSource:'AUTO',newsClassificationReason:reason,newsClassificationSignals:signals,classificationSource:'AUTO_AMBIGUOUS',routingStatus:'AMBIGUOUS',needsVerification:true,classificationVersion:CLASSIFICATION_VERSION,opdId:null,supportingOpdIds:[],districtId:null,uptdId:null,uptdName:null,uptdMatches:0,taxonomyId:routing?.taxonomyId??null,taxonomyName:routing?.taxonomyName??null,taxonomyScore:0,issueId:null,issueMatchScore:0,issueAssignmentSource:null,sentiment:null,importance:0,impact:null,velocity:null,risk:null};
  }
  // AUTO UTAMA is a classification proposal only. Intelligence starts after Humas verifies/locks it.
