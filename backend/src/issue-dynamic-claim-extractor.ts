@@ -28,7 +28,7 @@ const clip=(v:any,n=2400)=>String(v??'').slice(0,n);
 export async function extractDynamicIssueClaims(evidence:IssueAngleEvidence[]){
  const fallback=(reason='UNKNOWN')=>{const r=extractIssueAngles(evidence);return{...r,mode:'deterministic-fallback' as const,fallbackReason:reason,claims:r.angles.map(a=>({...a,claim:a.label,confidence:0,evidenceIds:a.evidence.map(x=>`${x.source}:${x.id}`)}))}};
  const key=process.env.GEMINI_API_KEY;if(!evidence.length)return fallback('NO_VALID_EVIDENCE');if(!key)return fallback('GEMINI_API_KEY_MISSING');
- const model=process.env.GEMINI_MODEL||'gemini-2.5-flash-lite';
+ const model=process.env.GEMINI_MODEL||'gemini-3.5-flash-lite';
  const source=evidence.slice(0,40).map(e=>({evidenceId:ref(e),source:e.source,title:clip(e.title,500),text:clip([e.summary,e.content,e.body_text].filter(Boolean).join(' '))}));
  try{
   const prompt=`Anda mengekstrak concern/claim faktual dari evidence media untuk Communication Gap pemerintah. Jangan menambah fakta yang tidak ada. Gabungkan claim yang semakna. Claim harus spesifik dan singkat, bukan label generik. Setiap claim WAJIB menunjuk evidenceIds yang diberikan. angleType hanya salah satu: ${Object.keys(TYPES).join(', ')}. Gunakan OTHER bila tidak cocok; jangan memaksa kategori. confidence 0..1. Jangan menilai apakah pemerintah sudah menjawab claim. Output JSON object {"claims":[{"claim":"...","angleType":"...","confidence":0.0,"evidenceIds":["online:1"]}]}. Maksimal 12 claim.\\n\\nEVIDENCE:\\n${JSON.stringify(source)}`;
