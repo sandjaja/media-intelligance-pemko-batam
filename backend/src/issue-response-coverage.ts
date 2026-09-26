@@ -41,7 +41,8 @@ export async function matchDynamicOfficialResponseCoverage(angles:CoverageAngle[
  if(!angles.length)return{status:'UNASSESSED',coverage:[],officialResponseCount:owned.length,mode:'dynamic'};
  if(!owned.length)return{status:'NO_RESPONSE',coverage:angles.map(a=>({key:a.key,label:a.label,claim:a.claim||a.label,status:'NOT_COVERED',matchScore:0,matchedOfficial:null,externalEvidenceCount:a.evidence.length})),officialResponseCount:0,mode:'dynamic'};
  const key=process.env.OPENAI_API_KEY;
- if(!key||!angles.some(a=>a.claim))return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback'};
+ if(!key)return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback',fallbackReason:'OPENAI_API_KEY_MISSING'};
+ if(!angles.some(a=>a.claim))return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback',fallbackReason:'NO_DYNAMIC_CLAIMS'};
  const model=process.env.OPENAI_MODEL||'gpt-5-mini',claims=angles.map((a,i)=>({claimId:String(i),claim:a.claim||a.label,angleType:a.key})),responses=owned.slice(0,20).map(o=>({responseId:String(o.id),title:o.title||'',content:String(o.content||'').slice(0,4000)}));
  try{
   const response=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${key}`},body:JSON.stringify({model,input:[
@@ -53,6 +54,6 @@ export async function matchDynamicOfficialResponseCoverage(angles:CoverageAngle[
   const parsed=JSON.parse(raw),rows=Array.isArray(parsed.coverage)?parsed.coverage:[],byClaim=new Map(rows.map((x:any)=>[String(x.claimId),x])),byResponse=new Map(responses.map(x=>[x.responseId,x]));
   const coverage=angles.map((a,i)=>{const x:any=byClaim.get(String(i))||{},status=['COVERED','PARTIAL','NOT_COVERED'].includes(x.status)?x.status:'NOT_COVERED',r=byResponse.get(String(x.responseId));return{key:a.key,label:a.label,claim:a.claim||a.label,status,matchScore:Math.max(0,Math.min(100,Math.round(Number(x.score)||0))),reason:String(x.reason||'').slice(0,500),matchedOfficial:r?{id:r.responseId,title:r.title,account:null}:null,externalEvidenceCount:a.evidence.length}});
   const aggregate=coverage.every(x=>x.status==='COVERED')?'ADDRESSED':coverage.some(x=>x.status==='COVERED'||x.status==='PARTIAL')?'PARTIAL_RESPONSE':'NO_RESPONSE';
-  return{status:aggregate,coverage,officialResponseCount:owned.length,mode:'ai-dynamic'};
- }catch{return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback'}}
+  return{status:aggregate,coverage,officialResponseCount:owned.length,mode:'ai-dynamic',fallbackReason:null};
+ }catch(error:any){const reason=String(error?.message||error||'UNKNOWN').slice(0,180);console.warn('[communication-gap] response coverage fallback:',reason);return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback',fallbackReason:reason}}
 }
