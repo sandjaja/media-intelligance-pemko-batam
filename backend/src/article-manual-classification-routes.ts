@@ -87,10 +87,15 @@ export async function registerArticleManualClassificationRoutes(app:FastifyInsta
   const before={classification:article.news_classification,source:article.news_classification_source};
   if(p.data.action==='REOPEN'){
    if(!locked)return reply.code(409).send({error:'ARTICLE_CLASSIFICATION_NOT_LOCKED'});
-   await audit(pool,actor.id,'ARTICLE_CLASSIFICATION_REOPENED',{organizationId,articleId:String(articleId),title:article.title,before,reason:p.data.reason,riskStatus:'PROVISIONAL'});
-   const affectedIssueIds=(await pool.query(`SELECT DISTINCT issue_id FROM issue_articles WHERE article_id=$1`,[articleId])).rows.map((row:any)=>Number(row.issue_id)).filter(Number.isFinite);
-   for(const issueId of affectedIssueIds)await recalculateIssueRisk(pool,issueId);
-   return{ok:true,data:{articleId:String(articleId),action:'REOPEN',verificationStatus:'REOPENED',riskStatus:'PROVISIONAL',classification:article.news_classification,source:article.news_classification_source}};
+   const client=await pool.connect();
+   try{
+    await client.query('BEGIN');
+    await audit(client,actor.id,'ARTICLE_CLASSIFICATION_REOPENED',{organizationId,articleId:String(articleId),title:article.title,before,reason:p.data.reason,riskStatus:'PROVISIONAL'});
+    const affectedIssueIds=(await client.query(`SELECT DISTINCT issue_id FROM issue_articles WHERE article_id=$1`,[articleId])).rows.map((row:any)=>Number(row.issue_id)).filter(Number.isFinite);
+    for(const issueId of affectedIssueIds)await recalculateIssueRisk(client,issueId);
+    await client.query('COMMIT');
+    return{ok:true,data:{articleId:String(articleId),action:'REOPEN',verificationStatus:'REOPENED',riskStatus:'PROVISIONAL',classification:article.news_classification,source:article.news_classification_source}};
+   }catch(e){await client.query('ROLLBACK');request.log.error({err:e,articleId},'classification reopen failed');return reply.code(409).send({error:'CLASSIFICATION_REOPEN_FAILED',message:e instanceof Error?e.message:String(e)});}finally{client.release();}
   }
   if(p.data.action==='APPROVE'){
    // Only primary news may enter the verified/locked state used by Issue Evidence.
