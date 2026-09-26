@@ -66,7 +66,7 @@ export async function recalculateIssueRisk(db:Db,issueId:number){
 
  if(!valid.length){
   const metadata={engine:'issue-risk-event-v2',assessed:false,validEvidence:0,totalExternalEvidence:0,excludedEvidence:linked.length,ownedCount,sources:{online:0,print:0,social:0},reason:'NO_VALID_EXTERNAL_EVIDENCE'};
-  await db.query(`UPDATE issues SET risk_level=NULL,momentum=NULL,updated_at=now() WHERE id=$1`,[issueId]);
+  await db.query(`UPDATE issues SET risk_level=NULL,updated_at=now() WHERE id=$1`,[issueId]);
   await db.query(`INSERT INTO issue_metrics(issue_id,media_volume,social_volume,positive_count,neutral_count,negative_count,velocity_score,influence_score,risk_score,metadata) VALUES($1,0,0,0,0,0,0,0,0,$2::jsonb)`,[issueId,JSON.stringify(metadata)]);
   return {issueId,...metadata};
  }
