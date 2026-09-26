@@ -8,6 +8,10 @@ function fakePool(){
    if(sql.includes('FROM organizations WHERE active=true'))return{rows:[{id:'1',name:'Pemerintah Kota Contoh',code:'PKC'}]};
    if(sql.includes('FROM government_branding WHERE is_active=true'))return{rows:[{government_name:'Pemerintah Kota Contoh',short_name:'Pemko Contoh',aliases:['Pemkot Contoh'],city_name:'Kota Contoh',tagline:null}]};
    if(sql.includes('FROM districts WHERE organization_id='))return{rows:[{name:'Kecamatan Utara',code:'UTARA'}]};
+   if(sql.includes('SELECT v.name FROM villages'))return{rows:[]};
+   if(sql.includes('FROM organization_area_aliases'))return{rows:[]};
+   if(sql.includes('FROM opd WHERE organization_id='))return{rows:[{id:'20',name:'Dinas Pelayanan',code:'DP'},{id:'30',name:'Dinas Perhubungan',code:'DISHUB'}]};
+   if(sql.includes('FROM uptd WHERE organization_id='))return{rows:[]};
    if(sql.includes('FROM taxonomy_categories tc JOIN classification_sectors cs'))return{rows:[{id:'10',name:'Pelayanan Publik',sector_name:'Pemerintahan'},{id:'11',name:'Pelayanan Pemerintahan',sector_name:'Pemerintahan'}]};
    if(sql.includes('FROM keywords k JOIN keyword_taxonomy kt'))return{rows:[{keyword_id:'100',keyword:'pelayanan publik',evidence_strength:'DIRECT',taxonomy_id:'10',taxonomy_name:'Pelayanan Publik',taxonomy_weight:5,opd_id:'20',opd_weight:1,opd_name:'Dinas Pelayanan',opd_code:'DP'}]};
    if(sql.includes('FROM keyword_opd ko JOIN opd o'))return{rows:[{opd_id:'21'}]};
@@ -45,14 +49,28 @@ test('Social V17 finds Master Keyword in body and proposes UTAMA',async()=>{
  assert.equal(result.primaryOpdId,'20');
 });
 
-test('Social V17 returns AMBIGU when taxonomy is visible but Master Keyword is absent',async()=>{
+test('Social V17 returns PENDUKUNG when taxonomy is visible but Master Keyword and OPD are absent',async()=>{
  const result=await analyzeSocialRoutingV16(fakePool(),{
   title:'Pelayanan Pemerintahan menjadi perhatian warga',
+  content:'Warga meminta tindak lanjut.'
+ });
+ assert.equal(result.routingStatus,'UNROUTED');
+ assert.equal(result.newsClassification,'PENDUKUNG');
+ assert.equal(result.keywordId,null);
+ assert.equal(result.primaryOpdId,null);
+ assert.equal(result.needsVerification,true);
+});
+
+test('Social V17 returns AMBIGU when OPD is visible but Master Keyword is absent',async()=>{
+ const result=await analyzeSocialRoutingV16(fakePool(),{
+  title:'Dishub meninjau lokasi',
   content:'Warga meminta tindak lanjut.'
  });
  assert.equal(result.routingStatus,'AMBIGUOUS');
  assert.equal(result.newsClassification,'AMBIGU');
  assert.equal(result.keywordId,null);
+ assert.equal(result.primaryOpdId,'30');
+ assert.equal(result.primaryOpdName,'Dinas Perhubungan');
  assert.equal(result.needsVerification,true);
 });
 
