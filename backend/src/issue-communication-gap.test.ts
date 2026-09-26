@@ -36,3 +36,10 @@ import { matchOfficialResponseCoverage } from './issue-response-coverage.js';
  test('returns unassessed when no reliable external angle exists',()=>{
   assert.equal(matchOfficialResponseCoverage([],[]).status,'UNASSESSED');
  });
+
+ test('recognizes substantive haze mitigation response without requiring identical wording',()=>{
+  const angles=extractIssueAngles([{id:625,source:'online',title:'Kabut asap berdampak pada kualitas udara dan mengganggu aktivitas warga',summary:'Kualitas udara tidak sehat akibat kabut asap, warga mengalami gangguan pernapasan'}]).angles;
+  const r=matchOfficialResponseCoverage(angles,[{id:194,title:'Kabut Asap Melanda Batam, Berikut Imbauan Pemerintah',content:'Masyarakat diimbau mengurangi aktivitas di luar ruangan, menggunakan masker, memperbanyak minum air putih, memeriksakan gangguan pernapasan dan menghindari pembakaran sampah maupun lahan.'}]);
+  assert.notEqual(r.status,'NO_RESPONSE');
+  assert.ok(r.coverage.some(x=>x.status==='PARTIAL'||x.status==='COVERED'));
+ });
