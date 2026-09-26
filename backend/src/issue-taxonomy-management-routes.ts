@@ -6,7 +6,7 @@ import { linkEligibleOnline,linkEligibleSocial,findEligiblePrintCandidates } fro
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { recalculateIssueRisk } from './issue-risk.js';
 import { extractDynamicIssueClaims } from './issue-dynamic-claim-extractor.js';
-import { matchOfficialResponseCoverage } from './issue-response-coverage.js';
+import { matchDynamicOfficialResponseCoverage } from './issue-response-coverage.js';
 
 declare module 'fastify' { interface FastifyRequest { issueTaxonomyAuth?: AuthorizationContext } }
 const canManage=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
@@ -55,7 +55,7 @@ export async function registerIssueTaxonomyManagementRoutes(app:FastifyInstance,
   const external=[...online.map((x:any)=>({...x,source:'online'})),...print.map((x:any)=>({...x,source:'print'})),...social.filter((x:any)=>x.source_kind==='external').map((x:any)=>({...x,source:'social'}))];
   const validExternal=external.filter((x:any)=>x.valid===true),owned=social.filter((x:any)=>x.source_kind==='owned');
   const angleResult=await extractDynamicIssueClaims(validExternal);
-  const coverageResult=matchOfficialResponseCoverage(angleResult.angles,owned);
+  const coverageResult=await matchDynamicOfficialResponseCoverage(angleResult.angles,owned);
   const ts=(v:any)=>{const n=v?new Date(v).getTime():NaN;return Number.isFinite(n)?n:null},first=(xs:any[])=>xs.map(x=>ts(x.published_at)).filter((x:number|null):x is number=>x!==null).sort((a,b)=>a-b)[0]??null;
   const firstExternalMs=first(validExternal),firstOwnedMs=first(owned),lagHours=firstExternalMs!==null&&firstOwnedMs!==null?Math.round(((firstOwnedMs-firstExternalMs)/3600000)*10)/10:null;
   const baselineStatus=validExternal.length===0?'NO_EXTERNAL_EVIDENCE':owned.length===0?'NO_OFFICIAL_RESPONSE':'OFFICIAL_RESPONSE_DETECTED';
