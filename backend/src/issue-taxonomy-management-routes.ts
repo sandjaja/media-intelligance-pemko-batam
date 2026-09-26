@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { linkEligibleOnline,linkEligibleSocial,findEligiblePrintCandidates } from './issue-monitor-matcher.js';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { recalculateIssueRisk } from './issue-risk.js';
-import { extractIssueAngles } from './issue-angle-extractor.js';
+import { extractDynamicIssueClaims } from './issue-dynamic-claim-extractor.js';
 import { matchOfficialResponseCoverage } from './issue-response-coverage.js';
 
 declare module 'fastify' { interface FastifyRequest { issueTaxonomyAuth?: AuthorizationContext } }
@@ -54,7 +54,7 @@ export async function registerIssueTaxonomyManagementRoutes(app:FastifyInstance,
   const social=(await pool.query(`SELECT sm.id,sm.title,sm.content,sm.published_at,sm.source_kind,sm.owned_account_id,sm.opd_id,osa.account_name owned_account_name,osa.handle owned_account_handle,(sm.source_kind='external' AND sm.metadata->'v16Routing'->>'newsClassification'='UTAMA' AND sm.metadata->'v16Routing'->>'routingStatus'='ROUTED' AND sm.opd_id IS NOT NULL AND (sm.metadata->'socialVerification'->>'status'='LOCKED' OR sm.metadata->'manualClassification'->>'locked'='true') AND COALESCE(sm.metadata->'intelligence'->>'riskStatus','')='FINAL' AND sm.sentiment IS NOT NULL AND COALESCE(sm.risk_score,0)>0) valid FROM social_mention_issues smi JOIN social_mentions sm ON sm.id=smi.mention_id LEFT JOIN owned_social_accounts osa ON osa.id=sm.owned_account_id WHERE smi.issue_id=$1`,[issueId])).rows;
   const external=[...online.map((x:any)=>({...x,source:'online'})),...print.map((x:any)=>({...x,source:'print'})),...social.filter((x:any)=>x.source_kind==='external').map((x:any)=>({...x,source:'social'}))];
   const validExternal=external.filter((x:any)=>x.valid===true),owned=social.filter((x:any)=>x.source_kind==='owned');
-  const angleResult=extractIssueAngles(validExternal);
+  const angleResult=await extractDynamicIssueClaims(validExternal);
   const coverageResult=matchOfficialResponseCoverage(angleResult.angles,owned);
   const ts=(v:any)=>{const n=v?new Date(v).getTime():NaN;return Number.isFinite(n)?n:null},first=(xs:any[])=>xs.map(x=>ts(x.published_at)).filter((x:number|null):x is number=>x!==null).sort((a,b)=>a-b)[0]??null;
   const firstExternalMs=first(validExternal),firstOwnedMs=first(owned),lagHours=firstExternalMs!==null&&firstOwnedMs!==null?Math.round(((firstOwnedMs-firstExternalMs)/3600000)*10)/10:null;
