@@ -37,7 +37,7 @@ export async function extractDynamicIssueClaims(evidence:IssueAngleEvidence[]){
   const payload=await response.json() as any,raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');
   if(!raw)throw new Error('AI provider returned no text');
   const parsed=JSON.parse(raw),validIds=new Set(source.map(x=>x.evidenceId)),byId=new Map(evidence.map(e=>[ref(e),e]));
-  const claims:DynamicClaim[]=(Array.isArray(parsed.claims)?parsed.claims:[]).slice(0,16).filter((c:any)=>c?.include!==false).map((c:any)=>{
+  const claims:DynamicClaim[]=(Array.isArray(parsed.claims)?parsed.claims:[]).slice(0,16).filter((c:any)=>c?.include===true).map((c:any)=>{
    const ids:string[]=[...new Set<string>((Array.isArray(c.evidenceIds)?c.evidenceIds:[]).map((x:any)=>String(x)).filter((x:string)=>validIds.has(x)))];
    const type=Object.prototype.hasOwnProperty.call(TYPES,String(c.angleType))?String(c.angleType):'OTHER';
    const ev=ids.map((id:string)=>byId.get(id)).filter(Boolean) as IssueAngleEvidence[];
