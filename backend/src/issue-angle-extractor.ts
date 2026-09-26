@@ -2,13 +2,13 @@ export type IssueAngleEvidence={id:string|number;source:'online'|'print'|'social
 export type IssueAngle={key:string;label:string;evidenceCount:number;evidence:Array<{id:string;source:string;title:string|null}>;anchors:string[]};
 
 const ANGLES=[
- ['DEMAND_COMPLAINT','Tuntutan / Keluhan',['tuntut','tuntutan','menuntut','keluh','keluhan','aduan','protes','keberatan']],
- ['DISRUPTION','Gangguan / Hambatan',['gangguan','terganggu','terhambat','hambatan','terputus','macet','tergenang']],
- ['IMPACT','Dampak',['dampak','berdampak','terdampak','akibat','kerugian','merugikan']],
+ ['DEMAND_COMPLAINT','Tuntutan / Keluhan',['tuntut','tuntutan','menuntut','keluh','keluhan','mengeluh','aduan','mengadu','protes','keberatan','belum dibayar','tak kunjung cair','gaji tertahan','upah tertahan','hak pekerja','hak buruh','pesangon']],
+ ['DISRUPTION','Gangguan / Hambatan',['gangguan','terganggu','terhambat','hambatan','terputus','macet','tergenang','belajar dari rumah','aktivitas di luar']],
+ ['IMPACT','Dampak',['dampak','berdampak','terdampak','akibat','kerugian','merugikan','tidak sehat','kurang sehat','ispa','sesak napas','gangguan pernapasan']],
  ['CAUSE','Penyebab',['penyebab','disebabkan','karena','pemicu']],
- ['HANDLING','Penanganan / Tindak Lanjut',['penanganan','ditangani','tindak lanjut','menindaklanjuti','perbaikan','diperbaiki','solusi','penyelesaian']],
+ ['HANDLING','Penanganan / Tindak Lanjut',['penanganan','ditangani','tindak lanjut','menindaklanjuti','perbaikan','diperbaiki','solusi','penyelesaian','jalan keluar','membentuk tim','bentuk tim','mengawal','dikawal']],
  ['TARGET_PROGRESS','Target / Capaian',['target','capaian','realisasi','progres','perkembangan']],
- ['TIMING_CERTAINTY','Jadwal / Kepastian',['jadwal','kapan','kepastian','dipastikan','batas waktu','tenggat']],
+ ['TIMING_CERTAINTY','Jadwal / Kepastian',['jadwal','kapan','kepastian','batas waktu','tenggat','seharusnya tanggal','belum jelas']],
  ['RISK_THREAT','Risiko / Ancaman',['risiko','berisiko','ancaman','darurat','bahaya','rawan']]
 ] as const;
 
