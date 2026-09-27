@@ -72,6 +72,24 @@ export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,
 
   app.get('/api/phase3/issues/:id/monitoring-periods',{preHandler:auth},async(request,reply)=>{const p=idParam.safeParse(request.params);if(!p.success)return reply.code(400).send({error:'INVALID_ISSUE_ID'});const w=await workflow(p.data.id);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});const ctx=request.phase3OutcomeAuth!;const global=ctx.roles.some(r=>['super_admin','humas','executive','viewer'].includes(r));if(!global&&(!ctx.roles.includes('opd')||String(ctx.opdId)!==String(w.lead_opd_id)))return reply.code(403).send({error:'FORBIDDEN'});const {rows}=await pool.query(`SELECT event_type,created_at,note,metadata FROM issue_workflow_events WHERE issue_id=$1 AND event_type IN ('MONITORING_STARTED','ISSUE_CLOSED') ORDER BY created_at ASC`,[p.data.id]);const periods:any[]=[];for(const e of rows){if(e.event_type==='MONITORING_STARTED')periods.push({number:periods.length+1,started_at:e.created_at,ended_at:null,status:'MONITORING',close_note:null});else{const open=[...periods].reverse().find(x=>!x.ended_at);if(open){open.ended_at=e.created_at;open.status='CLOSED';open.close_note=e.note||null}}}return{data:periods.reverse()};});
 
+  app.get('/api/phase3/issues/:id/monitoring-periods/:period/gap',{preHandler:auth},async(request,reply)=>{
+    const parsed=z.object({id:z.string().regex(/^\\d+$/),period:z.string().regex(/^\\d+$/)}).safeParse(request.params);
+    if(!parsed.success)return reply.code(400).send({error:'INVALID_MONITORING_PERIOD'});
+    const ctx=request.phase3OutcomeAuth!,issueId=parsed.data.id,periodNo=Number(parsed.data.period);
+    const w=await workflow(issueId);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});
+    const global=ctx.roles.some(r=>['super_admin','humas','executive','viewer'].includes(r));
+    if(!global&&(!ctx.roles.includes('opd')||String(ctx.opdId)!==String(w.lead_opd_id)))return reply.code(403).send({error:'FORBIDDEN'});
+    const events=(await pool.query(`SELECT event_type,created_at,note FROM issue_workflow_events WHERE issue_id=$1 AND event_type IN ('MONITORING_STARTED','ISSUE_CLOSED') ORDER BY created_at ASC,id ASC`,[issueId])).rows;
+    const periods:any[]=[];for(const e of events){if(e.event_type==='MONITORING_STARTED')periods.push({number:periods.length+1,started_at:e.created_at,ended_at:null,status:'MONITORING',close_note:null});else{const open=[...periods].reverse().find(x=>!x.ended_at);if(open){open.ended_at=e.created_at;open.status='CLOSED';open.close_note=e.note||null}}}
+    const period=periods.find(x=>x.number===periodNo);if(!period)return reply.code(404).send({error:'MONITORING_PERIOD_NOT_FOUND'});
+    const end=period.ended_at||new Date();
+    const online=(await pool.query(`SELECT a.id,a.title,a.published_at FROM issue_articles ia JOIN articles a ON a.id=ia.article_id WHERE ia.issue_id=$1 AND a.published_at >= $2 AND a.published_at <= $3 ORDER BY a.published_at ASC`,[issueId,period.started_at,end])).rows;
+    const print=(await pool.query(`SELECT pa.id,pa.title,pe.edition_date published_at FROM issue_print_articles ipa JOIN print_articles pa ON pa.id=ipa.print_article_id JOIN print_editions pe ON pe.id=pa.edition_id WHERE ipa.issue_id=$1 AND ipa.linkage_status='linked' AND pe.edition_date >= $2::date AND pe.edition_date <= $3::date ORDER BY pe.edition_date ASC`,[issueId,period.started_at,end])).rows;
+    const social=(await pool.query(`SELECT sm.id,sm.title,sm.published_at,sm.source_kind FROM social_mention_issues smi JOIN social_mentions sm ON sm.id=smi.mention_id WHERE smi.issue_id=$1 AND sm.published_at >= $2 AND sm.published_at <= $3 ORDER BY sm.published_at ASC`,[issueId,period.started_at,end])).rows;
+    const externalSocial=social.filter((x:any)=>x.source_kind==='external'),owned=social.filter((x:any)=>x.source_kind==='owned');
+    return{data:{period,evidence:{total:online.length+print.length+externalSocial.length+owned.length,online:online.length,print:print.length,social:externalSocial.length,owned:owned.length},items:{online,print,social:externalSocial,owned}}};
+  });
+
   app.post('/api/phase3/issues/:id/close',{preHandler:auth},async(request,reply)=>{
     const p=idParam.safeParse(request.params),b=closeInput.safeParse(request.body);if(!p.success||!b.success)return reply.code(400).send({error:'INVALID_CLOSE'});
     const ctx=request.phase3OutcomeAuth!;if(!isManager(ctx))return reply.code(403).send({error:'FORBIDDEN'});
