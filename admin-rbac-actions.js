@@ -12,19 +12,16 @@
   function patchOpdScope(){
     const role=$('#userRole'),wrap=$('#userOpdWrap'),opd=$('#userOpd');if(!role||!wrap||!opd)return;
     if(!$('#userOpdType')){
+      const original=[...opd.options].filter(o=>o.value).map(o=>({value:o.value,text:o.textContent.trim()}));
       const type=document.createElement('select');type.id='userOpdType';type.className=opd.className;type.innerHTML='<option value="">Pilih jenis OPD</option>';
-      opd.insertAdjacentElement('beforebegin',type);opd.classList.add('mt-2');
-      let all=[];
-      const snapshot=()=>{const rows=[...opd.options].filter(o=>o.value).map(o=>({value:o.value,text:o.textContent.trim()}));if(rows.length)all=rows};
-      const kind=n=>/^Dinas\b/i.test(n)?'DINAS':/^Badan\b/i.test(n)?'BADAN':/^Bagian\b/i.test(n)?'BAGIAN':'LAINNYA';
       ['DINAS','BADAN','BAGIAN','LAINNYA'].forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=k==='LAINNYA'?'Lainnya':k[0]+k.slice(1).toLowerCase();type.appendChild(o)});
-      const refill=(keep=true)=>{snapshot();const prev=keep?opd.value:'';opd.innerHTML='<option value="">Pilih OPD</option>';all.filter(x=>type.value&&kind(x.text)===type.value).forEach(x=>{const o=document.createElement('option');o.value=x.value;o.textContent=x.text;if(x.value===prev)o.selected=true;opd.appendChild(o)});};
-      type.addEventListener('change',()=>refill(false));
-      const observer=new MutationObserver(()=>{if(!type.value)snapshot()});observer.observe(opd,{childList:true});
-      setTimeout(snapshot,250);setTimeout(snapshot,750);
+      opd.insertAdjacentElement('beforebegin',type);opd.classList.add('mt-2');
+      const kind=n=>/^Dinas\b/i.test(n)||/^[A-Z0-9]+\s+[—-]\s+Dinas\b/i.test(n)?'DINAS':/^Badan\b/i.test(n)||/^[A-Z0-9]+\s+[—-]\s+Badan\b/i.test(n)?'BADAN':/^Bagian\b/i.test(n)||/^[A-Z0-9]+\s+[—-]\s+Bagian\b/i.test(n)?'BAGIAN':'LAINNYA';
+      const refill=()=>{const selected=type.value;opd.innerHTML='<option value="">Pilih OPD</option>';original.filter(x=>selected&&kind(x.text)===selected).forEach(x=>{const o=document.createElement('option');o.value=x.value;o.textContent=x.text;opd.appendChild(o)});opd.disabled=!selected};
+      type.addEventListener('change',refill);refill();
     }
     const type=$('#userOpdType');
-    const sync=()=>{const scoped=role.value==='opd';wrap.classList.toggle('hidden',!scoped);if(!scoped){opd.value='';if(type)type.value=''}};
+    const sync=()=>{const scoped=role.value==='opd';wrap.classList.toggle('hidden',!scoped);if(!scoped){opd.value='';if(type){type.value='';type.dispatchEvent(new Event('change'))}}};
     role.addEventListener('change',()=>setTimeout(sync,0));sync();
   }
   function patchDeleteButtons(){
