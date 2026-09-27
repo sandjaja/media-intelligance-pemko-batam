@@ -11,7 +11,18 @@
   }
   function patchOpdScope(){
     const role=$('#userRole'),wrap=$('#userOpdWrap'),opd=$('#userOpd');if(!role||!wrap||!opd)return;
-    const sync=()=>{const scoped=role.value==='opd';wrap.classList.toggle('hidden',!scoped);if(!scoped)opd.value='';};
+    if(!$('#userOpdType')){
+      const type=document.createElement('select');type.id='userOpdType';type.className=opd.className;type.innerHTML='<option value="">Pilih jenis OPD</option>';
+      const all=[...opd.options].filter(o=>o.value).map(o=>({value:o.value,text:o.textContent.trim()}));
+      const kind=n=>/^Dinas\b/i.test(n)?'DINAS':/^Badan\b/i.test(n)?'BADAN':/^Bagian\b/i.test(n)?'BAGIAN':'LAINNYA';
+      ['DINAS','BADAN','BAGIAN','LAINNYA'].forEach(k=>{const o=document.createElement('option');o.value=k;o.textContent=k==='LAINNYA'?'Lainnya':k[0]+k.slice(1).toLowerCase();type.appendChild(o)});
+      opd.insertAdjacentElement('beforebegin',type);opd.classList.add('mt-2');
+      const refill=(keep=true)=>{const prev=keep?opd.value:'';opd.innerHTML='<option value="">Pilih jenis OPD dahulu</option>';all.filter(x=>!type.value||kind(x.text)===type.value).forEach(x=>{const o=document.createElement('option');o.value=x.value;o.textContent=x.text;if(x.value===prev)o.selected=true;opd.appendChild(o)});if(prev&&![...opd.options].some(o=>o.value===prev))opd.value=''};
+      type.addEventListener('change',()=>refill(false));opd.addEventListener('change',()=>{const item=all.find(x=>x.value===opd.value);if(item&&!type.value){type.value=kind(item.text);refill(true)}});
+      const syncExisting=()=>{const item=all.find(x=>x.value===opd.value);if(item){type.value=kind(item.text);refill(true)}};setTimeout(syncExisting,100);
+    }
+    const type=$('#userOpdType');
+    const sync=()=>{const scoped=role.value==='opd';wrap.classList.toggle('hidden',!scoped);if(!scoped){opd.value='';if(type)type.value=''}};
     role.addEventListener('change',()=>setTimeout(sync,0));sync();
   }
   function patchDeleteButtons(){
