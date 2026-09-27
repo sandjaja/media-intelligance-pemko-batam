@@ -15,7 +15,7 @@ const TRANSITIONS: Record<Phase3WorkflowStatus, readonly Phase3WorkflowStatus[]>
   APPROVED: ['PUBLISHED'],
   PUBLISHED: ['MONITORING'],
   MONITORING: ['CLOSED'],
-  CLOSED: [],
+  CLOSED: ['MONITORING'],
 };
 
 export function isPhase3WorkflowStatus(value: string): value is Phase3WorkflowStatus {
