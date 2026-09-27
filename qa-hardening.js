@@ -32,7 +32,7 @@
 
   if(!document.querySelector('script[data-phase3-outcome]')){
     const s=document.createElement('script');
-    s.src='./phase3-outcome-ui.js?v=20260913-outcome1';
+    s.src='./phase3-outcome-ui.js?v=20260927-monitor-evidence1';
     s.dataset.phase3Outcome='1';
     document.body.appendChild(s);
   }
