@@ -9,7 +9,7 @@ declare module 'fastify' { interface FastifyRequest { phase3Auth?: Authorization
 
 const idParam=z.object({id:z.string().regex(/^\d+$/)});
 const assignmentInput=z.object({leadOpdId:z.coerce.number().int().positive(),supportingOpdIds:z.array(z.coerce.number().int().positive()).default([]),dueAt:z.string().datetime().nullable().optional()});
-const submissionInput=z.object({responseText:z.string().trim().min(10).max(20000),factsData:z.string().trim().max(20000).nullable().optional(),keyMessage:z.string().trim().max(5000).nullable().optional(),supportingLinks:z.array(z.string().url().max(2000)).max(5).default([])});
+const submissionInput=z.object({responseText:z.string().trim().min(10).max(20000),factsData:z.string().trim().min(1).max(20000),keyMessage:z.string().trim().min(1).max(5000),supportingLinks:z.array(z.string().url().max(2000)).max(5).default([])});
 const reviewInput=z.object({decision:z.enum(['REVISION_REQUIRED','APPROVED']),reason:z.string().trim().max(4000).nullable().optional()});
 
 export async function registerPhase3WorkflowRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
