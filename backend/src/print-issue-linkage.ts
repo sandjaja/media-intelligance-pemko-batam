@@ -5,7 +5,6 @@ import { z } from 'zod';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { detectUnifiedIssueCandidates } from './unified-candidate-issues.js';
 import { matchExistingIssues } from './unified-existing-issue-matcher.js';
-import { matchExistingIssues } from './unified-existing-issue-matcher.js';
 import { recalculateIssueRisk } from './issue-risk.js';
 
 declare module 'fastify' { interface FastifyRequest { printIssueAuth?: AuthorizationContext } }
