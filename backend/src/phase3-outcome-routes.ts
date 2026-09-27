@@ -3,6 +3,8 @@ import type { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
+import { extractDynamicIssueClaims } from './issue-dynamic-claim-extractor.js';
+import { matchDynamicOfficialResponseCoverage } from './issue-response-coverage.js';
 import { canTransitionPhase3, type Phase3ActorRole, type Phase3WorkflowStatus } from './phase3-workflow-policy.js';
 
 declare module 'fastify' { interface FastifyRequest { phase3OutcomeAuth?: AuthorizationContext } }
@@ -87,7 +89,10 @@ export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,
     const print=(await pool.query(`SELECT pa.id,pa.title,pe.edition_date published_at FROM issue_print_articles ipa JOIN print_articles pa ON pa.id=ipa.print_article_id JOIN print_editions pe ON pe.id=pa.edition_id WHERE ipa.issue_id=$1 AND ipa.linkage_status='linked' AND pe.edition_date >= $2::date AND pe.edition_date <= $3::date ORDER BY pe.edition_date ASC`,[issueId,period.started_at,end])).rows;
     const social=(await pool.query(`SELECT sm.id,sm.title,sm.published_at,sm.source_kind FROM social_mention_issues smi JOIN social_mentions sm ON sm.id=smi.mention_id WHERE smi.issue_id=$1 AND sm.published_at >= $2 AND sm.published_at <= $3 ORDER BY sm.published_at ASC`,[issueId,period.started_at,end])).rows;
     const externalSocial=social.filter((x:any)=>x.source_kind==='external'),owned=social.filter((x:any)=>x.source_kind==='owned');
-    return{data:{period,evidence:{total:online.length+print.length+externalSocial.length+owned.length,online:online.length,print:print.length,social:externalSocial.length,owned:owned.length},items:{online,print,social:externalSocial,owned}}};
+    const external=[...online.map((x:any)=>({...x,source:'online'})),...print.map((x:any)=>({...x,source:'print'})),...externalSocial.map((x:any)=>({...x,source:'social'}))];
+    const angleResult=await extractDynamicIssueClaims(external);
+    const coverageResult=await matchDynamicOfficialResponseCoverage(angleResult.angles,owned);
+    return{data:{period,evidence:{total:external.length+owned.length,external:external.length,online:online.length,print:print.length,social:externalSocial.length,owned:owned.length},communicationGap:{externalAngles:angleResult,semanticAssessment:coverageResult},items:{online,print,social:externalSocial,owned}}};
   });
 
   app.post('/api/phase3/issues/:id/close',{preHandler:auth},async(request,reply)=>{
