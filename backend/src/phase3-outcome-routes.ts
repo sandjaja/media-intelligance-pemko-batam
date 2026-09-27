@@ -67,7 +67,7 @@ export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,
     const ctx=request.phase3OutcomeAuth!;if(!isManager(ctx))return reply.code(403).send({error:'FORBIDDEN'});
     const w=await workflow(p.data.id);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});
     const role=actorRole(ctx);if(!canTransitionPhase3(w.workflow_status as Phase3WorkflowStatus,'MONITORING',role))return reply.code(409).send({error:'INVALID_WORKFLOW_TRANSITION',from:w.workflow_status,to:'MONITORING'});
-    await pool.query(`UPDATE issue_workflows SET workflow_status='MONITORING',updated_by=$1,updated_at=NOW() WHERE issue_id=$2`,[ctx.id,p.data.id]);
+    await pool.query(`UPDATE issue_workflows SET workflow_status='MONITORING',closed_at=NULL,updated_by=$1,updated_at=NOW() WHERE issue_id=$2`,[ctx.id,p.data.id]);
     await event(p.data.id,ctx,'MONITORING_STARTED',w.workflow_status,'MONITORING');
     return{data:await workflow(p.data.id)};
   });
