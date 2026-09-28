@@ -3,7 +3,7 @@ import type { SocialCandidate, SocialPlatform } from './social-collector.js';
 import { decryptIntegrationCredential } from './integration-credentials.js';
 
 export type ExternalSocialProviderCode='youtube'|'instagram'|'facebook'|'threads'|'tiktok'|'x';
-export type ExternalSocialDiscovery={query:string;publishedAfter?:string;maxResults?:number};
+export type ExternalSocialDiscovery={query:string;publishedAfter?:string;maxResults?:number;includeComments?:boolean};
 export type ExternalSocialCollection={candidates:SocialCandidate[];diagnostics?:Record<string,unknown>};
 export type ExternalSocialProviderContext={organizationId:number;credential:string;settings:Record<string,unknown>};
 
@@ -54,7 +54,8 @@ export const youtubeExternalSocialProvider:ExternalSocialProviderAdapter={
    apiKey:context.credential,
    query:discovery.query,
    maxResults,
-   publishedAfter:discovery.publishedAfter
+   publishedAfter:discovery.publishedAfter,
+   includeComments:discovery.includeComments
   });
   return{candidates:result.candidates,diagnostics:{...result.diagnostics,maxResults}};
  }
