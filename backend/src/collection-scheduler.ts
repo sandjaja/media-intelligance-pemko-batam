@@ -42,7 +42,7 @@ async function collectOwned(pool:Pool){
   const succeeded=results.filter(x=>x.ok).length,failed=results.length-succeeded;
   // Rebuilding owned clusters is CPU-heavy. Only do it when collection actually
   // persisted new/updated mentions instead of on every successful account check.
-  const changed=results.reduce((n,x)=>n+(x.ok?Number(x.inserted??x.savedOrUpdated??0):0),0);
+  const changed=results.reduce((n,x)=>n+(x.ok?Number(x.succeeded??x.inserted??x.savedOrUpdated??0):0),0);
   let clustering:any=null;
   if(changed>0){try{clustering=await rebuildOwnedContentClusters(pool)}catch{}}
   return {accounts:rows.length,succeeded,failed,changed,results,clustering};
