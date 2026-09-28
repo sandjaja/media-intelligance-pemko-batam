@@ -40,6 +40,13 @@ BEGIN
         RAISE EXCEPTION 'ISSUE_MERGE_DIFFERENT_ORGANIZATION';
     END IF;
 
+    -- Phase 3 is one workflow per Issue. Never merge two independently active
+    -- operational response histories automatically.
+    IF EXISTS (SELECT 1 FROM issue_workflows WHERE issue_id = p_source_issue_id)
+       AND EXISTS (SELECT 1 FROM issue_workflows WHERE issue_id = p_target_issue_id) THEN
+        RAISE EXCEPTION 'ISSUE_MERGE_WORKFLOW_CONFLICT';
+    END IF;
+
     IF lower(v_source.status) NOT IN ('watch','active')
        OR lower(v_target.status) NOT IN ('watch','active') THEN
         RAISE EXCEPTION 'ISSUE_MERGE_REQUIRES_OPERATIONAL_ISSUES';
@@ -124,10 +131,29 @@ BEGIN
     SET issue_id = p_target_issue_id, updated_at = now()
     WHERE issue_id = p_source_issue_id;
 
+    -- Non-workflow references can safely follow the canonical target.
+    UPDATE alerts SET issue_id = p_target_issue_id WHERE issue_id = p_source_issue_id;
+    UPDATE narratives SET issue_id = p_target_issue_id WHERE issue_id = p_source_issue_id;
+
+    -- If only the source has a Phase 3 workflow, preserve that operational
+    -- history by moving the whole issue-keyed workflow family atomically.
+    IF EXISTS (SELECT 1 FROM issue_workflows WHERE issue_id = p_source_issue_id)
+       AND NOT EXISTS (SELECT 1 FROM issue_workflows WHERE issue_id = p_target_issue_id) THEN
+        UPDATE issue_response_submissions SET issue_id = p_target_issue_id WHERE issue_id = p_source_issue_id;
+        UPDATE issue_workflow_events SET issue_id = p_target_issue_id WHERE issue_id = p_source_issue_id;
+        UPDATE issue_workflow_supporting_opd SET issue_id = p_target_issue_id WHERE issue_id = p_source_issue_id;
+        UPDATE issue_workflows SET issue_id = p_target_issue_id WHERE issue_id = p_source_issue_id;
+    END IF;
+
+    -- Preserve analytical monitoring history. A merge changes the canonical
+    -- Issue, not the monitoring period or its lifecycle state.
     UPDATE issue_monitors
-    SET status = 'CLOSED', updated_at = now()
-    WHERE issue_id = p_source_issue_id
-      AND status <> 'CLOSED';
+    SET issue_id = p_target_issue_id, updated_at = now()
+    WHERE issue_id = p_source_issue_id;
+
+    -- Historical measurements remain immutable on the archived source Issue.
+    -- They are intentionally NOT reassigned: the target will continue to
+    -- receive fresh metrics from its consolidated evidence.
 
     DELETE FROM issue_articles WHERE issue_id = p_source_issue_id;
     DELETE FROM issue_print_articles WHERE issue_id = p_source_issue_id;
@@ -149,6 +175,9 @@ BEGIN
             'targetIssueId', p_target_issue_id,
             'targetTitle', v_target.title,
             'reason', trim(p_reason),
+            'mergeVersion', 'v2-safe-history',
+            'sourceMetricsPreserved', true,
+            'sourceMonitorsMoved', true,
             'mergedAt', now()
         )
     );
