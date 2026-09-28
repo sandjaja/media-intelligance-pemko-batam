@@ -79,5 +79,7 @@ document.addEventListener('click',e=>{
 window.addEventListener('media:authenticated',()=>localStorage.removeItem(LOGOUT_KEY));
 window.addEventListener('focus',()=>setTimeout(sessionCheck,350));
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')setTimeout(sessionCheck,350)});
-setInterval(sessionCheck,60000);
+// Avoid permanent /api/me polling on every open browser tab. Session validity is
+// still checked on focus/visibility and API 401 responses trigger refresh.
+
 })();
