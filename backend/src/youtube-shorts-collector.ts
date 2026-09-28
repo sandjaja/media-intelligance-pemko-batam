@@ -12,6 +12,7 @@ export type YouTubeShortsCollectorOptions={
  query:string;
  maxResults?:number;
  publishedAfter?:string;
+ includeComments?:boolean;
 };
 
 function key(explicit?:string){const value=explicit||process.env.YOUTUBE_API_KEY;if(!value)throw new Error('YOUTUBE_API_KEY_NOT_CONFIGURED');return value;}
@@ -56,9 +57,11 @@ export async function collectYouTubeShortCandidatesWithDiagnostics(options:YouTu
  const details=await getJson('/videos',{part:'snippet,contentDetails',id:ids.join(',')},apiKey);
  const candidates:SocialCandidate[]=[];
  const shortVideos=(details.items??[]).filter(looksLikeShort); let videosWithComments=0;
+ const includeComments=options.includeComments!==false;
  for(const video of shortVideos){
   const parent=videoParent(video);
   candidates.push(youtubeShortToSocialCandidate({video:parent,discovery,rawPayload:video}));
+  if(!includeComments)continue;
   let threads:any;
   try{threads=await getJson('/commentThreads',{part:'snippet,replies',videoId:parent.videoId,maxResults:100,textFormat:'plainText'},apiKey);}
   catch(error){
