@@ -172,12 +172,20 @@ BEGIN
         jsonb_build_object(
             'sourceIssueId', p_source_issue_id,
             'sourceTitle', v_source.title,
+            'sourceOriginalStatus', v_source.status,
             'targetIssueId', p_target_issue_id,
             'targetTitle', v_target.title,
             'reason', trim(p_reason),
             'mergeVersion', 'v2-safe-history',
             'sourceMetricsPreserved', true,
             'sourceMonitorsMoved', true,
+            'provenance', jsonb_build_object(
+                'archivedSourceIssueId', p_source_issue_id,
+                'canonicalTargetIssueId', p_target_issue_id,
+                'evidenceMovedToTarget', true,
+                'monitorsMovedToTarget', true,
+                'metricsRemainOnArchivedSource', true
+            ),
             'mergedAt', now()
         )
     );
