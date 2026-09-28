@@ -48,23 +48,28 @@ async function collectOwned(pool:Pool){
   return {accounts:rows.length,succeeded,failed,changed,results,clustering};
 }
 
-async function collectSocial(pool:Pool){
+async function collectSocial(pool:Pool,trigger:CollectionTrigger){
   const scope=await loadOrganizationMediaScope(pool);
   if(!scope)throw new Error('ACTIVE_ORGANIZATION_UNRESOLVED');
   const orgId=scope.organizationId,provider=getExternalSocialProvider('youtube');
   if(!provider)throw new Error('YOUTUBE_PROVIDER_NOT_REGISTERED');
   const context=await loadExternalSocialProviderContext(pool,orgId,'youtube');
   if(!context)return {providers:1,succeeded:0,failed:0,diagnostics:{status:'YOUTUBE_INTEGRATION_DISABLED'},results:[{provider:'youtube',skipped:true,reason:'YOUTUBE_INTEGRATION_DISABLED'}]};
-  const maxResults=Math.max(1,Math.min(25,Number(context.settings.maxResults||25)));
+  const configuredMax=Math.max(1,Math.min(25,Number(context.settings.maxResults||25)));
+  // Scheduled discovery is intentionally lightweight. Manual collection keeps the
+  // wider historical/comment sweep for an operator who explicitly requests it.
+  const scheduled=trigger==='SCHEDULED';
+  const maxResults=scheduled?Math.min(10,configuredMax):configuredMax;
   const queries=[scope.governmentName,scope.shortName,scope.organizationName,...scope.governmentAliases]
     .map(v=>String(v||'').trim()).filter(v=>v.length>=3&&!/^\d+$/.test(v))
     .filter((v,i,a)=>a.findIndex(x=>x.toLowerCase()===v.toLowerCase())===i).slice(0,5);
   if(!queries.length)return {providers:1,succeeded:0,failed:0,diagnostics:{status:'SOCIAL_DISCOVERY_TERMS_NOT_AVAILABLE'},results:[{provider:'youtube',skipped:true,reason:'SOCIAL_DISCOVERY_TERMS_NOT_AVAILABLE'}]};
-  const publishedAfter=new Date(Date.now()-7*24*60*60*1000).toISOString();
+  const collectionWindowDays=scheduled?2:7;
+  const publishedAfter=new Date(Date.now()-collectionWindowDays*24*60*60*1000).toISOString();
   const allResults:any[]=[];let searchedVideos=0,shortCandidates=0,videosWithComments=0,commentsCollected=0,received=0,savedOrUpdated=0,skipped=0,ingestionFailed=0;
   for(const query of queries){
     try{
-      const collected=await provider.collect(context,{query,maxResults,publishedAfter});
+      const collected=await provider.collect(context,{query,maxResults,publishedAfter,includeComments:!scheduled});
       const d:any=collected.diagnostics||{};searchedVideos+=Number(d.searchedVideos||0);shortCandidates+=Number(d.shortCandidates||0);videosWithComments+=Number(d.videosWithComments||0);commentsCollected+=Number(d.commentsCollected||0);
       if(!collected.candidates.length)continue;
       const ingested=await ingestSocialBatch(pool,collected.candidates,'youtube-shorts'),results=ingested.results as any[];
@@ -75,7 +80,7 @@ async function collectSocial(pool:Pool){
   const scopeReview=allResults.filter(x=>x.reason==='ORGANIZATION_SCOPE_REVIEW').length;
   const outOfScope=allResults.filter(x=>x.reason==='ORGANIZATION_SCOPE_OUT_OF_SCOPE').length;
   const ingestionErrors=allResults.filter(x=>x.ok===false).slice(0,5).map(x=>({platform:x.platform??'youtube',externalId:x.externalId??null,query:x.query??null,error:String(x.error||'UNKNOWN_ERROR').slice(0,240)}));
-  return {providers:1,succeeded:ingestionFailed<queries.length?1:0,failed:ingestionFailed>=queries.length?1:0,diagnostics:{discovery:'AUTOMATIC_ORGANIZATION_SCOPE',queries,maxResults,collectionWindowDays:7,searchedVideos,shortCandidates,videosWithComments,commentsCollected,received,savedOrUpdated,skipped,ingestionFailed,manualLocked,outOfScope,scopeReview,ingestionErrors},results:[{provider:'youtube',queries,maxResults,results:allResults}]};
+  return {providers:1,succeeded:ingestionFailed<queries.length?1:0,failed:ingestionFailed>=queries.length?1:0,diagnostics:{discovery:'AUTOMATIC_ORGANIZATION_SCOPE',queries,maxResults,collectionWindowDays,commentsMode:scheduled?'SKIPPED_SCHEDULED':'FULL_MANUAL',searchedVideos,shortCandidates,videosWithComments,commentsCollected,received,savedOrUpdated,skipped,ingestionFailed,manualLocked,outOfScope,scopeReview,ingestionErrors},results:[{provider:'youtube',queries,maxResults,results:allResults}]};
 }
 
 function summarizeOnline(batch:{results:Record<string,unknown>[],clustering:any}){
@@ -102,7 +107,7 @@ export async function runCollection(pool:Pool,trigger:CollectionTrigger,requeste
     const result:any={};
     if(sources.includes('online'))result.online=summarizeOnline(await collectOnline(pool));
     if(sources.includes('owned'))result.owned=await collectOwned(pool);
-    if(sources.includes('social'))result.social=await collectSocial(pool);
+    if(sources.includes('social'))result.social=await collectSocial(pool,trigger);
     const failed=Number(result.online?.failed||0)+Number(result.owned?.failed||0)+Number(result.social?.failed||0);
     const successful=(result.online?.succeeded||0)+(result.owned?.succeeded||0)+(result.social?.succeeded||0);
     const status=failed>0?(successful>0?'PARTIAL':'FAILED'):'SUCCESS';
