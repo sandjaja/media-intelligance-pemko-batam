@@ -1,6 +1,6 @@
 (() => {
   const API_BASE = window.MEDIA_INTELLIGENCE_API || '/api';
-  let timer;
+
 
   const esc = (value) => String(value ?? '').replace(/[&<>'"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
   const fmtDate = (value) => value ? new Date(value).toLocaleString('id-ID', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : '-';
@@ -75,7 +75,6 @@
 
   function boot() {
     load();
-    timer = setInterval(load, 60000);
     const dashboard = document.getElementById('dashboard');
     if (dashboard && window.MutationObserver) {
       const observer = new MutationObserver(() => {
