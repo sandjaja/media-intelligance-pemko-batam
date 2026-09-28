@@ -32,5 +32,8 @@ export async function collectOwnedWebsiteAccount(pool:Pool,accountId:number){con
   if(looksXml){const rss=parseWebsiteFeed(body,account,pageUrl),result=await ingestSocialBatch(pool,rss,'website-rss');return{accountId:Number(account.id),accountName:account.account_name,mode:'rss-direct',feedUrl:pageUrl,backfillDays:BACKFILL_DAYS,cutoffDate:cutoffIso(),fetched:rss.length,...result}}
   const discovered=discoverFeedUrl(body,pageUrl);let rss:SocialCandidate[]=[];let feedUrl:string|null=discovered;let rssError:string|null=null;
   if(discovered){try{const feed=await fetchText(discovered,FEED_TIMEOUT_MS),isXml=feed.response.ok&&(feed.response.headers.get('content-type')?.toLowerCase().includes('xml')||/^\s*<\?xml|^\s*<(rss|feed)\b/i.test(feed.body));if(isXml){feedUrl=feed.response.url||discovered;rss=parseWebsiteFeed(feed.body,account,feedUrl)}}catch(err:any){rssError=String(err?.message||err)}}
-  let html:SocialCandidate[]=[];try{html=await collectHtmlCandidates(body,pageUrl,account)}catch{}
+  // Prefer the structured feed. Crawling up to 20 article pages is an expensive
+  // fallback and should only run when RSS/Atom did not yield usable recent items.
+  let html:SocialCandidate[]=[];
+  if(!rss.length){try{html=await collectHtmlCandidates(body,pageUrl,account)}catch{}}
   const candidates=mergeCandidates(rss,html);if(!candidates.length)throw new Error('RSS/Atom dan artikel HTML 7 hari terakhir tidak dapat diekstrak');const result=await ingestSocialBatch(pool,candidates,'website-hybrid');return{accountId:Number(account.id),accountName:account.account_name,mode:'hybrid',feedUrl,backfillDays:BACKFILL_DAYS,cutoffDate:cutoffIso(),rssFetched:rss.length,htmlFetched:html.length,fetched:candidates.length,rssError,...result}}
