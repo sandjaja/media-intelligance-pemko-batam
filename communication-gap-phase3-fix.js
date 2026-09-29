@@ -23,8 +23,6 @@
   function nav(active='analysis'){
     return `<div data-cg-phase3-nav="1" class="flex gap-2 overflow-x-auto pb-1 mb-4">
       <button data-cgfix="analysis" class="${cls(active==='analysis')}"><i class="fa-solid fa-chart-line mr-2"></i>Analisis Gap</button>
-      <button data-cgfix="linkage" class="${cls(active==='linkage')}"><i class="fa-solid fa-link mr-2"></i>Issue Linkage</button>
-      <button data-cgfix="candidate" class="${cls(active==='candidate')}"><i class="fa-solid fa-filter-circle-dollar mr-2"></i>Candidate Issue</button>
       <button data-cgfix="assignment" class="${cls(active==='assignment')}"><i class="fa-solid fa-list-check mr-2"></i>Penugasan & Respons</button>
       <button data-cgfix="monitoring" class="${cls(active==='monitoring')}"><i class="fa-solid fa-satellite-dish mr-2"></i>Monitoring Respons</button>
     </div>`;
@@ -33,8 +31,6 @@
     root?.querySelectorAll('[data-cgfix]').forEach(b=>b.onclick=()=>{
       const mode=b.dataset.cgfix;
       if(mode==='analysis') return window.openCommunicationGap?.();
-      if(mode==='linkage') return window.openIssueLinkageInbox?.();
-      if(mode==='candidate') return window.openUnifiedCandidateIssues?.();
       if(mode==='assignment') return window.openCommunicationGapWorkspace?.('assignment');
       if(mode==='monitoring') return window.openCommunicationGapWorkspace?.('monitoring');
     });
