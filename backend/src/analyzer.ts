@@ -15,13 +15,16 @@ function cleanSummary(value:string){const text=String(value||'').trim();if(!text
 
 async function mapHeadlineToExistingIssue(pool:Pool,articleId:string,title:string,taxonomyId:string|null){
  const manual=(await pool.query(`SELECT ia.issue_id,ia.relevance_score FROM issue_articles ia JOIN issues i ON i.id=ia.issue_id WHERE ia.article_id=$1 AND ia.assignment_source='MANUAL' AND i.status IN ('active','watch') ORDER BY ia.relevance_score DESC,ia.created_at DESC LIMIT 1`,[articleId])).rows[0];
+ // Legacy AUTO rows are no longer authoritative evidence. Keep explicit MANUAL and ISSUE_MONITOR links intact.
  await pool.query(`DELETE FROM issue_articles WHERE article_id=$1 AND assignment_source='AUTO'`,[articleId]);
  if(manual)return{id:String(manual.issue_id),score:Number(manual.relevance_score||100),source:'MANUAL'};
  const headline=normalize(title);if(!headline||!taxonomyId)return null;
  const rows=(await pool.query(`SELECT i.id,i.title,i.taxonomy_category_id,t.name taxonomy_name,t.description taxonomy_description FROM issues i JOIN taxonomy_categories t ON t.id=i.taxonomy_category_id AND t.active=true WHERE i.status IN ('active','watch') AND i.taxonomy_category_id=$1 ORDER BY CASE WHEN i.status='active' THEN 0 ELSE 1 END,i.id`,[taxonomyId])).rows;
  let best:{id:string;score:number}|null=null;
  for(const row of rows){let score=45,headlineEvidence=0;if(containsPhrase(headline,String(row.title||'')))headlineEvidence+=100;for(const token of meaningfulTokens(String(row.title||'')))if(containsPhrase(headline,token))headlineEvidence+=35;for(const term of taxonomyTerms({name:row.taxonomy_name,description:row.taxonomy_description})){if(containsPhrase(headline,term))headlineEvidence+=25;else for(const token of meaningfulTokens(term))if(containsPhrase(headline,token))headlineEvidence+=15;}if(headlineEvidence<=0)continue;score+=headlineEvidence;if(score>(best?.score??0))best={id:String(row.id),score};}
- if(!best||best.score<60)return null;await pool.query(`INSERT INTO issue_articles(issue_id,article_id,relevance_score,assignment_source) VALUES($1,$2,$3,'AUTO') ON CONFLICT (issue_id,article_id) DO UPDATE SET relevance_score=EXCLUDED.relevance_score,assignment_source=CASE WHEN issue_articles.assignment_source='MANUAL' THEN 'MANUAL' ELSE 'AUTO' END`,[best.id,articleId,Math.min(100,best.score)]);return{...best,source:'AUTO'};
+ if(!best||best.score<60)return null;
+ // Recommendation only: normal analysis must never make an article official Issue evidence.
+ return{...best,score:Math.min(100,best.score),source:'RECOMMENDATION'};
 }
 
 export async function routeArticleHeadline(pool:Pool,articleId:string){
