@@ -34,7 +34,7 @@ export async function registerPhase3WorkflowRoutes(app:FastifyInstance,pool:Pool
   const selectedSupporting=(await pool.query(`SELECT o.id,o.name,o.code FROM issue_workflow_supporting_opd s JOIN opd o ON o.id=s.opd_id AND o.active=true WHERE s.issue_id=$1 ORDER BY o.name`,[p.data.id])).rows;
   const allActiveUptds=(await pool.query(`SELECT u.id,u.name,u.code,u.opd_id,o.name parent_opd_name FROM uptd u JOIN opd o ON o.id=u.opd_id WHERE u.active=true AND o.active=true ORDER BY o.name,u.name`)).rows;
   const geo=(await pool.query(`SELECT geographic_scope FROM issues WHERE id=$1`,[p.data.id])).rows[0]?.geographic_scope||'UNSPECIFIED';
-  const districts=(await pool.query(`SELECT d.id,d.code,d.name,EXISTS(SELECT 1 FROM issue_districts x WHERE x.issue_id=$1 AND x.district_id=d.id) in_issue_scope FROM districts d WHERE d.active=true ORDER BY d.name`,[p.data.id])).rows;
+  const districts=(await pool.query(`SELECT d.id,d.code,d.name,EXISTS(SELECT 1 FROM issue_districts x WHERE x.issue_id=$1 AND x.district_id=d.id) in_issue_scope FROM districts d WHERE d.active=true ORDER BY d.name`,[p.data.id])).rows.map((d:any)=>({...d,in_issue_scope:d.in_issue_scope===true||d.in_issue_scope==='true'}));
   return{data:{leadOpd:canonicalLead,primaryKeyword:keyword,recommendedSupportingOpds:recommendedSupporting,selectedSupportingOpds:selectedSupporting,supportingUptds:allActiveUptds,geographicScope:geo,districtContributors:districts}};
  });
 
