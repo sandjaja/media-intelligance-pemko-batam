@@ -27,7 +27,14 @@ const TYPES:Record<string,string>={
 const ref=(e:IssueAngleEvidence)=>`${e.source}:${e.id}`;
 const clip=(v:any,n=2400)=>String(v??'').slice(0,n);
 
-export async function extractDynamicIssueClaims(evidence:IssueAngleEvidence[]){
+export type IssueAnalysisContext={
+ issueTitle?:string|null;
+ geographicScope?:'UNSPECIFIED'|'DISTRICTS'|'CITYWIDE'|string|null;
+ districts?:Array<{id?:number;code?:string|null;name:string}>;
+};
+
+export async function extractDynamicIssueClaims(evidence:IssueAngleEvidence[],context:IssueAnalysisContext={}){
+
  const fallback=(reason='UNKNOWN')=>{const r=extractIssueAngles(evidence);return{...r,mode:'deterministic-fallback' as const,fallbackReason:reason,claims:r.angles.map(a=>({...a,claim:a.label,confidence:0,evidenceIds:a.evidence.map(x=>`${x.source}:${x.id}`)}))}};
  const key=process.env.GEMINI_API_KEY;if(!evidence.length)return fallback('NO_VALID_EVIDENCE');if(!key)return fallback('GEMINI_API_KEY_MISSING');
  const model=process.env.GEMINI_MODEL||'gemini-3.5-flash-lite';
