@@ -39,7 +39,7 @@ export async function registerArticleManualClassificationRoutes(app:FastifyInsta
    await client.query(`UPDATE article_manual_keywords SET active=false,updated_at=NOW() WHERE article_id=$1 AND active=true`,[articleId]);
    for(const keywordId of ids){const role=keywordId===primaryKeywordId?'PRIMARY':'RELATED';await client.query(`INSERT INTO article_manual_keywords(article_id,keyword_id,selected_by,reason,active,keyword_role,created_at,updated_at) VALUES($1,$2,$3,$4,true,$5,NOW(),NOW()) ON CONFLICT(article_id,keyword_id) DO UPDATE SET selected_by=EXCLUDED.selected_by,reason=EXCLUDED.reason,active=true,keyword_role=EXCLUDED.keyword_role,updated_at=NOW()`,[articleId,keywordId,actor.id,reason||null,role]);}
    await client.query(`UPDATE articles SET news_classification='UTAMA',news_classification_source='MANUAL',news_classification_changed_by=$2,news_classification_changed_at=NOW() WHERE id=$1`,[articleId,actor.id]);
-   const result=await analyzeArticle(client as unknown as Pool,String(articleId));
+   const result=await analyzeArticle(client as unknown as Pool,String(articleId),{humanFinalAnalysis:true});
    if(!result?.opdId)throw new Error('MANUAL_KEYWORD_DID_NOT_PRODUCE_PRIMARY_OPD');
    await audit(client,actor.id,'ARTICLE_CLASSIFICATION_KEYWORD_CORRECTED',{organizationId,articleId:String(articleId),title:article.title,before,after:{classification:'UTAMA',source:'MANUAL'},keywordIds:ids,primaryKeywordId,keywords:valid.map((r:any)=>r.keyword),primaryOpdId:result.opdId,reason:reason||null});
    await audit(client,actor.id,'ARTICLE_CLASSIFICATION_VERIFIED',{organizationId,articleId:String(articleId),title:article.title,before,after:{classification:'UTAMA',source:'MANUAL'},verificationSource:'MANUAL_KEYWORD_CORRECTION',keywordIds:ids,primaryKeywordId,keywords:valid.map((r:any)=>r.keyword),primaryOpdId:result.opdId,reason:reason||null});
@@ -102,7 +102,7 @@ export async function registerArticleManualClassificationRoutes(app:FastifyInsta
    // Only primary news may enter the verified/locked state used by Issue Evidence.
    // Supporting news stays reviewable so it can still be promoted by choosing a Primary Keyword.
    if(article.news_classification!=='UTAMA')return reply.code(409).send({error:'PRIMARY_ARTICLE_REQUIRED_FOR_VERIFICATION'});
-   const readiness=await analyzeArticle(pool,String(articleId));
+   const readiness=await analyzeArticle(pool,String(articleId),{humanFinalAnalysis:true});
    if(!readiness||readiness.newsClassification!=='UTAMA'||readiness.routingStatus!=='ROUTED'||!readiness.opdId||Number(readiness.keywordMatches||0)<1)return reply.code(409).send({error:'PRIMARY_ARTICLE_NOT_READY_FOR_VERIFICATION'});
    await audit(pool,actor.id,'ARTICLE_CLASSIFICATION_VERIFIED',{organizationId,articleId:String(articleId),title:article.title,before,after:before,reason:p.data.reason||null,riskStatus:'FINAL',riskFinalizedAt:new Date().toISOString()});
    let issueMonitorMatches=0;
@@ -118,12 +118,15 @@ export async function registerArticleManualClassificationRoutes(app:FastifyInsta
    const affectedIssueIds=(await client.query(`SELECT DISTINCT issue_id FROM issue_articles WHERE article_id=$1`,[articleId])).rows.map((row:any)=>Number(row.issue_id)).filter(Number.isFinite);
    await client.query(`UPDATE article_manual_keywords SET active=false,updated_at=NOW() WHERE article_id=$1 AND active=true`,[articleId]);
    await client.query(`UPDATE articles SET news_classification='PENDUKUNG',news_classification_source='MANUAL',news_classification_changed_by=$2,news_classification_changed_at=NOW() WHERE id=$1`,[articleId,actor.id]);
+   // Supporting is a human classification decision, not a request to erase the
+   // early sentiment/risk signal. Remove Issue/routing links but preserve scoring
+   // so Humas can still use it when reviewing or promoting the article later.
    await clearSupportingIntelligenceLinks(client as unknown as Pool,String(articleId));
    for(const issueId of affectedIssueIds)await recalculateIssueRisk(client,issueId);
-   await client.query(`UPDATE articles SET sentiment=NULL,sentiment_score=NULL,risk_score=NULL,risk_level=NULL,importance_score=NULL,impact_score=NULL,velocity_score=NULL,updated_at=NOW() WHERE id=$1`,[articleId]);
-   await audit(client,actor.id,'ARTICLE_CLASSIFICATION_SET_SUPPORTING',{organizationId,articleId:String(articleId),title:article.title,before,after:{classification:'PENDUKUNG',source:'MANUAL'},reason:p.data.reason,riskStatus:'NOT_ANALYZED',riskScore:null,riskLevel:null});
+   const signal=(await client.query(`SELECT sentiment,risk_score,risk_level,importance_score FROM articles WHERE id=$1`,[articleId])).rows[0]??{};
+   await audit(client,actor.id,'ARTICLE_CLASSIFICATION_SET_SUPPORTING',{organizationId,articleId:String(articleId),title:article.title,before,after:{classification:'PENDUKUNG',source:'MANUAL'},reason:p.data.reason,riskStatus:'EARLY_SIGNAL',riskScore:signal.risk_score??null,riskLevel:signal.risk_level??null});
    await client.query('COMMIT');
-   return{ok:true,data:{articleId:String(articleId),action:'SET_SUPPORTING',verificationStatus:'SUPPORTING_CONFIRMED',riskStatus:'NOT_ANALYZED',risk:null,classification:'PENDUKUNG',source:'MANUAL'}};
+   return{ok:true,data:{articleId:String(articleId),action:'SET_SUPPORTING',verificationStatus:'SUPPORTING_CONFIRMED',riskStatus:'EARLY_SIGNAL',risk:{score:signal.risk_score??null,level:signal.risk_level??null},classification:'PENDUKUNG',source:'MANUAL'}};
   }catch(e){await client.query('ROLLBACK');request.log.error({err:e,articleId},'classification verification failed');return reply.code(409).send({error:'CLASSIFICATION_VERIFICATION_FAILED',message:e instanceof Error?e.message:String(e)});}finally{client.release();}
  });
 }
