@@ -93,27 +93,25 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
           continue;
         }
         const routing=await analyzeSocialRoutingV16(pool,{title:mention.title,content:mention.content});
-        // Classification and intelligence are separate gates. AUTO routing may propose UTAMA,
-        // but sentiment/risk must wait for explicit Humas verification/correction.
-        const verified=mention.metadata?.socialVerification?.status==='LOCKED'||mention.metadata?.manualClassification?.locked===true;
-        const eligibleForAnalysis=routing.newsClassification==='UTAMA'&&routing.routingStatus==='ROUTED'&&!!routing.primaryOpdId&&verified;
-        const query=eligibleForAnalysis?parseKeywordQuery(routing.keyword?[routing.keyword].join(' | '):''):null;
-        const analysis=eligibleForAnalysis?analyzeCoreArticle({
+        // Sentiment/risk are early decision signals and are refreshed even before
+        // Humas locks the classification. Locking remains a separate human-only gate.
+        const query=parseKeywordQuery(routing.keyword?[routing.keyword].join(' | '):'');
+        const analysis=analyzeCoreArticle({
           id:mention.id,title:String(mention.title||mention.content||'').slice(0,300),
           summary:String(mention.content||'').slice(0,900),content:mention.content??null,
-          sourceName:'social',sourceTier:null,mediaKind:'social',opdId:routing.primaryOpdId,publishedAt:null
-        },query!,1):null;
-        const risk=analysis?calculateRisk({importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,sentiment:analysis.sentiment,sentimentScore:analysis.sentimentScore}):null;
+          sourceName:'social',sourceTier:null,mediaKind:'social',opdId:routing.primaryOpdId||null,publishedAt:null
+        },query,1);
+        const risk=calculateRisk({importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,sentiment:analysis.sentiment,sentimentScore:analysis.sentimentScore});
         const client=await pool.connect();
         try {
           await client.query('BEGIN');
           const metadata={...(mention.metadata||{}),v16Routing:routing};
-          const intelligence=analysis&&risk?{...analysis,riskLevel:risk.level,riskReasons:risk.reasons,riskStatus:'FINAL'}:undefined;
+          const intelligence={...analysis,riskLevel:risk.level,riskReasons:risk.reasons,riskStatus:'PROVISIONAL'};
           const {intelligence:_oldIntelligence,...metadataWithoutIntelligence}=metadata;
           const nextMetadata=intelligence?{...metadataWithoutIntelligence,intelligence}:metadataWithoutIntelligence;
           await client.query(`UPDATE social_mentions SET opd_id=$2,metadata=$3::jsonb,processing_status=$4,sentiment=$5,sentiment_score=$6,importance_score=$7,influence_score=$8,risk_score=$9,risk_level=$10,updated_at=NOW() WHERE id=$1`,[
             mention.id,routing.primaryOpdId,JSON.stringify(nextMetadata),routing.routingStatus==='ROUTED'?'classified':'captured',
-            analysis?.sentiment??null,analysis?.sentimentScore??null,analysis?.importanceScore??null,analysis?.impactScore??null,risk?.score??null,risk?.level??null
+            analysis.sentiment,analysis.sentimentScore,analysis.importanceScore,analysis.impactScore,risk.score,risk.level
           ]);
           await client.query(`DELETE FROM social_mention_keywords WHERE mention_id=$1`,[mention.id]);
           if(routing.keywordId) await client.query(`INSERT INTO social_mention_keywords(mention_id,keyword_id,matched_text,match_count,confidence) VALUES($1,$2,$3,1,$4) ON CONFLICT(mention_id,keyword_id) DO UPDATE SET matched_text=EXCLUDED.matched_text,match_count=1,confidence=EXCLUDED.confidence`,[
@@ -202,7 +200,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     try{
       await client.query('BEGIN');
       const {intelligence:_staleIntelligence,...metadataWithoutIntelligence}=metadata;
-      await client.query(`UPDATE social_mentions SET metadata=$2::jsonb,sentiment=NULL,sentiment_score=NULL,importance_score=NULL,influence_score=NULL,risk_score=NULL,risk_level=NULL,updated_at=NOW() WHERE id=$1`,[mentionId,JSON.stringify(metadataWithoutIntelligence)]);
+      await client.query(`UPDATE social_mentions SET metadata=$2::jsonb,updated_at=NOW() WHERE id=$1`,[mentionId,JSON.stringify(metadataWithoutIntelligence)]);
       const affectedIssueIds=(await client.query(`SELECT issue_id FROM social_mention_issues WHERE mention_id=$1`,[mentionId])).rows.map((x:any)=>Number(x.issue_id));await client.query(`DELETE FROM social_mention_issues WHERE mention_id=$1`,[mentionId]);for(const issueId of [...new Set(affectedIssueIds)])await recalculateIssueRisk(client,issueId);
       await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'SOCIAL_CLASSIFICATION_REOPENED',$2::jsonb)`,[actor.id,JSON.stringify({mentionId:String(mentionId),reason:p.data.reason})]);
       await client.query('COMMIT');
