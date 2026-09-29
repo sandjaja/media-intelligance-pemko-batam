@@ -71,7 +71,15 @@ ATURAN PENTING:
 7. angleType hanya salah satu: ${Object.keys(TYPES).join(', ')}. confidence 0..1.
 8. Jangan menilai coverage Owned Channel; tahap lain yang melakukannya.
 
-Output JSON object {"claims":[{"claim":"...","angleType":"...","confidence":0.0,"evidenceIds":["online:1"],"include":true,"excludeReason":null}]}. Maksimal 16 kandidat. Gunakan include=false hanya untuk boilerplate/noise/duplikasi yang tidak substantif.
+Selain claims, buat "geographicAnalysis" untuk membantu Humas membandingkan cakupan pemantauan dengan lokasi yang benar-benar disebut evidence. Jangan mengubah claim utama demi scope wilayah.
+- scopeSummary: ringkasan singkat cakupan wilayah Humas.
+- evidenceSummary: apa yang evidence benar-benar mendukung tentang lokasi; bila generik, katakan generik.
+- implication: implikasi komunikasi yang netral dan operasional, tanpa mengarang kondisi lapangan.
+- mentionedLocations: hanya nama lokasi yang eksplisit didukung evidence.
+- scopeEvidenceStatus: gunakan "SUPPORTED" bila evidence eksplisit mendukung wilayah scope, "PARTIAL" bila hanya sebagian scope didukung, "GENERIC" bila evidence tidak cukup spesifik, atau "OUTSIDE_SCOPE" bila lokasi evidence eksplisit berada di luar scope.
+Untuk CITYWIDE, jangan memperlakukan setiap kecamatan sebagai wajib disebut evidence.
+
+Output JSON object {"claims":[{"claim":"...","angleType":"...","confidence":0.0,"evidenceIds":["online:1"],"include":true,"excludeReason":null}],"geographicAnalysis":{"scopeSummary":"...","evidenceSummary":"...","implication":"...","mentionedLocations":["..."],"scopeEvidenceStatus":"SUPPORTED"}}. Maksimal 16 kandidat. Gunakan include=false hanya untuk boilerplate/noise/duplikasi yang tidak substantif.
 
 EVIDENCE:
 ${JSON.stringify(source)}`
@@ -87,6 +95,14 @@ ${JSON.stringify(source)}`
    return{key:type,label:TYPES[type],claim:String(c.claim||'').trim().slice(0,500),confidence:Math.max(0,Math.min(1,Number(c.confidence)||0)),evidenceIds:ids,evidenceCount:ev.length,evidence:ev.map(e=>({id:String(e.id),source:e.source,title:e.title??null})),anchors:[]};
   }).filter((c:DynamicClaim)=>c.claim.length>=8&&c.evidenceIds.length>0&&c.confidence>=0.45);
   if(!claims.length)return fallback('AI_RETURNED_NO_VALID_CLAIMS');
-  return{angles:claims,claims,unclassified:[],totalEvidence:evidence.length,mode:'ai-dynamic' as const,fallbackReason:null};
+  const ga=parsed?.geographicAnalysis&&typeof parsed.geographicAnalysis==='object'?parsed.geographicAnalysis:null;
+  const geographicAnalysis=ga?{
+   scopeSummary:String(ga.scopeSummary||'').trim().slice(0,500),
+   evidenceSummary:String(ga.evidenceSummary||'').trim().slice(0,800),
+   implication:String(ga.implication||'').trim().slice(0,800),
+   mentionedLocations:[...new Set<string>((Array.isArray(ga.mentionedLocations)?ga.mentionedLocations:[]).map((x:any)=>String(x).trim()).filter(Boolean))].slice(0,20),
+   scopeEvidenceStatus:['SUPPORTED','PARTIAL','GENERIC','OUTSIDE_SCOPE'].includes(String(ga.scopeEvidenceStatus))?String(ga.scopeEvidenceStatus):'GENERIC'
+  }:null;
+  return{angles:claims,claims,unclassified:[],totalEvidence:evidence.length,mode:'ai-dynamic' as const,fallbackReason:null,geographicAnalysis};
  }catch(error:any){const reason=String(error?.message||error||'UNKNOWN').slice(0,180);console.warn('[communication-gap] dynamic claim fallback:',reason);return fallback(reason)}
 }
