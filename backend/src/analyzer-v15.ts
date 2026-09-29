@@ -29,9 +29,20 @@ async function scoreEarlySignal(pool:Pool,article:any,articleId:string,matchedNa
 }
 
 export async function analyzeArticle(pool:Pool,articleId:string,options:AnalysisOptions={}){
+ // A human VERIFIED decision is authoritative. Background ingestion/reanalysis may
+ // refresh early sentiment/risk signals, but must never reclassify or reroute a
+ // locked Online article until Humas explicitly REOPENs it.
+ const latestVerification=(await pool.query(`SELECT al.action FROM audit_logs al WHERE al.action IN ('ARTICLE_CLASSIFICATION_VERIFIED','ARTICLE_CLASSIFICATION_REOPENED') AND al.metadata->>'articleId'=$1 ORDER BY al.created_at DESC,al.id DESC LIMIT 1`,[articleId])).rows[0]?.action??null;
+ const autoMustPreserveLockedClassification=latestVerification==='ARTICLE_CLASSIFICATION_VERIFIED'&&options.humanFinalAnalysis!==true;
  const article=(await pool.query(`SELECT a.id,a.source_id,a.title,a.url,a.content,a.summary,a.published_at,ms.name source_name,ms.tier,ms.category media_kind FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE a.id=$1`,[articleId])).rows[0];
  if(!article)return null;
- let news=await getManualNewsClassification(pool,articleId); // Only MANUAL is authoritative; existing AUTO classification is recomputed on every analysis.
+ let news=await getManualNewsClassification(pool,articleId);
+ if(autoMustPreserveLockedClassification&&article.media_kind==='online'){
+  const current=(await pool.query(`SELECT news_classification,news_classification_source FROM articles WHERE id=$1`,[articleId])).rows[0];
+  if(current?.news_classification==='UTAMA'||current?.news_classification==='PENDUKUNG'){
+   news={classification:current.news_classification,source:current.news_classification_source==='MANUAL'?'MANUAL':'AUTO',reason:'human verified classification preserved during automatic reanalysis',signals:['HUMAN_VERIFIED_LOCK']};
+  }
+ } // MANUAL and human VERIFIED decisions are authoritative; unlocked AUTO may be recomputed.
  let gateRole=article.media_kind==='online'?options.onlineGateRole??null:null;
  let gateReason=options.onlineGateReason??null;
  let gateSignals=options.onlineGateSignals??[];
