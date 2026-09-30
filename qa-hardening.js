@@ -32,7 +32,7 @@
 
   if(!document.querySelector('script[data-phase3-outcome]')){
     const s=document.createElement('script');
-    s.src='./phase3-outcome-ui.js?v=20260930-cycle-history4';
+    s.src='./phase3-outcome-ui.js?v=20260930-cycle-history5';
     s.dataset.phase3Outcome='1';
     document.body.appendChild(s);
   }
