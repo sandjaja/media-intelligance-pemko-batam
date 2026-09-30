@@ -66,13 +66,14 @@ export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,
       params.push(ctx.opdId);scope=`AND (w.lead_opd_id=$1 OR EXISTS(SELECT 1 FROM issue_workflow_contributors c WHERE c.issue_id=w.issue_id AND c.contributor_type='OPD' AND c.opd_id=$1))`;
     }else if(!global)return{data:[]};
     const {rows}=await pool.query(`SELECT w.issue_id,w.workflow_status,w.lead_opd_id,w.approved_at,w.published_at,w.closed_at,w.updated_at,i.title,i.description,i.risk_level,i.momentum,i.geographic_scope,t.name taxonomy_name,o.name lead_opd_name,
+      im.risk_score issue_risk_score,im.positive_count issue_positive_count,im.neutral_count issue_neutral_count,im.negative_count issue_negative_count,im.metadata issue_metric_metadata,
       (SELECT json_build_object('id',k.id,'keyword',k.keyword) FROM issue_keywords ik JOIN keywords k ON k.id=ik.keyword_id WHERE ik.issue_id=i.id AND ik.keyword_role='PRIMARY' ORDER BY ik.id LIMIT 1) primary_keyword,
       COALESCE((SELECT json_agg(json_build_object('id',k.id,'keyword',k.keyword) ORDER BY ik.id) FROM issue_keywords ik JOIN keywords k ON k.id=ik.keyword_id WHERE ik.issue_id=i.id AND ik.keyword_role='SUPPORTING'),'[]'::json) supporting_keywords,
       COALESCE((SELECT json_agg(json_build_object('id',so.id,'name',so.name) ORDER BY so.name) FROM issue_workflow_contributors c JOIN opd so ON so.id=c.opd_id WHERE c.issue_id=i.id AND c.contributor_type='OPD'),'[]'::json) supporting_opds,
       COALESCE((SELECT json_agg(json_build_object('id',d.id,'name',d.name) ORDER BY d.name) FROM issue_districts idt JOIN districts d ON d.id=idt.district_id WHERE idt.issue_id=i.id),'[]'::json) districts,
       (SELECT e.metadata FROM issue_workflow_events e WHERE e.issue_id=w.issue_id AND e.event_type='RESPONSE_PUBLISHED' ORDER BY e.created_at DESC LIMIT 1) publication,
       (SELECT e.note FROM issue_workflow_events e WHERE e.issue_id=w.issue_id AND e.event_type='ISSUE_CLOSED' ORDER BY e.created_at DESC LIMIT 1) close_note
-      FROM issue_workflows w JOIN issues i ON i.id=w.issue_id LEFT JOIN taxonomy_categories t ON t.id=i.taxonomy_category_id LEFT JOIN opd o ON o.id=w.lead_opd_id
+      FROM issue_workflows w JOIN issues i ON i.id=w.issue_id LEFT JOIN taxonomy_categories t ON t.id=i.taxonomy_category_id LEFT JOIN opd o ON o.id=w.lead_opd_id LEFT JOIN LATERAL (SELECT m.risk_score,m.positive_count,m.neutral_count,m.negative_count,m.metadata FROM issue_metrics m WHERE m.issue_id=i.id ORDER BY m.created_at DESC,m.id DESC LIMIT 1) im ON true
       WHERE w.workflow_status IN ('APPROVED','PUBLISHED','MONITORING','CLOSED') ${scope}
       ORDER BY CASE w.workflow_status WHEN 'APPROVED' THEN 0 WHEN 'PUBLISHED' THEN 1 WHEN 'MONITORING' THEN 2 ELSE 3 END,w.updated_at DESC`,params);
     return{data:rows};
