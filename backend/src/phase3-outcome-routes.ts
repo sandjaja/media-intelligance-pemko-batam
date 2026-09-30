@@ -65,7 +65,7 @@ export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,
       if(!ctx.opdId)return{data:[]};
       params.push(ctx.opdId);scope=`AND (w.lead_opd_id=$1 OR EXISTS(SELECT 1 FROM issue_workflow_contributors c WHERE c.issue_id=w.issue_id AND c.contributor_type='OPD' AND c.opd_id=$1))`;
     }else if(!global)return{data:[]};
-    const {rows}=await pool.query(`SELECT w.issue_id,w.workflow_status,w.lead_opd_id,w.approved_at,w.published_at,w.closed_at,w.updated_at,i.title,i.description,i.risk_level,i.risk_score,i.momentum,i.geographic_scope,t.name taxonomy_name,o.name lead_opd_name,
+    const {rows}=await pool.query(`SELECT w.issue_id,w.workflow_status,w.lead_opd_id,w.approved_at,w.published_at,w.closed_at,w.updated_at,i.title,i.description,i.risk_level,i.momentum,i.geographic_scope,t.name taxonomy_name,o.name lead_opd_name,
       (SELECT json_build_object('id',k.id,'keyword',k.keyword) FROM issue_keywords ik JOIN keywords k ON k.id=ik.keyword_id WHERE ik.issue_id=i.id AND ik.keyword_role='PRIMARY' ORDER BY ik.id LIMIT 1) primary_keyword,
       COALESCE((SELECT json_agg(json_build_object('id',k.id,'keyword',k.keyword) ORDER BY ik.id) FROM issue_keywords ik JOIN keywords k ON k.id=ik.keyword_id WHERE ik.issue_id=i.id AND ik.keyword_role='SUPPORTING'),'[]'::json) supporting_keywords,
       COALESCE((SELECT json_agg(json_build_object('id',so.id,'name',so.name) ORDER BY so.name) FROM issue_workflow_contributors c JOIN opd so ON so.id=c.opd_id WHERE c.issue_id=i.id AND c.contributor_type='OPD'),'[]'::json) supporting_opds,
