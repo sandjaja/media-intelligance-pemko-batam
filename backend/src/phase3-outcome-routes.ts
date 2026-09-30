@@ -103,7 +103,7 @@ export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,
   app.get('/api/phase3/issues/:id/monitoring-periods',{preHandler:auth},async(request,reply)=>{const p=idParam.safeParse(request.params);if(!p.success)return reply.code(400).send({error:'INVALID_ISSUE_ID'});const w=await workflow(p.data.id);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});const ctx=request.phase3OutcomeAuth!;if(!(await canSeeOutcome(ctx,w)))return reply.code(403).send({error:'FORBIDDEN'});const {rows}=await pool.query(`SELECT event_type,created_at,note,metadata FROM issue_workflow_events WHERE issue_id=$1 AND event_type IN ('RESPONSE_PUBLISHED','MONITORING_STARTED','ISSUE_CLOSED') ORDER BY created_at ASC,id ASC`,[p.data.id]);const periods:any[]=[];let publishedAt:any=null;for(const e of rows){if(e.event_type==='RESPONSE_PUBLISHED')publishedAt=e.created_at;else if(e.event_type==='MONITORING_STARTED')periods.push({number:periods.length+1,started_at:publishedAt||e.created_at,monitoring_started_at:e.created_at,ended_at:null,status:'MONITORING',close_note:null});else{const open=[...periods].reverse().find(x=>!x.ended_at);if(open){open.ended_at=e.created_at;open.status='CLOSED';open.close_note=e.note||null}}}return{data:periods.reverse()};});
 
   app.get('/api/phase3/issues/:id/monitoring-periods/:period/gap',{preHandler:auth},async(request,reply)=>{
-    const parsed=z.object({id:z.string().regex(/^\\d+$/),period:z.string().regex(/^\\d+$/)}).safeParse(request.params);
+    const parsed=z.object({id:z.string().regex(/^\d+$/),period:z.string().regex(/^\d+$/)}).safeParse(request.params);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_MONITORING_PERIOD'});
     const ctx=request.phase3OutcomeAuth!,issueId=parsed.data.id,periodNo=Number(parsed.data.period);
     const w=await workflow(issueId);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});
@@ -123,7 +123,7 @@ export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,
   });
 
   app.post('/api/phase3/issues/:id/monitoring-periods/:period/analyze',{preHandler:auth},async(request,reply)=>{
-    const parsed=z.object({id:z.string().regex(/^\\d+$/),period:z.string().regex(/^\\d+$/)}).safeParse(request.params);
+    const parsed=z.object({id:z.string().regex(/^\d+$/),period:z.string().regex(/^\d+$/)}).safeParse(request.params);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_MONITORING_PERIOD'});
     const ctx=request.phase3OutcomeAuth!;if(!isManager(ctx))return reply.code(403).send({error:'FORBIDDEN'});
     const issueId=parsed.data.id,periodNo=Number(parsed.data.period),w=await workflow(issueId);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});
