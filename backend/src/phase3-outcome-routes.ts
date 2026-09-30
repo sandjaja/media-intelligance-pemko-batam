@@ -29,7 +29,24 @@ export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,
       request.phase3OutcomeAuth=ctx;
     }catch{return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'});}
   };
-  const actorRole=(ctx:AuthorizationContext):Phase3ActorRole=>(ctx.roles[0]||'viewer') as Phase3ActorRole;
+  const actorRole=(ctx:AuthorizationContext):Phase3ActorRole=>{
+    for(const role of ['super_admin','humas','opd','district','executive','viewer'] as Phase3ActorRole[])if(ctx.roles.includes(role))return role;
+    return 'viewer';
+  };
+  const isGlobalReader=(ctx:AuthorizationContext)=>ctx.roles.some(r=>['super_admin','humas','executive','viewer'].includes(r));
+  const canSeeOutcome=async(ctx:AuthorizationContext,w:any)=>{
+    if(isGlobalReader(ctx))return true;
+    if(ctx.roles.includes('district')&&ctx.districtId){
+      const visible=await pool.query(`SELECT 1 FROM issues i WHERE i.id=$1 AND ((i.geographic_scope='CITYWIDE' OR (i.geographic_scope='DISTRICTS' AND EXISTS(SELECT 1 FROM issue_districts d WHERE d.issue_id=i.id AND d.district_id=$2))) OR EXISTS(SELECT 1 FROM issue_workflow_contributors c WHERE c.issue_id=i.id AND c.contributor_type='DISTRICT' AND c.district_id=$2)) LIMIT 1`,[w.issue_id,ctx.districtId]);
+      return Boolean(visible.rows[0]);
+    }
+    if(ctx.roles.includes('opd')&&ctx.opdId){
+      if(String(w.lead_opd_id)===String(ctx.opdId))return true;
+      const supporting=await pool.query(`SELECT 1 FROM issue_workflow_contributors WHERE issue_id=$1 AND contributor_type='OPD' AND opd_id=$2 LIMIT 1`,[w.issue_id,ctx.opdId]);
+      return Boolean(supporting.rows[0]);
+    }
+    return false;
+  };
   const isManager=(ctx:AuthorizationContext)=>ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
   const workflow=async(issueId:string)=>{
     const {rows}=await pool.query(`SELECT w.*,i.title,i.description,i.status analytical_status,i.risk_level,i.momentum,o.name lead_opd_name FROM issue_workflows w JOIN issues i ON i.id=w.issue_id LEFT JOIN opd o ON o.id=w.lead_opd_id WHERE w.issue_id=$1`,[issueId]);
@@ -39,9 +56,15 @@ export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,
 
   app.get('/api/phase3/outcomes',{preHandler:auth},async(request)=>{
     const ctx=request.phase3OutcomeAuth!;
-    const global=ctx.roles.some(r=>['super_admin','humas','executive','viewer'].includes(r));
+    const global=isGlobalReader(ctx);
     const params:any[]=[];let scope='';
-    if(!global&&ctx.roles.includes('opd')){params.push(ctx.opdId);scope=`AND (w.lead_opd_id=$1 OR EXISTS(SELECT 1 FROM issue_workflow_supporting_opd s WHERE s.issue_id=w.issue_id AND s.opd_id=$1))`;}
+    if(!global&&ctx.roles.includes('district')){
+      if(!ctx.districtId)return{data:[]};
+      params.push(ctx.districtId);scope=`AND ((i.geographic_scope='CITYWIDE' OR (i.geographic_scope='DISTRICTS' AND EXISTS(SELECT 1 FROM issue_districts d WHERE d.issue_id=i.id AND d.district_id=$1))) OR EXISTS(SELECT 1 FROM issue_workflow_contributors c WHERE c.issue_id=i.id AND c.contributor_type='DISTRICT' AND c.district_id=$1))`;
+    }else if(!global&&ctx.roles.includes('opd')){
+      if(!ctx.opdId)return{data:[]};
+      params.push(ctx.opdId);scope=`AND (w.lead_opd_id=$1 OR EXISTS(SELECT 1 FROM issue_workflow_contributors c WHERE c.issue_id=w.issue_id AND c.contributor_type='OPD' AND c.opd_id=$1))`;
+    }else if(!global)return{data:[]};
     const {rows}=await pool.query(`SELECT w.issue_id,w.workflow_status,w.lead_opd_id,w.approved_at,w.published_at,w.closed_at,w.updated_at,i.title,i.description,i.risk_level,i.momentum,o.name lead_opd_name,
       (SELECT e.metadata FROM issue_workflow_events e WHERE e.issue_id=w.issue_id AND e.event_type='RESPONSE_PUBLISHED' ORDER BY e.created_at DESC LIMIT 1) publication,
       (SELECT e.note FROM issue_workflow_events e WHERE e.issue_id=w.issue_id AND e.event_type='ISSUE_CLOSED' ORDER BY e.created_at DESC LIMIT 1) close_note
@@ -72,27 +95,44 @@ export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,
     return{data:await workflow(p.data.id)};
   });
 
-  app.get('/api/phase3/issues/:id/monitoring-periods',{preHandler:auth},async(request,reply)=>{const p=idParam.safeParse(request.params);if(!p.success)return reply.code(400).send({error:'INVALID_ISSUE_ID'});const w=await workflow(p.data.id);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});const ctx=request.phase3OutcomeAuth!;const global=ctx.roles.some(r=>['super_admin','humas','executive','viewer'].includes(r));if(!global&&(!ctx.roles.includes('opd')||String(ctx.opdId)!==String(w.lead_opd_id)))return reply.code(403).send({error:'FORBIDDEN'});const {rows}=await pool.query(`SELECT event_type,created_at,note,metadata FROM issue_workflow_events WHERE issue_id=$1 AND event_type IN ('MONITORING_STARTED','ISSUE_CLOSED') ORDER BY created_at ASC`,[p.data.id]);const periods:any[]=[];for(const e of rows){if(e.event_type==='MONITORING_STARTED')periods.push({number:periods.length+1,started_at:e.created_at,ended_at:null,status:'MONITORING',close_note:null});else{const open=[...periods].reverse().find(x=>!x.ended_at);if(open){open.ended_at=e.created_at;open.status='CLOSED';open.close_note=e.note||null}}}return{data:periods.reverse()};});
+  app.get('/api/phase3/issues/:id/monitoring-periods',{preHandler:auth},async(request,reply)=>{const p=idParam.safeParse(request.params);if(!p.success)return reply.code(400).send({error:'INVALID_ISSUE_ID'});const w=await workflow(p.data.id);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});const ctx=request.phase3OutcomeAuth!;if(!(await canSeeOutcome(ctx,w)))return reply.code(403).send({error:'FORBIDDEN'});const {rows}=await pool.query(`SELECT event_type,created_at,note,metadata FROM issue_workflow_events WHERE issue_id=$1 AND event_type IN ('MONITORING_STARTED','ISSUE_CLOSED') ORDER BY created_at ASC`,[p.data.id]);const periods:any[]=[];for(const e of rows){if(e.event_type==='MONITORING_STARTED')periods.push({number:periods.length+1,started_at:e.created_at,ended_at:null,status:'MONITORING',close_note:null});else{const open=[...periods].reverse().find(x=>!x.ended_at);if(open){open.ended_at=e.created_at;open.status='CLOSED';open.close_note=e.note||null}}}return{data:periods.reverse()};});
 
   app.get('/api/phase3/issues/:id/monitoring-periods/:period/gap',{preHandler:auth},async(request,reply)=>{
     const parsed=z.object({id:z.string().regex(/^\\d+$/),period:z.string().regex(/^\\d+$/)}).safeParse(request.params);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_MONITORING_PERIOD'});
     const ctx=request.phase3OutcomeAuth!,issueId=parsed.data.id,periodNo=Number(parsed.data.period);
     const w=await workflow(issueId);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});
-    const global=ctx.roles.some(r=>['super_admin','humas','executive','viewer'].includes(r));
-    if(!global&&(!ctx.roles.includes('opd')||String(ctx.opdId)!==String(w.lead_opd_id)))return reply.code(403).send({error:'FORBIDDEN'});
+    if(!(await canSeeOutcome(ctx,w)))return reply.code(403).send({error:'FORBIDDEN'});
     const events=(await pool.query(`SELECT event_type,created_at,note FROM issue_workflow_events WHERE issue_id=$1 AND event_type IN ('MONITORING_STARTED','ISSUE_CLOSED') ORDER BY created_at ASC,id ASC`,[issueId])).rows;
     const periods:any[]=[];for(const e of events){if(e.event_type==='MONITORING_STARTED')periods.push({number:periods.length+1,started_at:e.created_at,ended_at:null,status:'MONITORING',close_note:null});else{const open=[...periods].reverse().find(x=>!x.ended_at);if(open){open.ended_at=e.created_at;open.status='CLOSED';open.close_note=e.note||null}}}
     const period=periods.find(x=>x.number===periodNo);if(!period)return reply.code(404).send({error:'MONITORING_PERIOD_NOT_FOUND'});
     const end=period.ended_at||new Date();
     const online=(await pool.query(`SELECT a.id,a.title,a.published_at FROM issue_articles ia JOIN articles a ON a.id=ia.article_id WHERE ia.issue_id=$1 AND a.published_at >= $2 AND a.published_at <= $3 ORDER BY a.published_at ASC`,[issueId,period.started_at,end])).rows;
-    const print=(await pool.query(`SELECT pa.id,pa.title,pe.edition_date published_at,pa.created_at ingested_at,ipa.created_at linked_at,ipa.decided_at FROM issue_print_articles ipa JOIN print_articles pa ON pa.id=ipa.print_article_id JOIN print_editions pe ON pe.id=pa.edition_id WHERE ipa.issue_id=$1 AND ipa.linkage_status='linked' AND pe.edition_date >= $2::date AND pe.edition_date <= $3::date AND pa.created_at >= $2 AND pa.created_at <= $3 ORDER BY pa.created_at ASC`,[issueId,period.started_at,end])).rows;
+    const print=(await pool.query(`SELECT pa.id,pa.title,pe.edition_date published_at,pa.created_at ingested_at,ipa.created_at linked_at,ipa.decided_at FROM issue_print_articles ipa JOIN print_articles pa ON pa.id=ipa.print_article_id JOIN print_editions pe ON pe.id=pa.edition_id WHERE ipa.issue_id=$1 AND ipa.linkage_status='linked' AND pe.edition_date >= $2::date AND pe.edition_date <= $3::date ORDER BY pe.edition_date ASC,pa.id ASC`,[issueId,period.started_at,end])).rows;
     const social=(await pool.query(`SELECT sm.id,sm.title,sm.published_at,sm.source_kind FROM social_mention_issues smi JOIN social_mentions sm ON sm.id=smi.mention_id WHERE smi.issue_id=$1 AND sm.published_at >= $2 AND sm.published_at <= $3 ORDER BY sm.published_at ASC`,[issueId,period.started_at,end])).rows;
     const externalSocial=social.filter((x:any)=>x.source_kind==='external'),owned=social.filter((x:any)=>x.source_kind==='owned');
     const external=[...online.map((x:any)=>({...x,source:'online'})),...print.map((x:any)=>({...x,source:'print'})),...externalSocial.map((x:any)=>({...x,source:'social'}))];
-    const angleResult=await extractDynamicIssueClaims(external);
-    const coverageResult=await matchDynamicOfficialResponseCoverage(angleResult.angles,owned);
-    return{data:{period,evidence:{total:external.length+owned.length,external:external.length,online:online.length,print:print.length,social:externalSocial.length,owned:owned.length},communicationGap:{externalAngles:angleResult,semanticAssessment:coverageResult},items:{online,print,social:externalSocial,owned}}};
+    const gapSnapshot=(await pool.query(`SELECT result,analyzed_at FROM issue_communication_gap_snapshots WHERE issue_id=$1 ORDER BY analyzed_at DESC LIMIT 1`,[issueId])).rows[0]||null;
+    const finalResponse=(await pool.query(`SELECT s.id,s.version,s.response_text,s.facts_data,s.key_message,s.supporting_links,s.reviewed_at,s.submitted_at,o.name opd_name FROM issue_response_submissions s LEFT JOIN opd o ON o.id=s.opd_id WHERE s.issue_id=$1 AND s.status='APPROVED' ORDER BY s.version DESC,s.created_at DESC LIMIT 1`,[issueId])).rows[0]||null;
+    return{data:{period,evidence:{total:external.length+owned.length,external:external.length,online:online.length,print:print.length,social:externalSocial.length,owned:owned.length},baseline:{gap:gapSnapshot?.result||null,gapAnalyzedAt:gapSnapshot?.analyzed_at||null,finalResponse},items:{online,print,social:externalSocial,owned}}};
+  });
+
+  app.post('/api/phase3/issues/:id/monitoring-periods/:period/analyze',{preHandler:auth},async(request,reply)=>{
+    const parsed=z.object({id:z.string().regex(/^\\d+$/),period:z.string().regex(/^\\d+$/)}).safeParse(request.params);
+    if(!parsed.success)return reply.code(400).send({error:'INVALID_MONITORING_PERIOD'});
+    const ctx=request.phase3OutcomeAuth!;if(!isManager(ctx))return reply.code(403).send({error:'FORBIDDEN'});
+    const issueId=parsed.data.id,periodNo=Number(parsed.data.period),w=await workflow(issueId);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});
+    const events=(await pool.query(`SELECT event_type,created_at,note FROM issue_workflow_events WHERE issue_id=$1 AND event_type IN ('MONITORING_STARTED','ISSUE_CLOSED') ORDER BY created_at ASC,id ASC`,[issueId])).rows;
+    const periods:any[]=[];for(const e of events){if(e.event_type==='MONITORING_STARTED')periods.push({number:periods.length+1,started_at:e.created_at,ended_at:null,status:'MONITORING'});else{const open=[...periods].reverse().find(x=>!x.ended_at);if(open)open.ended_at=e.created_at;}}
+    const period=periods.find(x=>x.number===periodNo);if(!period)return reply.code(404).send({error:'MONITORING_PERIOD_NOT_FOUND'});const end=period.ended_at||new Date();
+    const online=(await pool.query(`SELECT a.id,a.title,a.published_at FROM issue_articles ia JOIN articles a ON a.id=ia.article_id WHERE ia.issue_id=$1 AND a.published_at >= $2 AND a.published_at <= $3 ORDER BY a.published_at ASC`,[issueId,period.started_at,end])).rows;
+    const print=(await pool.query(`SELECT pa.id,pa.title,pe.edition_date published_at FROM issue_print_articles ipa JOIN print_articles pa ON pa.id=ipa.print_article_id JOIN print_editions pe ON pe.id=pa.edition_id WHERE ipa.issue_id=$1 AND ipa.linkage_status='linked' AND pe.edition_date >= $2::date AND pe.edition_date <= $3::date ORDER BY pe.edition_date ASC,pa.id ASC`,[issueId,period.started_at,end])).rows;
+    const social=(await pool.query(`SELECT sm.id,sm.title,sm.published_at,sm.source_kind FROM social_mention_issues smi JOIN social_mentions sm ON sm.id=smi.mention_id WHERE smi.issue_id=$1 AND sm.published_at >= $2 AND sm.published_at <= $3 ORDER BY sm.published_at ASC`,[issueId,period.started_at,end])).rows;
+    const externalSocial=social.filter((x:any)=>x.source_kind==='external'),owned=social.filter((x:any)=>x.source_kind==='owned'),external=[...online.map((x:any)=>({...x,source:'online'})),...print.map((x:any)=>({...x,source:'print'})),...externalSocial.map((x:any)=>({...x,source:'social'}))];
+    const angleResult=await extractDynamicIssueClaims(external),coverageResult=await matchDynamicOfficialResponseCoverage(angleResult.angles,owned);
+    const gapSnapshot=(await pool.query(`SELECT result,analyzed_at FROM issue_communication_gap_snapshots WHERE issue_id=$1 ORDER BY analyzed_at DESC LIMIT 1`,[issueId])).rows[0]||null;
+    const finalResponse=(await pool.query(`SELECT s.id,s.version,s.response_text,s.facts_data,s.key_message,s.supporting_links,s.reviewed_at,s.submitted_at,o.name opd_name FROM issue_response_submissions s LEFT JOIN opd o ON o.id=s.opd_id WHERE s.issue_id=$1 AND s.status='APPROVED' ORDER BY s.version DESC,s.created_at DESC LIMIT 1`,[issueId])).rows[0]||null;
+    return{data:{period,evidence:{total:external.length+owned.length,online:online.length,print:print.length,social:externalSocial.length,owned:owned.length},baseline:{gap:gapSnapshot?.result||null,gapAnalyzedAt:gapSnapshot?.analyzed_at||null,finalResponse},analysis:{externalAngles:angleResult,semanticAssessment:coverageResult},items:{online,print,social:externalSocial,owned}}};
   });
 
   app.post('/api/phase3/issues/:id/close',{preHandler:auth},async(request,reply)=>{
