@@ -32,7 +32,7 @@
 
   if(!document.querySelector('script[data-phase3-outcome]')){
     const s=document.createElement('script');
-    s.src='./phase3-outcome-ui.js?v=20261001-monitor-history-bind1';
+    s.src='./phase3-outcome-ui.js?v=20261001-monitor-active-only1';
     s.dataset.phase3Outcome='1';
     document.body.appendChild(s);
   }
