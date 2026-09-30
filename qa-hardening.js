@@ -25,14 +25,14 @@
 
   if(!document.querySelector('script[data-phase3-workspace]')){
     const s=document.createElement('script');
-    s.src='./phase3-workspace.js?v=20260930-cycle-history3';
+    s.src='./phase3-workspace.js?v=20260930-cycle-history4';
     s.dataset.phase3Workspace='1';
     document.body.appendChild(s);
   }
 
   if(!document.querySelector('script[data-phase3-outcome]')){
     const s=document.createElement('script');
-    s.src='./phase3-outcome-ui.js?v=20260930-cycle-history2';
+    s.src='./phase3-outcome-ui.js?v=20260930-cycle-history4';
     s.dataset.phase3Outcome='1';
     document.body.appendChild(s);
   }
