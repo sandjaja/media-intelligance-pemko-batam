@@ -70,6 +70,28 @@ ${JSON.stringify(input).slice(0,50000)}`;
   return JSON.parse(raw);
 }
 
+
+async function analyzeMonitoringAgainstPublication(input:any){
+  const key=process.env.GEMINI_API_KEY;if(!key)throw new Error('GEMINI_API_KEY_MISSING');
+  const model=process.env.GEMINI_MODEL||'gemini-3.5-flash-lite';
+  const prompt=`Anda adalah evaluator monitoring pascapublikasi pemerintah daerah. Bandingkan Fokus Monitoring yang ditetapkan saat Analisa Publikasi dengan evidence 4 media yang benar-benar tersedia SETELAH publikasi. Jangan mengarang isi evidence. Jangan menyimpulkan efektivitas bila evidence belum cukup.
+
+Untuk SETIAP monitoringFocus, beri:
+- status: PROVEN bila evidence jelas membuktikan target; PARTIAL bila baru sebagian; NOT_PROVEN bila evidence ada tetapi tidak mendukung target; INSUFFICIENT_DATA bila evidence relevan belum cukup.
+- assessment: alasan singkat berbasis evidence.
+- evidenceRefs: referensi evidence yang benar-benar mendukung, format source:id.
+- signal: apa yang terlihat dari evidence.
+Kemudian overallAssessment harus menjelaskan perkembangan pascapublikasi tanpa memaksakan kesimpulan. Jika total evidence sangat sedikit atau kanal relevan kosong, nyatakan keterbatasannya.
+Output JSON {"focusResults":[{"type":"...","target":"...","status":"PROVEN|PARTIAL|NOT_PROVEN|INSUFFICIENT_DATA","assessment":"...","evidenceRefs":["print:38"],"signal":"..."}],"overallAssessment":"...","evidenceSufficiency":"SUFFICIENT|LIMITED|INSUFFICIENT","remainingGap":["..."],"newSignals":["..."]}.
+
+DATA:
+${JSON.stringify(input).slice(0,50000)}`;
+  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}})});
+  if(!r.ok)throw new Error(`Gemini HTTP ${r.status}`);
+  const payload=await r.json() as any,raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');
+  return JSON.parse(raw);
+}
+
 export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
   const auth=async(request:FastifyRequest,reply:any)=>{
     const token=request.cookies.access_token;
@@ -182,9 +204,9 @@ export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,
     const periods:any[]=[];let publishedAt:any=null;for(const e of events){if(e.event_type==='RESPONSE_PUBLISHED')publishedAt=e.created_at;else if(e.event_type==='MONITORING_STARTED')periods.push({number:periods.length+1,started_at:publishedAt||e.created_at,monitoring_started_at:e.created_at,ended_at:null,status:'MONITORING',close_note:null});else{const open=[...periods].reverse().find(x=>!x.ended_at);if(open){open.ended_at=e.created_at;open.status='CLOSED';open.close_note=e.note||null}}}
     const period=periods.find(x=>x.number===periodNo);if(!period)return reply.code(404).send({error:'MONITORING_PERIOD_NOT_FOUND'});
     const end=period.ended_at||new Date();
-    const online=(await pool.query(`SELECT a.id,a.title,a.published_at FROM issue_articles ia JOIN articles a ON a.id=ia.article_id WHERE ia.issue_id=$1 AND a.published_at >= $2 AND a.published_at <= $3 ORDER BY a.published_at ASC`,[issueId,period.started_at,end])).rows;
+    const online=(await pool.query(`SELECT a.id,a.title,a.published_at,a.summary,a.content FROM issue_articles ia JOIN articles a ON a.id=ia.article_id WHERE ia.issue_id=$1 AND a.published_at >= $2 AND a.published_at <= $3 ORDER BY a.published_at ASC`,[issueId,period.started_at,end])).rows;
     const print=(await pool.query(`SELECT pa.id,pa.title,pe.edition_date published_at,pa.created_at ingested_at,ipa.created_at linked_at,ipa.decided_at FROM issue_print_articles ipa JOIN print_articles pa ON pa.id=ipa.print_article_id JOIN print_editions pe ON pe.id=pa.edition_id WHERE ipa.issue_id=$1 AND ipa.linkage_status='linked' AND pe.edition_date >= $2::date AND pe.edition_date <= $3::date ORDER BY pe.edition_date ASC,pa.id ASC`,[issueId,period.started_at,end])).rows;
-    const social=(await pool.query(`SELECT sm.id,sm.title,sm.published_at,sm.source_kind FROM social_mention_issues smi JOIN social_mentions sm ON sm.id=smi.mention_id WHERE smi.issue_id=$1 AND sm.published_at >= $2 AND sm.published_at <= $3 ORDER BY sm.published_at ASC`,[issueId,period.started_at,end])).rows;
+    const social=(await pool.query(`SELECT sm.id,sm.title,sm.published_at,sm.source_kind,sm.content FROM social_mention_issues smi JOIN social_mentions sm ON sm.id=smi.mention_id WHERE smi.issue_id=$1 AND sm.published_at >= $2 AND sm.published_at <= $3 ORDER BY sm.published_at ASC`,[issueId,period.started_at,end])).rows;
     const externalSocial=social.filter((x:any)=>x.source_kind==='external'),owned=social.filter((x:any)=>x.source_kind==='owned');
     const external=[...online.map((x:any)=>({...x,source:'online'})),...print.map((x:any)=>({...x,source:'print'})),...externalSocial.map((x:any)=>({...x,source:'social'}))];
     const gapSnapshot=(await pool.query(`SELECT result,analyzed_at FROM issue_communication_gap_snapshots WHERE issue_id=$1 ORDER BY analyzed_at DESC LIMIT 1`,[issueId])).rows[0]||null;
@@ -201,13 +223,31 @@ export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,
     const periods:any[]=[];let publishedAt:any=null;for(const e of events){if(e.event_type==='RESPONSE_PUBLISHED')publishedAt=e.created_at;else if(e.event_type==='MONITORING_STARTED')periods.push({number:periods.length+1,started_at:publishedAt||e.created_at,monitoring_started_at:e.created_at,ended_at:null,status:'MONITORING'});else{const open=[...periods].reverse().find(x=>!x.ended_at);if(open)open.ended_at=e.created_at;}}
     const period=periods.find(x=>x.number===periodNo);if(!period)return reply.code(404).send({error:'MONITORING_PERIOD_NOT_FOUND'});const end=period.ended_at||new Date();
     const online=(await pool.query(`SELECT a.id,a.title,a.published_at FROM issue_articles ia JOIN articles a ON a.id=ia.article_id WHERE ia.issue_id=$1 AND a.published_at >= $2 AND a.published_at <= $3 ORDER BY a.published_at ASC`,[issueId,period.started_at,end])).rows;
-    const print=(await pool.query(`SELECT pa.id,pa.title,pe.edition_date published_at FROM issue_print_articles ipa JOIN print_articles pa ON pa.id=ipa.print_article_id JOIN print_editions pe ON pe.id=pa.edition_id WHERE ipa.issue_id=$1 AND ipa.linkage_status='linked' AND pe.edition_date >= $2::date AND pe.edition_date <= $3::date ORDER BY pe.edition_date ASC,pa.id ASC`,[issueId,period.started_at,end])).rows;
+    const print=(await pool.query(`SELECT pa.id,pa.title,pe.edition_date published_at,pa.body_text content FROM issue_print_articles ipa JOIN print_articles pa ON pa.id=ipa.print_article_id JOIN print_editions pe ON pe.id=pa.edition_id WHERE ipa.issue_id=$1 AND ipa.linkage_status='linked' AND pe.edition_date >= $2::date AND pe.edition_date <= $3::date ORDER BY pe.edition_date ASC,pa.id ASC`,[issueId,period.started_at,end])).rows;
     const social=(await pool.query(`SELECT sm.id,sm.title,sm.published_at,sm.source_kind FROM social_mention_issues smi JOIN social_mentions sm ON sm.id=smi.mention_id WHERE smi.issue_id=$1 AND sm.published_at >= $2 AND sm.published_at <= $3 ORDER BY sm.published_at ASC`,[issueId,period.started_at,end])).rows;
     const externalSocial=social.filter((x:any)=>x.source_kind==='external'),owned=social.filter((x:any)=>x.source_kind==='owned'),external=[...online.map((x:any)=>({...x,source:'online'})),...print.map((x:any)=>({...x,source:'print'})),...externalSocial.map((x:any)=>({...x,source:'social'}))];
     const angleResult=await extractDynamicIssueClaims(external),coverageResult=await matchDynamicOfficialResponseCoverage(angleResult.angles,owned);
+    const publicationEvent=(await pool.query(`SELECT created_at,note,metadata FROM issue_workflow_events WHERE issue_id=$1 AND event_type='RESPONSE_PUBLISHED' ORDER BY created_at DESC,id DESC LIMIT 1`,[issueId])).rows[0]||null;
+    let publicationAnalysis:any=null,focusAssessment:any=null;
+    const pub=publicationEvent?.metadata||{};
+    if(pub.channel==='website'&&pub.url){
+      try{
+        const article=await fetchWebsitePublication(String(pub.url));
+        publicationAnalysis=await analyzeWebsitePublication({issueTitle:String(w.title||''),gap:null,finalResponse:null,publication:{url:String(pub.url),note:publicationEvent?.note||null},article});
+        const evidenceForAi=[
+          ...online.map((x:any)=>({ref:`online:${x.id}`,source:'ONLINE',title:x.title||'',text:String(x.summary||x.content||'').slice(0,3500)})),
+          ...print.map((x:any)=>({ref:`print:${x.id}`,source:'PRINT',title:x.title||'',text:String(x.content||'').slice(0,3500)})),
+          ...externalSocial.map((x:any)=>({ref:`social:${x.id}`,source:'SOCIAL',title:x.title||'',text:String(x.content||'').slice(0,3500)})),
+          ...owned.map((x:any)=>({ref:`owned:${x.id}`,source:'OWNED',title:x.title||'',text:String(x.content||'').slice(0,3500)}))
+        ];
+        if(Array.isArray(publicationAnalysis?.monitoringFocus)&&publicationAnalysis.monitoringFocus.length){
+          focusAssessment=await analyzeMonitoringAgainstPublication({monitoringFocus:publicationAnalysis.monitoringFocus,evidence:evidenceForAi,evidenceCounts:{online:online.length,print:print.length,social:externalSocial.length,owned:owned.length,total:evidenceForAi.length}});
+        }
+      }catch(error:any){request.log.warn({issueId,reason:String(error?.message||error).slice(0,180)},'publication-focus monitoring analysis unavailable');}
+    }
     const gapSnapshot=(await pool.query(`SELECT result,analyzed_at FROM issue_communication_gap_snapshots WHERE issue_id=$1 ORDER BY analyzed_at DESC LIMIT 1`,[issueId])).rows[0]||null;
     const finalResponse=(await pool.query(`SELECT s.id,s.version,s.response_text,s.facts_data,s.key_message,s.supporting_links,s.reviewed_at,s.submitted_at,o.name opd_name FROM issue_response_submissions s LEFT JOIN opd o ON o.id=s.opd_id WHERE s.issue_id=$1 AND s.status='APPROVED' ORDER BY s.version DESC,s.updated_at DESC LIMIT 1`,[issueId])).rows[0]||null;
-    return{data:{period,evidence:{total:external.length+owned.length,online:online.length,print:print.length,social:externalSocial.length,owned:owned.length},baseline:{gap:gapSnapshot?.result||null,gapAnalyzedAt:gapSnapshot?.analyzed_at||null,finalResponse},analysis:{externalAngles:angleResult,semanticAssessment:coverageResult},items:{online,print,social:externalSocial,owned}}};
+    return{data:{period,evidence:{total:external.length+owned.length,online:online.length,print:print.length,social:externalSocial.length,owned:owned.length},baseline:{gap:gapSnapshot?.result||null,gapAnalyzedAt:gapSnapshot?.analyzed_at||null,finalResponse},analysis:{externalAngles:angleResult,semanticAssessment:coverageResult,publicationAnalysis,focusAssessment},items:{online,print,social:externalSocial,owned}}};
   });
 
   app.post('/api/phase3/issues/:id/close',{preHandler:auth},async(request,reply)=>{
