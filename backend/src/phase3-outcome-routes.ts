@@ -14,8 +14,54 @@ const publishInput=z.object({
   channel:z.enum(['website','instagram','facebook','tiktok','youtube','x','threads','press_release','media_statement','other']),
   url:z.string().url().max(2000).nullable().optional(),
   note:z.string().trim().max(4000).nullable().optional(),
+}).superRefine((v,ctx)=>{
+  if(v.channel==='website'&&!v.url)ctx.addIssue({code:z.ZodIssueCode.custom,path:['url'],message:'URL website wajib diisi'});
 });
 const closeInput=z.object({note:z.string().trim().min(3).max(4000)});
+const publicationAnalysisInput=z.object({});
+
+function cleanPublicationHtml(html:string){
+  const title=(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]||'').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim();
+  const text=html.replace(/<script[\s\S]*?<\/script>/gi,' ').replace(/<style[\s\S]*?<\/style>/gi,' ').replace(/<noscript[\s\S]*?<\/noscript>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/&quot;/gi,'"').replace(/&#39;/gi,"'").replace(/\s+/g,' ').trim();
+  return{title:title.slice(0,500),text:text.slice(0,24000)};
+}
+async function fetchWebsitePublication(rawUrl:string){
+  const u=new URL(rawUrl);
+  if(!['http:','https:'].includes(u.protocol))throw new Error('PUBLICATION_URL_PROTOCOL_NOT_ALLOWED');
+  const host=u.hostname.toLowerCase();
+  if(host==='localhost'||host==='0.0.0.0'||host==='127.0.0.1'||host==='::1'||host.endsWith('.local')||/^10\./.test(host)||/^192\.168\./.test(host)||/^169\.254\./.test(host)||/^172\.(1[6-9]|2\d|3[01])\./.test(host))throw new Error('PUBLICATION_URL_HOST_NOT_ALLOWED');
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);
+  try{
+    const r=await fetch(u.toString(),{signal:controller.signal,redirect:'follow',headers:{'user-agent':'MediaIntelligencePemkoBatam/1.0'}});
+    if(!r.ok)throw new Error(`PUBLICATION_FETCH_HTTP_${r.status}`);
+    const type=r.headers.get('content-type')||'';if(!type.includes('text/html'))throw new Error('PUBLICATION_NOT_HTML');
+    const len=Number(r.headers.get('content-length')||0);if(len>2_000_000)throw new Error('PUBLICATION_TOO_LARGE');
+    return cleanPublicationHtml((await r.text()).slice(0,2_000_000));
+  }finally{clearTimeout(timer)}
+}
+async function analyzeWebsitePublication(input:{issueTitle:string;gap:any;finalResponse:any;publication:{url:string;note?:string|null};article:{title:string;text:string}}){
+  const key=process.env.GEMINI_API_KEY;if(!key)throw new Error('GEMINI_API_KEY_MISSING');
+  const model=process.env.GEMINI_MODEL||'gemini-3.5-flash-lite';
+  const prompt=`Anda adalah analis komunikasi pemerintah daerah. Evaluasi MATERI PUBLIKASI resmi dengan membandingkan Analisis Gap Awal, Respons Final OPD, dan isi publikasi. Jangan menambah fakta dan jangan menilai keberhasilan monitoring media; tahap ini hanya menilai kualitas/substansi publikasi sebelum monitoring dimulai.
+
+Nilai:
+1. summary: ringkasan publikasi.
+2. gapCoverage: apakah gap awal dijawab oleh publikasi; jelaskan covered, partial, missing.
+3. opdClarification: bagian respons/klarifikasi OPD yang masuk dan yang tidak masuk.
+4. keyMessage: apakah pesan utama tersampaikan dan seberapa jelas.
+5. massCommunication: evaluasi framing, kejelasan bagi publik, konteks, dan potensi salah tafsir.
+6. monitoringFocus: claim/pertanyaan/pesan yang perlu dipantau setelah publikasi.
+
+Output JSON:
+{"summary":"...","gapCoverage":{"status":"ADDRESSED|PARTIAL|NOT_ADDRESSED|UNASSESSED","covered":["..."],"partial":["..."],"missing":["..."],"assessment":"..."},"opdClarification":{"included":["..."],"missing":["..."],"assessment":"..."},"keyMessage":{"status":"CLEAR|PARTIAL|MISSING","assessment":"..."},"massCommunication":{"framing":"...","clarity":"...","strengths":["..."],"risks":["..."]},"monitoringFocus":["..."]}
+
+DATA:
+${JSON.stringify(input).slice(0,50000)}`;
+  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}})});
+  if(!r.ok)throw new Error(`Gemini HTTP ${r.status}`);
+  const payload=await r.json() as any,raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');
+  return JSON.parse(raw);
+}
 
 export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
   const auth=async(request:FastifyRequest,reply:any)=>{
@@ -88,6 +134,23 @@ export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,
     await pool.query(`UPDATE issue_workflows SET workflow_status='PUBLISHED',published_at=NOW(),updated_by=$1,updated_at=NOW() WHERE issue_id=$2`,[ctx.id,p.data.id]);
     await event(p.data.id,ctx,'RESPONSE_PUBLISHED',w.workflow_status,'PUBLISHED',b.data.note??null,{channel:b.data.channel,url:b.data.url??null});
     return{data:await workflow(p.data.id)};
+  });
+
+  app.post('/api/phase3/issues/:id/publication-analysis',{preHandler:auth},async(request,reply)=>{
+    const p=idParam.safeParse(request.params),b=publicationAnalysisInput.safeParse(request.body||{});
+    if(!p.success||!b.success)return reply.code(400).send({error:'INVALID_PUBLICATION_ANALYSIS'});
+    const ctx=request.phase3OutcomeAuth!;if(!isManager(ctx))return reply.code(403).send({error:'FORBIDDEN'});
+    const w=await workflow(p.data.id);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});
+    if(!['PUBLISHED','MONITORING','CLOSED'].includes(String(w.workflow_status)))return reply.code(409).send({error:'PUBLICATION_NOT_AVAILABLE'});
+    const publicationEvent=(await pool.query(`SELECT created_at,note,metadata FROM issue_workflow_events WHERE issue_id=$1 AND event_type='RESPONSE_PUBLISHED' ORDER BY created_at DESC,id DESC LIMIT 1`,[p.data.id])).rows[0]||null;
+    const publication=publicationEvent?.metadata||{};if(publication.channel!=='website'||!publication.url)return reply.code(409).send({error:'WEBSITE_PUBLICATION_URL_REQUIRED'});
+    const gap=(await pool.query(`SELECT result,analyzed_at FROM issue_communication_gap_snapshots WHERE issue_id=$1 ORDER BY analyzed_at DESC LIMIT 1`,[p.data.id])).rows[0]||null;
+    const finalResponse=(await pool.query(`SELECT s.response_text,s.facts_data,s.key_message,s.supporting_links,o.name opd_name FROM issue_response_submissions s LEFT JOIN opd o ON o.id=s.opd_id WHERE s.issue_id=$1 AND s.status='APPROVED' ORDER BY s.version DESC,s.updated_at DESC LIMIT 1`,[p.data.id])).rows[0]||null;
+    try{
+      const article=await fetchWebsitePublication(String(publication.url));
+      const analysis=await analyzeWebsitePublication({issueTitle:String(w.title||''),gap:gap?.result||null,finalResponse,publication:{url:String(publication.url),note:publicationEvent?.note||null},article});
+      return{data:{source:{type:'website',url:publication.url,title:article.title,published_at:publicationEvent.created_at},gapAnalyzedAt:gap?.analyzed_at||null,analysis}};
+    }catch(error:any){const reason=String(error?.message||error||'UNKNOWN').slice(0,240);request.log.warn({issueId:p.data.id,reason},'publication analysis failed');return reply.code(422).send({error:'PUBLICATION_ANALYSIS_FAILED',reason});}
   });
 
   app.post('/api/phase3/issues/:id/monitor',{preHandler:auth},async(request,reply)=>{
