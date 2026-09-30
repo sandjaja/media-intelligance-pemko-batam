@@ -72,7 +72,7 @@ export async function registerArticleManualClassificationRoutes(app:FastifyInsta
   const organizationId=await org(request,reply);if(!organizationId)return;
   const articleId=Number((request.params as any).id);
   const locked=Number.isInteger(articleId)&&articleId>0?await isVerifiedLocked(articleId):false;
-  if(locked&&(request.body as any)?.action!=='REOPEN')return reply.code(423).send({error:'ARTICLE_CLASSIFICATION_LOCKED'});
+  if(locked&&(request.body as any)?.action!=='REOPEN'){if((request.body as any)?.action==='APPROVE')return{ok:true,data:{articleId:String(articleId),action:'APPROVE',alreadyVerified:true,verificationStatus:'LOCKED'}};return reply.code(423).send({error:'ARTICLE_CLASSIFICATION_LOCKED'});}
   const p=z.discriminatedUnion('action',[
    z.object({action:z.literal('APPROVE'),reason:z.string().trim().max(1000).optional().default('')}),
    z.object({action:z.literal('CORRECT_KEYWORD'),keywordIds:z.array(z.number().int().positive()).min(1).max(3),primaryKeywordId:z.number().int().positive(),reason:z.string().trim().max(1000).optional().default('')}),
