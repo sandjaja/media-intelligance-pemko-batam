@@ -43,7 +43,7 @@ async function fetchWebsitePublication(rawUrl:string){
     return cleanPublicationHtml((await r.text()).slice(0,2_000_000));
   }finally{clearTimeout(timer)}
 }
-async function analyzeWebsitePublication(input:{issueTitle:string;gap:any;finalResponse:any;publication:{url:string;note?:string|null};article:{title:string;text:string}}){
+async function analyzePublicationPackage(input:any,mediaParts:any[]=[]){
   const key=process.env.GEMINI_API_KEY;if(!key)throw new Error('GEMINI_API_KEY_MISSING');
   const model=process.env.GEMINI_MODEL||'gemini-3.5-flash-lite';
   const prompt=`Anda adalah analis komunikasi pemerintah daerah. Evaluasi MATERI PUBLIKASI resmi dengan membandingkan Analisis Gap Awal, Respons Final OPD, dan isi publikasi. Jangan menambah fakta dan jangan menilai keberhasilan monitoring media; tahap ini hanya menilai kualitas/substansi publikasi sebelum monitoring dimulai.
@@ -68,7 +68,7 @@ Output JSON:
 
 DATA:
 ${JSON.stringify(input).slice(0,50000)}`;
-  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}})});
+  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt},...mediaParts]}],generationConfig:{responseMimeType:'application/json'}})});
   if(!r.ok)throw new Error(`Gemini HTTP ${r.status}`);
   const payload=await r.json() as any,raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');
   return JSON.parse(raw);
@@ -207,19 +207,21 @@ export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,
   });
 
   app.post('/api/phase3/issues/:id/publication-analysis',{preHandler:auth},async(request,reply)=>{
-    const p=idParam.safeParse(request.params),b=publicationAnalysisInput.safeParse(request.body||{});
-    if(!p.success||!b.success)return reply.code(400).send({error:'INVALID_PUBLICATION_ANALYSIS'});
-    const ctx=request.phase3OutcomeAuth!;if(!isManager(ctx))return reply.code(403).send({error:'FORBIDDEN'});
-    const w=await workflow(p.data.id);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});
-    if(!['PUBLISHED','MONITORING','CLOSED'].includes(String(w.workflow_status)))return reply.code(409).send({error:'PUBLICATION_NOT_AVAILABLE'});
-    const publicationEvent=(await pool.query(`SELECT created_at,note,metadata FROM issue_workflow_events WHERE issue_id=$1 AND event_type='RESPONSE_PUBLISHED' ORDER BY created_at DESC,id DESC LIMIT 1`,[p.data.id])).rows[0]||null;
-    const publication=publicationEvent?.metadata||{};if(publication.channel!=='website'||!publication.url)return reply.code(409).send({error:'WEBSITE_PUBLICATION_URL_REQUIRED'});
+    const p=idParam.safeParse(request.params),b=publicationAnalysisInput.safeParse(request.body||{});if(!p.success||!b.success)return reply.code(400).send({error:'INVALID_PUBLICATION_ANALYSIS'});
+    const ctx=request.phase3OutcomeAuth!;if(!isManager(ctx))return reply.code(403).send({error:'FORBIDDEN'});const w=await workflow(p.data.id);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});if(!['PUBLISHED','MONITORING','CLOSED'].includes(String(w.workflow_status)))return reply.code(409).send({error:'PUBLICATION_NOT_AVAILABLE'});if(!w.publication_evidence_saved_at)return reply.code(409).send({error:'PUBLICATION_EVIDENCE_NOT_SAVED'});
+    const evidence=(await pool.query(`SELECT e.* FROM issue_publication_evidence e WHERE e.issue_id=$1 ORDER BY e.is_primary DESC,e.created_at,e.id`,[p.data.id])).rows;if(!evidence.length)return reply.code(409).send({error:'PUBLICATION_EVIDENCE_REQUIRED'});
     const gap=(await pool.query(`SELECT result,analyzed_at FROM issue_communication_gap_snapshots WHERE issue_id=$1 ORDER BY analyzed_at DESC LIMIT 1`,[p.data.id])).rows[0]||null;
     const finalResponse=(await pool.query(`SELECT s.response_text,s.facts_data,s.key_message,s.supporting_links,o.name opd_name FROM issue_response_submissions s LEFT JOIN opd o ON o.id=s.opd_id WHERE s.issue_id=$1 AND s.status='APPROVED' ORDER BY s.version DESC,s.updated_at DESC LIMIT 1`,[p.data.id])).rows[0]||null;
     try{
-      const article=await fetchWebsitePublication(String(publication.url));
-      const analysis=await analyzeWebsitePublication({issueTitle:String(w.title||''),gap:gap?.result||null,finalResponse,publication:{url:String(publication.url),note:publicationEvent?.note||null},article});
-      return{data:{source:{type:'website',url:publication.url,title:article.title,published_at:publicationEvent.created_at},gapAnalyzedAt:gap?.analyzed_at||null,analysis}};
+      const materials:any[]=[],mediaParts:any[]=[];
+      for(const e of evidence){
+        if(e.evidence_type==='WEBSITE'&&e.url){const article=await fetchWebsitePublication(String(e.url));materials.push({id:e.id,type:'WEBSITE',channel:e.channel,url:e.url,caption:e.caption,title:article.title,text:article.text});continue}
+        const files=(await pool.query('SELECT id,storage_key,file_name,mime_type,file_order FROM issue_publication_evidence_files WHERE evidence_id=$1 ORDER BY file_order,id',[e.id])).rows;const fileMeta:any[]=[];
+        for(const file of files){const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');const chunks:any[]=[];for await(const chunk of Readable.fromWeb(result.stream as any))chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk));const buf=Buffer.concat(chunks);if(buf.length>8_000_000)throw new Error('PUBLICATION_EVIDENCE_TOO_LARGE');mediaParts.push({inlineData:{mimeType:file.mime_type,data:buf.toString('base64')}});fileMeta.push({id:file.id,file_name:file.file_name,mime_type:file.mime_type,file_order:file.file_order});}
+        materials.push({id:e.id,type:e.evidence_type,channel:e.channel,caption:e.caption,files:fileMeta});
+      }
+      const analysis=await analyzePublicationPackage({issueTitle:String(w.title||''),gap:gap?.result||null,finalResponse,publicationEvidence:materials},mediaParts);
+      return{data:{source:{type:'package',evidenceCount:evidence.length,saved_at:w.publication_evidence_saved_at},gapAnalyzedAt:gap?.analyzed_at||null,analysis}};
     }catch(error:any){const reason=String(error?.message||error||'UNKNOWN').slice(0,240);request.log.warn({issueId:p.data.id,reason},'publication analysis failed');return reply.code(422).send({error:'PUBLICATION_ANALYSIS_FAILED',reason});}
   });
 
