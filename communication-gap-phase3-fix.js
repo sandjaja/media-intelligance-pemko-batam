@@ -24,7 +24,7 @@
     return `<div data-cg-phase3-nav="1" class="flex gap-2 overflow-x-auto pb-1 mb-4">
       <button data-cgfix="analysis" class="${cls(active==='analysis')}"><i class="fa-solid fa-chart-line mr-2"></i>Analisis Gap</button>
       <button data-cgfix="assignment" class="${cls(active==='assignment')}"><i class="fa-solid fa-list-check mr-2"></i>Penugasan & Respons</button>
-      <button data-cgfix="monitoring" class="${cls(active==='monitoring')}"><i class="fa-solid fa-satellite-dish mr-2"></i>Monitoring Respons</button>
+      <button data-cgfix="monitoring" class="${cls(active==='monitoring')}"><i class="fa-solid fa-satellite-dish mr-2"></i>Monitoring Respons</button><button data-cgfix="history" class="${cls(active==='history')}"><i class="fa-solid fa-clock-rotate-left mr-2"></i>Riwayat Siklus</button>
     </div>`;
   }
   function bind(root){
@@ -33,6 +33,7 @@
       if(mode==='analysis') return window.openCommunicationGap?.();
       if(mode==='assignment') return window.openCommunicationGapWorkspace?.('assignment');
       if(mode==='monitoring') return window.openCommunicationGapWorkspace?.('monitoring');
+      if(mode==='history') return window.openCommunicationGapWorkspace?.('history');
     });
   }
   function inject(){
