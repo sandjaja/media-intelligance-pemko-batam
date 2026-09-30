@@ -25,7 +25,7 @@
 
   if(!document.querySelector('script[data-phase3-workspace]')){
     const s=document.createElement('script');
-    s.src='./phase3-workspace.js?v=20261001-canonical-outcome1';
+    s.src='./phase3-workspace.js?v=20261001-history-direct1';
     s.dataset.phase3Workspace='1';
     document.body.appendChild(s);
   }
