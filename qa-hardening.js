@@ -32,8 +32,15 @@
 
   if(!document.querySelector('script[data-phase3-outcome]')){
     const s=document.createElement('script');
-    s.src='./phase3-outcome-ui.js?v=20260927-monitor-evidence1';
+    s.src='./phase3-outcome-ui.js?v=20260930-cycle-history1';
     s.dataset.phase3Outcome='1';
+    document.body.appendChild(s);
+  }
+
+  if(!document.querySelector('script[data-cg-phase3-fix]')){
+    const s=document.createElement('script');
+    s.src='./communication-gap-phase3-fix.js?v=20260930-cycle-history1';
+    s.dataset.cgPhase3Fix='1';
     document.body.appendChild(s);
   }
 
