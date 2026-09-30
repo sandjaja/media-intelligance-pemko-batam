@@ -276,7 +276,7 @@ export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,
     if(pub.channel==='website'&&pub.url){
       try{
         const article=await fetchWebsitePublication(String(pub.url));
-        publicationAnalysis=await analyzeWebsitePublication({issueTitle:String(w.title||''),gap:null,finalResponse:null,publication:{url:String(pub.url),note:publicationEvent?.note||null},article});
+        publicationAnalysis=await analyzePublicationPackage({issueTitle:String(w.title||''),gap:null,finalResponse:null,publicationEvidence:[{type:'WEBSITE',url:String(pub.url),note:publicationEvent?.note||null,title:article.title,text:article.text}]});
         const evidenceForAi=[
           ...online.map((x:any)=>({ref:`online:${x.id}`,source:'ONLINE',title:x.title||'',text:String(x.summary||x.content||'').slice(0,3500)})),
           ...print.map((x:any)=>({ref:`print:${x.id}`,source:'PRINT',title:x.title||'',text:String(x.content||'').slice(0,3500)})),
