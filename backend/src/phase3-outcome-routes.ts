@@ -281,13 +281,31 @@ export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,
     const social=(await pool.query(`SELECT sm.id,sm.title,sm.published_at,sm.source_kind FROM social_mention_issues smi JOIN social_mentions sm ON sm.id=smi.mention_id WHERE smi.issue_id=$1 AND sm.published_at >= $2 AND sm.published_at <= $3 ORDER BY sm.published_at ASC`,[issueId,period.started_at,end])).rows;
     const externalSocial=social.filter((x:any)=>x.source_kind==='external'),owned=social.filter((x:any)=>x.source_kind==='owned'),external=[...online.map((x:any)=>({...x,source:'online'})),...print.map((x:any)=>({...x,source:'print'})),...externalSocial.map((x:any)=>({...x,source:'social'}))];
     const angleResult=await extractDynamicIssueClaims(external),coverageResult=await matchDynamicOfficialResponseCoverage(angleResult.angles,owned);
-    const publicationEvent=(await pool.query(`SELECT created_at,note,metadata FROM issue_workflow_events WHERE issue_id=$1 AND event_type='RESPONSE_PUBLISHED' ORDER BY created_at DESC,id DESC LIMIT 1`,[issueId])).rows[0]||null;
     let publicationAnalysis:any=null,focusAssessment:any=null;
-    const pub=publicationEvent?.metadata||{};
-    if(pub.channel==='website'&&pub.url){
-      try{
-        const article=await fetchWebsitePublication(String(pub.url));
-        publicationAnalysis=await analyzePublicationPackage({issueTitle:String(w.title||''),gap:null,finalResponse:null,publicationEvidence:[{type:'WEBSITE',url:String(pub.url),note:publicationEvent?.note||null,title:article.title,text:article.text}]});
+    try{
+      const publicationEvidence=(await pool.query(`SELECT e.* FROM issue_publication_evidence e WHERE e.issue_id=$1 ORDER BY e.is_primary DESC,e.created_at,e.id`,[issueId])).rows;
+      if(publicationEvidence.length){
+        const materials:any[]=[],mediaParts:any[]=[];
+        for(const e of publicationEvidence){
+          if(e.evidence_type==='WEBSITE'&&e.url){
+            const article=await fetchWebsitePublication(String(e.url));
+            materials.push({id:e.id,type:'WEBSITE',channel:e.channel,url:e.url,caption:e.caption,title:article.title,text:article.text});
+            continue;
+          }
+          const files=(await pool.query('SELECT id,storage_key,file_name,mime_type,file_order FROM issue_publication_evidence_files WHERE evidence_id=$1 ORDER BY file_order,id',[e.id])).rows;
+          const fileMeta:any[]=[];
+          for(const file of files){
+            const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');
+            const chunks:any[]=[];for await(const chunk of Readable.fromWeb(result.stream as any))chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk));
+            const buf=Buffer.concat(chunks);if(buf.length>8_000_000)throw new Error('PUBLICATION_EVIDENCE_TOO_LARGE');
+            mediaParts.push({inlineData:{mimeType:file.mime_type,data:buf.toString('base64')}});
+            fileMeta.push({id:file.id,file_name:file.file_name,mime_type:file.mime_type,file_order:file.file_order});
+          }
+          materials.push({id:e.id,type:e.evidence_type,channel:e.channel,caption:e.caption,files:fileMeta});
+        }
+        const gapForPublication=(await pool.query(`SELECT result FROM issue_communication_gap_snapshots WHERE issue_id=$1 ORDER BY analyzed_at DESC LIMIT 1`,[issueId])).rows[0]||null;
+        const responseForPublication=(await pool.query(`SELECT s.response_text,s.facts_data,s.key_message,s.supporting_links,o.name opd_name FROM issue_response_submissions s LEFT JOIN opd o ON o.id=s.opd_id WHERE s.issue_id=$1 AND s.status='APPROVED' ORDER BY s.version DESC,s.updated_at DESC LIMIT 1`,[issueId])).rows[0]||null;
+        publicationAnalysis=await analyzePublicationPackage({issueTitle:String(w.title||''),gap:gapForPublication?.result||null,finalResponse:responseForPublication,publicationEvidence:materials},mediaParts);
         const evidenceForAi=[
           ...online.map((x:any)=>({ref:`online:${x.id}`,source:'ONLINE',title:x.title||'',text:String(x.summary||x.content||'').slice(0,3500)})),
           ...print.map((x:any)=>({ref:`print:${x.id}`,source:'PRINT',title:x.title||'',text:String(x.content||'').slice(0,3500)})),
@@ -297,8 +315,8 @@ export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,
         if(Array.isArray(publicationAnalysis?.monitoringFocus)&&publicationAnalysis.monitoringFocus.length){
           focusAssessment=await analyzeMonitoringAgainstPublication({monitoringFocus:publicationAnalysis.monitoringFocus,evidence:evidenceForAi,evidenceCounts:{online:online.length,print:print.length,social:externalSocial.length,owned:owned.length,total:evidenceForAi.length}});
         }
-      }catch(error:any){request.log.warn({issueId,reason:String(error?.message||error).slice(0,180)},'publication-focus monitoring analysis unavailable');}
-    }
+      }
+    }catch(error:any){request.log.warn({issueId,reason:String(error?.message||error).slice(0,180)},'publication-package monitoring analysis unavailable');}
     const gapSnapshot=(await pool.query(`SELECT result,analyzed_at FROM issue_communication_gap_snapshots WHERE issue_id=$1 ORDER BY analyzed_at DESC LIMIT 1`,[issueId])).rows[0]||null;
     const finalResponse=(await pool.query(`SELECT s.id,s.version,s.response_text,s.facts_data,s.key_message,s.supporting_links,s.reviewed_at,s.submitted_at,o.name opd_name FROM issue_response_submissions s LEFT JOIN opd o ON o.id=s.opd_id WHERE s.issue_id=$1 AND s.status='APPROVED' ORDER BY s.version DESC,s.updated_at DESC LIMIT 1`,[issueId])).rows[0]||null;
     return{data:{period,evidence:{total:external.length+owned.length,online:online.length,print:print.length,social:externalSocial.length,owned:owned.length},baseline:{gap:gapSnapshot?.result||null,gapAnalyzedAt:gapSnapshot?.analyzed_at||null,finalResponse},analysis:{externalAngles:angleResult,semanticAssessment:coverageResult,publicationAnalysis,focusAssessment},items:{online,print,social:externalSocial,owned}}};
