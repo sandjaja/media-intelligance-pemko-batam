@@ -9,17 +9,16 @@ CREATE INDEX IF NOT EXISTS idx_users_district
   ON users(district_id)
   WHERE district_id IS NOT NULL;
 
-INSERT INTO roles(code,name,description,scope,active)
-VALUES (
-  'district',
-  'Kecamatan',
-  'Kecamatan-scoped monitoring and assigned field clarification',
-  'district',
-  true
-)
+-- The current roles.scope constraint predates district-scoped accounts.
+ALTER TABLE roles DROP CONSTRAINT IF EXISTS roles_scope_check;
+ALTER TABLE roles
+  ADD CONSTRAINT roles_scope_check
+  CHECK (scope IN ('system','organization','opd','district'));
+
+INSERT INTO roles(code,name,scope,active)
+VALUES ('district','Kecamatan','district',true)
 ON CONFLICT (code) DO UPDATE
 SET name=EXCLUDED.name,
-    description=EXCLUDED.description,
     scope='district',
     active=true;
 
@@ -28,12 +27,7 @@ SET name=EXCLUDED.name,
 INSERT INTO role_permissions(role_id,permission_id)
 SELECT r.id,p.id
 FROM roles r
-JOIN permissions p ON p.code IN (
-  'media.read',
-  'social.read',
-  'issues.read',
-  'reports.read'
-)
+JOIN permissions p ON p.code IN ('media.read','social.read','issues.read','reports.read')
 WHERE r.code='district'
 ON CONFLICT DO NOTHING;
 
