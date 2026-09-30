@@ -5,6 +5,7 @@ export const NORMALIZED_ROLES = [
   'humas',
   'executive',
   'opd',
+  'district',
   'viewer',
 ] as const;
 
@@ -16,6 +17,7 @@ export type AuthorizationContext = {
   email: string;
   legacyRole: LegacyRole;
   opdId: string | null;
+  districtId: string | null;
   active: boolean;
   roles: NormalizedRole[];
   permissions: string[];
@@ -31,9 +33,13 @@ export function roleRequiresOpd(role: NormalizedRole) {
   return role === 'opd';
 }
 
+export function roleRequiresDistrict(role: NormalizedRole) {
+  return role === 'district';
+}
+
 export async function loadAuthorizationContext(pool: Pool, userId: string): Promise<AuthorizationContext | null> {
   const { rows } = await pool.query(
-    `SELECT u.id,u.email,u.role,u.opd_id,u.active,
+    `SELECT u.id,u.email,u.role,u.opd_id,u.district_id,u.active,
             COALESCE(array_agg(DISTINCT r.code) FILTER (WHERE r.code IS NOT NULL), ARRAY[]::text[]) roles,
             COALESCE(array_agg(DISTINCT p.code) FILTER (WHERE p.code IS NOT NULL), ARRAY[]::text[]) permissions
        FROM users u
@@ -42,7 +48,7 @@ export async function loadAuthorizationContext(pool: Pool, userId: string): Prom
        LEFT JOIN role_permissions rp ON rp.role_id=r.id
        LEFT JOIN permissions p ON p.id=rp.permission_id
       WHERE u.id=$1
-      GROUP BY u.id,u.email,u.role,u.opd_id,u.active
+      GROUP BY u.id,u.email,u.role,u.opd_id,u.district_id,u.active
       LIMIT 1`,
     [userId],
   );
@@ -53,6 +59,7 @@ export async function loadAuthorizationContext(pool: Pool, userId: string): Prom
     email: String(row.email),
     legacyRole: row.role as LegacyRole,
     opdId: row.opd_id == null ? null : String(row.opd_id),
+    districtId: row.district_id == null ? null : String(row.district_id),
     active: Boolean(row.active),
     roles: (row.roles || []).filter((x: string) => (NORMALIZED_ROLES as readonly string[]).includes(x)) as NormalizedRole[],
     permissions: (row.permissions || []).map(String),
