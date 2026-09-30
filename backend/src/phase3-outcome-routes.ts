@@ -50,12 +50,12 @@ Nilai:
 3. opdClarification: bagian respons/klarifikasi OPD yang masuk dan yang tidak masuk.
 4. keyMessage: apakah pesan utama tersampaikan dan seberapa jelas.
 5. massCommunication: evaluasi framing, kejelasan bagi publik, konteks, dan potensi salah tafsir.
-6. monitoringFocus: JANGAN membuat saran pekerjaan internal OPD atau survei generik. Buat objek fokus monitoring yang dapat DIBUKTIKAN oleh evidence Media Online, Media Cetak, Media Sosial eksternal, atau Owned Channel setelah publikasi. Setiap fokus harus diturunkan dari gap awal, respons OPD, atau isi publikasi. Gunakan jenis:
+6. monitoringFocus: JANGAN membuat saran pekerjaan internal OPD atau survei generik. Buat objek fokus monitoring yang dapat DIBUKTIKAN oleh KONTEN evidence yang memang dikoleksi sistem: judul/isi Media Online, Media Cetak, posting Media Sosial yang masuk sistem, dan konten Owned Channel setelah publikasi. Sistem TIDAK menjamin memiliki komentar, jumlah share/repost, engagement, thread diskusi, atau reaksi audiens; karena itu JANGAN menjadikan data tersebut sebagai indikator kecuali data itu secara eksplisit tersedia pada evidence. Setiap fokus harus diturunkan dari gap awal, respons OPD, atau isi publikasi. Gunakan jenis:
    - MESSAGE_PICKUP: apakah pesan/fakta penting publikasi diangkat media.
    - CLAIM_PERSISTENCE: apakah claim/gap lama masih muncul setelah publikasi.
    - NEW_CLAIM: apakah muncul claim/masalah baru yang tidak ada pada baseline.
    - SENTIMENT_RISK: apakah framing/sentimen/risiko bergerak positif, netral, atau negatif.
-   - OFFICIAL_AMPLIFICATION: apakah pesan resmi diamplifikasi kanal resmi lain.
+   - OFFICIAL_AMPLIFICATION: apakah substansi/pesan resmi muncul kembali pada KONTEN Owned Channel atau evidence lain yang tersedia; jangan memakai share/repost/engagement sebagai indikator.
 Untuk tiap fokus berikan target yang spesifik, rationale singkat, expectedSignal (indikator evidence yang menunjukkan fokus terpenuhi), dan sourceTypes yang relevan dari ONLINE, PRINT, SOCIAL, OWNED.
 Contoh: bukan "evaluasi lanjutan OPD", tetapi "Pantau apakah media mengangkat Kecamatan Sagulung sebagai juara umum" bila fakta itu memang ada pada publikasi.
 
@@ -77,7 +77,8 @@ async function analyzeMonitoringAgainstPublication(input:any){
   const prompt=`Anda adalah evaluator monitoring pascapublikasi pemerintah daerah. Bandingkan Fokus Monitoring yang ditetapkan saat Analisa Publikasi dengan evidence 4 media yang benar-benar tersedia SETELAH publikasi. Jangan mengarang isi evidence. Jangan menyimpulkan efektivitas bila evidence belum cukup.
 
 Untuk SETIAP monitoringFocus, beri:
-- status: PROVEN bila evidence jelas membuktikan target; PARTIAL bila baru sebagian; NOT_PROVEN bila evidence ada tetapi tidak mendukung target; INSUFFICIENT_DATA bila evidence relevan belum cukup.
+- status: PROVEN bila evidence jelas membuktikan target; PARTIAL bila baru sebagian; NOT_PROVEN bila evidence relevan tersedia tetapi tidak mendukung target; INSUFFICIENT_DATA bila evidence relevan belum cukup.
+- Nilai HANYA dari konten evidence yang diberikan. Jangan meminta atau menyimpulkan dari komentar, share/repost, engagement, atau reaksi audiens yang tidak terdapat dalam evidence.
 - assessment: alasan singkat berbasis evidence.
 - evidenceRefs: referensi evidence yang benar-benar mendukung, format source:id.
 - signal: apa yang terlihat dari evidence.
