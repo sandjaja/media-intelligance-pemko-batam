@@ -50,10 +50,17 @@ Nilai:
 3. opdClarification: bagian respons/klarifikasi OPD yang masuk dan yang tidak masuk.
 4. keyMessage: apakah pesan utama tersampaikan dan seberapa jelas.
 5. massCommunication: evaluasi framing, kejelasan bagi publik, konteks, dan potensi salah tafsir.
-6. monitoringFocus: claim/pertanyaan/pesan yang perlu dipantau setelah publikasi.
+6. monitoringFocus: JANGAN membuat saran pekerjaan internal OPD atau survei generik. Buat objek fokus monitoring yang dapat DIBUKTIKAN oleh evidence Media Online, Media Cetak, Media Sosial eksternal, atau Owned Channel setelah publikasi. Setiap fokus harus diturunkan dari gap awal, respons OPD, atau isi publikasi. Gunakan jenis:
+   - MESSAGE_PICKUP: apakah pesan/fakta penting publikasi diangkat media.
+   - CLAIM_PERSISTENCE: apakah claim/gap lama masih muncul setelah publikasi.
+   - NEW_CLAIM: apakah muncul claim/masalah baru yang tidak ada pada baseline.
+   - SENTIMENT_RISK: apakah framing/sentimen/risiko bergerak positif, netral, atau negatif.
+   - OFFICIAL_AMPLIFICATION: apakah pesan resmi diamplifikasi kanal resmi lain.
+Untuk tiap fokus berikan target yang spesifik, rationale singkat, expectedSignal (indikator evidence yang menunjukkan fokus terpenuhi), dan sourceTypes yang relevan dari ONLINE, PRINT, SOCIAL, OWNED.
+Contoh: bukan "evaluasi lanjutan OPD", tetapi "Pantau apakah media mengangkat Kecamatan Sagulung sebagai juara umum" bila fakta itu memang ada pada publikasi.
 
 Output JSON:
-{"summary":"...","gapCoverage":{"status":"ADDRESSED|PARTIAL|NOT_ADDRESSED|UNASSESSED","covered":["..."],"partial":["..."],"missing":["..."],"assessment":"..."},"opdClarification":{"included":["..."],"missing":["..."],"assessment":"..."},"keyMessage":{"status":"CLEAR|PARTIAL|MISSING","assessment":"..."},"massCommunication":{"framing":"...","clarity":"...","strengths":["..."],"risks":["..."]},"monitoringFocus":["..."]}
+{"summary":"...","gapCoverage":{"status":"ADDRESSED|PARTIAL|NOT_ADDRESSED|UNASSESSED","covered":["..."],"partial":["..."],"missing":["..."],"assessment":"..."},"opdClarification":{"included":["..."],"missing":["..."],"assessment":"..."},"keyMessage":{"status":"CLEAR|PARTIAL|MISSING","assessment":"..."},"massCommunication":{"framing":"...","clarity":"...","strengths":["..."],"risks":["..."]},"monitoringFocus":[{"type":"MESSAGE_PICKUP|CLAIM_PERSISTENCE|NEW_CLAIM|SENTIMENT_RISK|OFFICIAL_AMPLIFICATION","target":"...","rationale":"...","expectedSignal":"...","sourceTypes":["ONLINE","PRINT","SOCIAL","OWNED"]}]}
 
 DATA:
 ${JSON.stringify(input).slice(0,50000)}`;
