@@ -88,6 +88,8 @@ ATURAN PENILAIAN:
 - Untuk SENTIMENT_RISK: jangan menyatakan perbaikan/penurunan sentimen atau risiko hanya karena satu evidence bernada positif. Bandingkan dengan baseline bila tersedia; bila evidence tidak cukup untuk tren, gunakan PARTIAL atau INSUFFICIENT_DATA dan jelaskan sinyal yang ditemukan.
 - CLAIM_PERSISTENCE dan NEW_CLAIM harus menunjuk claim konkret dalam evidence.
 - Nilai HANYA konten evidence yang diberikan. Jangan meminta atau menyimpulkan komentar, share/repost, engagement, atau reaksi audiens yang tidak ada.
+- Perlakukan sourceType sebagai identitas sumber yang otoritatif: online=Media Online, print=Media Cetak, social=Media Sosial, owned=Owned Channel. Jangan mengubah atau menebak bentuk sumber (misalnya menyebut print sebagai screenshot/kanal pemerintah) kecuali metadata/konten evidence secara eksplisit menyatakannya.
+- evidenceRefs wajib mempertahankan sourceType:id yang diberikan.
 
 Untuk SETIAP monitoringFocus beri:
 status: PROVEN|PARTIAL|NOT_PROVEN|INSUFFICIENT_DATA
