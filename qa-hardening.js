@@ -25,7 +25,7 @@
 
   if(!document.querySelector('script[data-phase3-workspace]')){
     const s=document.createElement('script');
-    s.src='./phase3-workspace.js?v=20260912-phase3-ui2';
+    s.src='./phase3-workspace.js?v=20260930-cycle-history3';
     s.dataset.phase3Workspace='1';
     document.body.appendChild(s);
   }
