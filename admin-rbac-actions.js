@@ -41,12 +41,15 @@
     const id=$('#userId')?.value||'';
     const role=$('#userRole')?.value||'viewer';
     const opdRaw=$('#userOpd')?.value||'';
+    const districtRaw=$('#userDistrict')?.value||'';
     if(role==='opd'&&!opdRaw){toast('Role OPD wajib memilih OPD.',false);return;}
+    if(role==='district'&&!districtRaw){toast('Role Kecamatan wajib memilih Kecamatan.',false);return;}
     const body={
       email:$('#userEmail').value.trim(),
       role,
       active:$('#userActive').checked,
       opdId:role==='opd'?Number(opdRaw):null,
+      districtId:role==='district'?Number(districtRaw):null,
     };
     const password=$('#userPassword').value;
     if(!id||password)body.password=password;
