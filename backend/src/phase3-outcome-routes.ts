@@ -6,6 +6,8 @@ import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { extractDynamicIssueClaims } from './issue-dynamic-claim-extractor.js';
 import { matchDynamicOfficialResponseCoverage } from './issue-response-coverage.js';
 import { canTransitionPhase3, type Phase3ActorRole, type Phase3WorkflowStatus } from './phase3-workflow-policy.js';
+import { get, put, del } from '@vercel/blob';
+import { Readable } from 'node:stream';
 
 declare module 'fastify' { interface FastifyRequest { phase3OutcomeAuth?: AuthorizationContext } }
 
@@ -19,6 +21,8 @@ const publishInput=z.object({
 });
 const closeInput=z.object({note:z.string().trim().min(3).max(4000)});
 const publicationAnalysisInput=z.object({});
+const publicationEvidenceQuery=z.object({channel:z.enum(['instagram','facebook','tiktok','youtube','x','threads','press_release','media_statement','other']).optional(),caption:z.string().max(4000).optional(),primary:z.enum(['true','false']).optional()});
+const safePublicationName=(name:string)=>String(name||'publication').normalize('NFKD').replace(/[^a-zA-Z0-9._-]+/g,'-').replace(/^-+|-+$/g,'').slice(-140)||'publication';
 
 function cleanPublicationHtml(html:string){
   const title=(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]||'').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim();
@@ -94,6 +98,7 @@ ${JSON.stringify(input).slice(0,50000)}`;
 }
 
 export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
+  try{app.addContentTypeParser(['image/jpeg','image/png','application/pdf'],{parseAs:'buffer',bodyLimit:8_000_000},(_req,body,done)=>done(null,body));}catch{}
   const auth=async(request:FastifyRequest,reply:any)=>{
     const token=request.cookies.access_token;
     if(!token)return reply.code(401).send({error:'UNAUTHENTICATED'});
@@ -129,6 +134,30 @@ export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,
     return rows[0]||null;
   };
   const event=async(issueId:string|number,ctx:AuthorizationContext,type:string,fromStatus:string,toStatus:string,note?:string|null,metadata:any={})=>pool.query(`INSERT INTO issue_workflow_events(issue_id,actor_user_id,actor_role,event_type,from_status,to_status,note,metadata) VALUES($1,$2,$3,$4,$5,$6,$7,$8::jsonb)`,[issueId,ctx.id,actorRole(ctx),type,fromStatus,toStatus,note||null,JSON.stringify(metadata||{})]);
+
+  app.get('/api/phase3/issues/:id/publication-evidence',{preHandler:auth},async(request,reply)=>{
+    const p=idParam.safeParse(request.params);if(!p.success)return reply.code(400).send({error:'INVALID_ISSUE_ID'});
+    const w=await workflow(p.data.id);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});if(!(await canSeeOutcome(request.phase3OutcomeAuth!,w)))return reply.code(403).send({error:'FORBIDDEN'});
+    return{data:(await pool.query(`SELECT id,evidence_type,channel,url,file_name,mime_type,caption,is_primary,created_at FROM issue_publication_evidence WHERE issue_id=$1 ORDER BY is_primary DESC,created_at,id`,[p.data.id])).rows};
+  });
+  app.post('/api/phase3/issues/:id/publication-evidence/website',{preHandler:auth},async(request,reply)=>{
+    const p=idParam.safeParse(request.params),b=z.object({url:z.string().url().max(2000),caption:z.string().max(4000).nullable().optional(),primary:z.boolean().optional()}).safeParse(request.body);if(!p.success||!b.success)return reply.code(400).send({error:'INVALID_PUBLICATION_EVIDENCE'});
+    const ctx=request.phase3OutcomeAuth!;if(!isManager(ctx))return reply.code(403).send({error:'FORBIDDEN'});const count=Number((await pool.query('SELECT count(*) n FROM issue_publication_evidence WHERE issue_id=$1',[p.data.id])).rows[0]?.n||0);if(count>=5)return reply.code(409).send({error:'PUBLICATION_EVIDENCE_LIMIT'});
+    if(b.data.primary)await pool.query('UPDATE issue_publication_evidence SET is_primary=false WHERE issue_id=$1',[p.data.id]);const row=(await pool.query(`INSERT INTO issue_publication_evidence(issue_id,evidence_type,channel,url,caption,is_primary,created_by) VALUES($1,'WEBSITE','website',$2,$3,$4,$5) RETURNING id,evidence_type,channel,url,file_name,mime_type,caption,is_primary,created_at`,[p.data.id,b.data.url,b.data.caption||null,!!b.data.primary,ctx.id])).rows[0];return reply.code(201).send({data:row});
+  });
+  app.post('/api/phase3/issues/:id/publication-evidence/file',{preHandler:auth,bodyLimit:8_000_000},async(request,reply)=>{
+    const p=idParam.safeParse(request.params),q=publicationEvidenceQuery.safeParse(request.query);if(!p.success||!q.success)return reply.code(400).send({error:'INVALID_PUBLICATION_EVIDENCE'});const ctx=request.phase3OutcomeAuth!;if(!isManager(ctx))return reply.code(403).send({error:'FORBIDDEN'});
+    const mime=String(request.headers['content-type']||'').split(';')[0].trim();if(!['application/pdf','image/jpeg','image/png'].includes(mime))return reply.code(415).send({error:'UNSUPPORTED_PUBLICATION_EVIDENCE'});const body=request.body as Buffer;if(!Buffer.isBuffer(body)||!body.length)return reply.code(400).send({error:'EMPTY_PUBLICATION_EVIDENCE'});if(body.length>8_000_000)return reply.code(413).send({error:'PUBLICATION_EVIDENCE_TOO_LARGE'});
+    const count=Number((await pool.query('SELECT count(*) n FROM issue_publication_evidence WHERE issue_id=$1',[p.data.id])).rows[0]?.n||0);if(count>=5)return reply.code(409).send({error:'PUBLICATION_EVIDENCE_LIMIT'});const name=safePublicationName(String(request.headers['x-file-name']||`publication-${Date.now()}${mime==='application/pdf'?'.pdf':mime==='image/png'?'.png':'.jpg'}`));let blob:any;try{blob=await put(`phase3-publication/${p.data.id}/${Date.now()}-${name}`,body,{access:'private',contentType:mime,addRandomSuffix:true});}catch(e){request.log.error(e);return reply.code(503).send({error:'PUBLICATION_STORAGE_UNAVAILABLE'});}
+    try{const primary=q.data.primary==='true';if(primary)await pool.query('UPDATE issue_publication_evidence SET is_primary=false WHERE issue_id=$1',[p.data.id]);const type=mime==='application/pdf'?'PDF':'IMAGE';const row=(await pool.query(`INSERT INTO issue_publication_evidence(issue_id,evidence_type,channel,storage_key,file_name,mime_type,caption,is_primary,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,evidence_type,channel,url,file_name,mime_type,caption,is_primary,created_at`,[p.data.id,type,q.data.channel||null,blob.pathname,name,mime,q.data.caption||null,primary,ctx.id])).rows[0];return reply.code(201).send({data:row});}catch(e){try{await del(blob.pathname)}catch{}throw e}
+  });
+  app.get('/api/phase3/publication-evidence/:evidenceId/file',{preHandler:auth},async(request,reply)=>{
+    const id=z.coerce.number().int().positive().safeParse((request.params as any).evidenceId);if(!id.success)return reply.code(400).send({error:'INVALID_EVIDENCE_ID'});const row=(await pool.query('SELECT * FROM issue_publication_evidence WHERE id=$1',[id.data])).rows[0];if(!row?.storage_key)return reply.code(404).send({error:'PUBLICATION_EVIDENCE_NOT_FOUND'});const w=await workflow(String(row.issue_id));if(!w||!(await canSeeOutcome(request.phase3OutcomeAuth!,w)))return reply.code(403).send({error:'FORBIDDEN'});
+    try{const result=await get(row.storage_key,{access:'private'});if(!result)return reply.code(404).send({error:'PUBLICATION_EVIDENCE_NOT_FOUND'});reply.header('Content-Type',result.blob.contentType||row.mime_type||'application/octet-stream');reply.header('Content-Disposition',`inline; filename*=UTF-8''${encodeURIComponent(row.file_name||'publication')}`);return reply.send(Readable.fromWeb(result.stream as any));}catch(e){request.log.error(e);return reply.code(503).send({error:'PUBLICATION_STORAGE_UNAVAILABLE'});}
+  });
+  app.delete('/api/phase3/issues/:id/publication-evidence/:evidenceId',{preHandler:auth},async(request,reply)=>{
+    const p=idParam.safeParse(request.params),eid=z.coerce.number().int().positive().safeParse((request.params as any).evidenceId);if(!p.success||!eid.success)return reply.code(400).send({error:'INVALID_EVIDENCE_ID'});if(!isManager(request.phase3OutcomeAuth!))return reply.code(403).send({error:'FORBIDDEN'});const row=(await pool.query('DELETE FROM issue_publication_evidence WHERE id=$1 AND issue_id=$2 RETURNING storage_key',[eid.data,p.data.id])).rows[0];if(!row)return reply.code(404).send({error:'PUBLICATION_EVIDENCE_NOT_FOUND'});if(row.storage_key)try{await del(row.storage_key)}catch(e){request.log.warn(e,'failed to delete publication blob')};return{ok:true};
+  });
 
   app.get('/api/phase3/outcomes',{preHandler:auth},async(request)=>{
     const ctx=request.phase3OutcomeAuth!;
