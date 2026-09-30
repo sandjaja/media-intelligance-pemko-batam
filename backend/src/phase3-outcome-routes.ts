@@ -78,20 +78,25 @@ ${JSON.stringify(input).slice(0,50000)}`;
 async function analyzeMonitoringAgainstPublication(input:any){
   const key=process.env.GEMINI_API_KEY;if(!key)throw new Error('GEMINI_API_KEY_MISSING');
   const model=process.env.GEMINI_MODEL||'gemini-3.5-flash-lite';
-  const prompt=`Anda adalah evaluator monitoring pascapublikasi pemerintah daerah. Bandingkan Fokus Monitoring yang ditetapkan saat Analisa Publikasi dengan evidence 4 media yang benar-benar tersedia SETELAH publikasi. Jangan mengarang isi evidence. Jangan menyimpulkan efektivitas bila evidence belum cukup.
+  const prompt=`Anda adalah evaluator monitoring pascapublikasi pemerintah daerah. Bandingkan Fokus Monitoring yang ditetapkan saat Analisa Publikasi dengan evidence 4 media yang benar-benar tersedia SETELAH publikasi. Jangan mengarang isi evidence dan jangan menyimpulkan efektivitas keseluruhan bila evidence belum cukup.
 
-Untuk SETIAP monitoringFocus, beri:
-- status: PROVEN bila evidence jelas membuktikan target; PARTIAL bila baru sebagian; NOT_PROVEN bila evidence relevan tersedia tetapi tidak mendukung target; INSUFFICIENT_DATA bila evidence relevan belum cukup.
-- Nilai HANYA dari konten evidence yang diberikan. Jangan meminta atau menyimpulkan dari komentar, share/repost, engagement, atau reaksi audiens yang tidak terdapat dalam evidence.
-- assessment: alasan singkat berbasis evidence.
-- evidenceRefs: referensi evidence yang benar-benar mendukung, format source:id.
-- signal: apa yang terlihat dari evidence.
-Kemudian overallAssessment harus menjelaskan perkembangan pascapublikasi tanpa memaksakan kesimpulan. Jika total evidence sangat sedikit atau kanal relevan kosong, nyatakan keterbatasannya.
-Output JSON {"focusResults":[{"type":"...","target":"...","status":"PROVEN|PARTIAL|NOT_PROVEN|INSUFFICIENT_DATA","assessment":"...","evidenceRefs":["print:38"],"signal":"..."}],"overallAssessment":"...","evidenceSufficiency":"SUFFICIENT|LIMITED|INSUFFICIENT","remainingGap":["..."],"newSignals":["..."]}.
+ATURAN PENILAIAN:
+- Status per fokus menunjukkan apakah SINYAL ditemukan pada evidence, bukan otomatis berarti respons komunikasi efektif secara keseluruhan.
+- Jika hanya satu/sangat sedikit evidence atau hanya satu kanal terwakili, evidenceSufficiency harus LIMITED/INSUFFICIENT dan overallAssessment wajib menyebut bahwa efektivitas keseluruhan belum dapat disimpulkan.
+- Untuk MESSAGE_PICKUP: PROVEN hanya bila pesan/inti respons jelas muncul pada evidence.
+- Untuk OFFICIAL_AMPLIFICATION: nilai sebagai pickup/amplifikasi PESAN RESMI oleh media/kanal. Kutipan pernyataan resmi di media eksternal boleh menjadi sinyal pickup, tetapi jangan menyebutnya amplifikasi kanal resmi milik Pemko.
+- Untuk SENTIMENT_RISK: jangan menyatakan perbaikan/penurunan sentimen atau risiko hanya karena satu evidence bernada positif. Bandingkan dengan baseline bila tersedia; bila evidence tidak cukup untuk tren, gunakan PARTIAL atau INSUFFICIENT_DATA dan jelaskan sinyal yang ditemukan.
+- CLAIM_PERSISTENCE dan NEW_CLAIM harus menunjuk claim konkret dalam evidence.
+- Nilai HANYA konten evidence yang diberikan. Jangan meminta atau menyimpulkan komentar, share/repost, engagement, atau reaksi audiens yang tidak ada.
 
-DATA:
-${JSON.stringify(input).slice(0,50000)}`;
-  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}})});
+Untuk SETIAP monitoringFocus beri:
+status: PROVEN|PARTIAL|NOT_PROVEN|INSUFFICIENT_DATA
+assessment: alasan singkat berbasis evidence
+evidenceRefs: referensi source:id
+signal: sinyal konkret yang terlihat
+
+overallAssessment harus menjadi KESIMPULAN SEMENTARA yang ringkas dan operasional: apa yang ditemukan, apa yang belum dapat disimpulkan, kanal apa yang belum terwakili, dan apakah evidence masih perlu ditambah.
+Output JSON {"focusResults":[{"type":"...","target":"...","status":"PROVEN|PARTIAL|NOT_PROVEN|INSUFFICIENT_DATA","assessment":"...","evidenceRefs":["print:38"],"signal":"..."}],"overallAssessment":"...","evidenceSufficiency":"SUFFICIENT|LIMITED|INSUFFICIENT","remainingGap":["..."],"newSignals":["..."]}.`  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}})});
   if(!r.ok)throw new Error(`Gemini HTTP ${r.status}`);
   const payload=await r.json() as any,raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');
   return JSON.parse(raw);
