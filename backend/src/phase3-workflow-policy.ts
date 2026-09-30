@@ -4,7 +4,7 @@ export const PHASE3_WORKFLOW_STATUSES = [
 ] as const;
 
 export type Phase3WorkflowStatus = typeof PHASE3_WORKFLOW_STATUSES[number];
-export type Phase3ActorRole = 'super_admin'|'humas'|'executive'|'opd'|'viewer';
+export type Phase3ActorRole = 'super_admin'|'humas'|'executive'|'opd'|'district'|'viewer';
 
 const TRANSITIONS: Record<Phase3WorkflowStatus, readonly Phase3WorkflowStatus[]> = {
   NEW: ['ASSIGNED'],
@@ -15,7 +15,7 @@ const TRANSITIONS: Record<Phase3WorkflowStatus, readonly Phase3WorkflowStatus[]>
   APPROVED: ['PUBLISHED'],
   PUBLISHED: ['MONITORING'],
   MONITORING: ['CLOSED'],
-  CLOSED: ['MONITORING'],
+  CLOSED: [],
 };
 
 export function isPhase3WorkflowStatus(value: string): value is Phase3WorkflowStatus {
