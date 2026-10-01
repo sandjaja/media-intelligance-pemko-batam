@@ -62,6 +62,10 @@ PRINSIP WAJIB:
 - CLAIM_PERSISTENCE hanya boleh digunakan untuk claim/problem/gap lama yang memang ingin dikoreksi/diredam dan masih perlu dipantau setelah publikasi. Pesan resmi atau narasi yang INGIN diperkuat bukan CLAIM_PERSISTENCE; gunakan MESSAGE_PICKUP.
 - MESSAGE_PICKUP digunakan untuk memantau apakah pesan/framing/fakta strategis yang sengaja dibawa publikasi kemudian muncul dalam evidence media.
 - Jika tidak ada baseline claim/problem lama yang jelas dari Strakom, jangan membuat CLAIM_PERSISTENCE.
+- coordinationRequirements dari Strakom adalah kebutuhan substansi/koordinasi untuk membuat komunikasi lengkap. Saat bukti publikasi belum memuat informasi yang dibutuhkan, nyatakan sebagai "belum tercantum/belum dapat diverifikasi dari bukti publikasi", BUKAN bahwa OPD/kecamatan belum bertindak.
+- expectedCommunicationOutcomes adalah TARGET pemahaman/tindakan audiens. Analisa Publikasi hanya boleh menilai apakah konten menyediakan informasi/pesan yang mendukung target itu; jangan menyatakan outcome masyarakat sudah terjadi.
+- Jika ada kebutuhan koordinasi/substansi yang belum terwakili di publikasi, masukkan coordinationFollowUp. Gunakan pihak yang sudah disebut Strakom; jangan membuat routing OPD/kecamatan baru.
+- coordinationFollowUp.status hanya NONE, NEEDS_CONFIRMATION, NEEDS_COORDINATION, atau FOLLOWUP_PUBLICATION. Rekomendasi harus berupa tindak lanjut komunikasi/informasi, bukan perintah kebijakan operasional.
 
 HASILKAN:
 1. strategyEssence: sintesis singkat tentang inti Strakom, bukan salinan field.
@@ -75,7 +79,7 @@ HASILKAN:
 8. monitoringFocus: turunkan hanya hal yang memang perlu diamati SETELAH publikasi untuk mengetahui pickup/persistensi claim/sinyal baru/sentimen-risiko/amplifikasi. Gunakan evidence yang tersedia di sistem (ONLINE, PRINT, SOCIAL, OWNED), jangan mengandalkan komentar/share/engagement jika tidak tersedia.
 
 Output JSON:
-{"strategyEssence":{"summary":"...","essentialIntent":["..."],"priorityAudience":["..."],"coreMessage":["..."],"intendedApproach":"..."},"executionAssessment":{"status":"ALIGNED|PARTIAL|MISALIGNED|INSUFFICIENT_EVIDENCE","assessment":"..."},"achieved":["..."],"gaps":["..."],"communicationStyle":{"observed":"...","fitAssessment":"..."},"strengths":["..."],"audienceAndMessage":{"assessment":"...","potentialMisunderstanding":["..."]},"improvements":[{"priority":"HIGH|MEDIUM|LOW","recommendation":"...","reason":"..."}],"monitoringFocus":[{"type":"MESSAGE_PICKUP|CLAIM_PERSISTENCE|NEW_CLAIM|SENTIMENT_RISK|OFFICIAL_AMPLIFICATION","target":"...","rationale":"...","expectedSignal":"...","sourceTypes":["ONLINE","PRINT","SOCIAL","OWNED"]}]}
+{"strategyEssence":{"summary":"...","essentialIntent":["..."],"priorityAudience":["..."],"coreMessage":["..."],"intendedApproach":"..."},"executionAssessment":{"status":"ALIGNED|PARTIAL|MISALIGNED|INSUFFICIENT_EVIDENCE","assessment":"..."},"achieved":["..."],"gaps":["..."],"communicationStyle":{"observed":"...","fitAssessment":"..."},"strengths":["..."],"audienceAndMessage":{"assessment":"...","potentialMisunderstanding":["..."]},"improvements":[{"priority":"HIGH|MEDIUM|LOW","recommendation":"...","reason":"..."}],"coordinationFollowUp":{"status":"NONE|NEEDS_CONFIRMATION|NEEDS_COORDINATION|FOLLOWUP_PUBLICATION","missingInformation":["..."],"parties":["..."],"recommendation":"...","reason":"..."},"monitoringFocus":[{"type":"MESSAGE_PICKUP|CLAIM_PERSISTENCE|NEW_CLAIM|SENTIMENT_RISK|OFFICIAL_AMPLIFICATION","target":"...","rationale":"...","expectedSignal":"...","sourceTypes":["ONLINE","PRINT","SOCIAL","OWNED"]}]}
 
 DATA:
 ${JSON.stringify(input).slice(0,50000)}`;
@@ -247,7 +251,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
     const p=idParam.safeParse(request.params),b=publicationAnalysisInput.safeParse(request.body||{});if(!p.success||!b.success)return reply.code(400).send({error:'INVALID_PUBLICATION_ANALYSIS'});
     const ctx=request.phase3OutcomeAuth!;if(!isManager(ctx))return reply.code(403).send({error:'FORBIDDEN'});const w=await workflow(p.data.id);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});if(!['PUBLISHED','MONITORING','CLOSED'].includes(String(w.workflow_status)))return reply.code(409).send({error:'PUBLICATION_NOT_AVAILABLE'});if(!w.publication_evidence_saved_at)return reply.code(409).send({error:'PUBLICATION_EVIDENCE_NOT_SAVED'});
     const evidence=(await pool.query(`SELECT e.* FROM issue_publication_evidence e WHERE e.workflow_id=$1 ORDER BY e.is_primary DESC,e.created_at,e.id`,[w.id])).rows;if(!evidence.length)return reply.code(409).send({error:'PUBLICATION_EVIDENCE_REQUIRED'});
-    const approvedStrategy=(await pool.query(`SELECT id,version,executive_summary,communication_objectives,target_audiences,key_messages,talking_points,channel_strategy,timing_strategy,spokesperson_strategy,content_formats,communication_risks,success_kpis,approved_at FROM communication_strategies WHERE workflow_id=$1 AND status='APPROVED' AND is_current=TRUE ORDER BY version DESC LIMIT 1`,[w.id])).rows[0]||null;
+    const approvedStrategy=(await pool.query(`SELECT id,version,executive_summary,communication_objectives,target_audiences,key_messages,talking_points,channel_strategy,timing_strategy,spokesperson_strategy,content_formats,communication_risks,coordination_requirements,expected_communication_outcomes,success_kpis,approved_at FROM communication_strategies WHERE workflow_id=$1 AND status='APPROVED' AND is_current=TRUE ORDER BY version DESC LIMIT 1`,[w.id])).rows[0]||null;
     if(!approvedStrategy)return reply.code(409).send({error:'APPROVED_COMMUNICATION_STRATEGY_REQUIRED'});
     try{
       const materials:any[]=[],mediaParts:any[]=[];
