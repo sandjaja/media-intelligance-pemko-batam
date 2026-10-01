@@ -76,7 +76,8 @@ HASILKAN:
 6. strengths: kekuatan TEKNIK/EKSEKUSI publikasi yang membuat strategi tersampaikan; jangan mengulang achieved.
 7. audienceAndMessage: apakah framing/pesan dapat dipahami oleh audiens yang dituju secara substantif.
 8. improvements: perbaikan prioritas dan operasional untuk publikasi berikutnya; hindari saran generik.
-8. monitoringFocus: turunkan hanya hal yang memang perlu diamati SETELAH publikasi untuk mengetahui pickup/persistensi claim/sinyal baru/sentimen-risiko/amplifikasi. Gunakan evidence yang tersedia di sistem (ONLINE, PRINT, SOCIAL, OWNED), jangan mengandalkan komentar/share/engagement jika tidak tersedia.
+9. coordinationFollowUp: tindak lanjut informasi/koordinasi hanya jika ada kebutuhan material dari Strakom yang belum terwakili pada bukti publikasi.
+10. monitoringFocus: turunkan hanya hal yang memang perlu diamati SETELAH publikasi untuk mengetahui pickup/persistensi claim/sinyal baru/sentimen-risiko/amplifikasi. Gunakan evidence yang tersedia di sistem (ONLINE, PRINT, SOCIAL, OWNED), jangan mengandalkan komentar/share/engagement jika tidak tersedia.
 
 Output JSON:
 {"strategyEssence":{"summary":"...","essentialIntent":["..."],"priorityAudience":["..."],"coreMessage":["..."],"intendedApproach":"..."},"executionAssessment":{"status":"ALIGNED|PARTIAL|MISALIGNED|INSUFFICIENT_EVIDENCE","assessment":"..."},"achieved":["..."],"gaps":["..."],"communicationStyle":{"observed":"...","fitAssessment":"..."},"strengths":["..."],"audienceAndMessage":{"assessment":"...","potentialMisunderstanding":["..."]},"improvements":[{"priority":"HIGH|MEDIUM|LOW","recommendation":"...","reason":"..."}],"coordinationFollowUp":{"status":"NONE|NEEDS_CONFIRMATION|NEEDS_COORDINATION|FOLLOWUP_PUBLICATION","missingInformation":["..."],"parties":["..."],"recommendation":"...","reason":"..."},"monitoringFocus":[{"type":"MESSAGE_PICKUP|CLAIM_PERSISTENCE|NEW_CLAIM|SENTIMENT_RISK|OFFICIAL_AMPLIFICATION","target":"...","rationale":"...","expectedSignal":"...","sourceTypes":["ONLINE","PRINT","SOCIAL","OWNED"]}]}
@@ -241,9 +242,9 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
     const ctx=request.phase3OutcomeAuth!;if(!isManager(ctx))return reply.code(403).send({error:'FORBIDDEN'});
     const w=await workflow(p.data.id);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});
     const role=actorRole(ctx);if(!canTransitionPhase3(w.workflow_status as Phase3WorkflowStatus,'PUBLISHED',role))return reply.code(409).send({error:'INVALID_WORKFLOW_TRANSITION',from:w.workflow_status,to:'PUBLISHED'});
-    const approvedStrategy=Boolean((await pool.query("SELECT 1 FROM communication_strategies WHERE workflow_id=$1 AND status='APPROVED' AND is_current=TRUE LIMIT 1",[w.id])).rows[0]);if(!approvedStrategy)return reply.code(409).send({error:'APPROVED_COMMUNICATION_STRATEGY_REQUIRED'});
+    const approvedStrategy=(await pool.query("SELECT id,version FROM communication_strategies WHERE workflow_id=$1 AND status='APPROVED' AND is_current=TRUE ORDER BY version DESC LIMIT 1",[w.id])).rows[0]||null;if(!approvedStrategy)return reply.code(409).send({error:'APPROVED_COMMUNICATION_STRATEGY_REQUIRED'});
     await pool.query(`UPDATE issue_workflows SET workflow_status='PUBLISHED',published_at=NOW(),updated_by=$1,updated_at=NOW() WHERE id=$2`,[ctx.id,w.id]);
-    await event(w.id,p.data.id,ctx,'RESPONSE_PUBLISHED',w.workflow_status,'PUBLISHED',b.data.note??null,{channel:b.data.channel,url:b.data.url??null});
+    await event(w.id,p.data.id,ctx,'RESPONSE_PUBLISHED',w.workflow_status,'PUBLISHED',b.data.note??null,{channel:b.data.channel,url:b.data.url??null,strategyId:Number(approvedStrategy.id),strategyVersion:Number(approvedStrategy.version)});
     return{data:await workflow(p.data.id)};
   });
 
@@ -278,7 +279,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
     const p=idParam.safeParse(request.params);if(!p.success)return reply.code(400).send({error:'INVALID_ISSUE_ID'});
     const ctx=request.phase3OutcomeAuth!;if(!isManager(ctx))return reply.code(403).send({error:'FORBIDDEN'});
     const w=await workflow(p.data.id);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});
-    const role=actorRole(ctx);if(!canTransitionPhase3(w.workflow_status as Phase3WorkflowStatus,'MONITORING',role))return reply.code(409).send({error:'INVALID_WORKFLOW_TRANSITION',from:w.workflow_status,to:'MONITORING'});const previous=Number((await pool.query(`SELECT count(*) n FROM issue_workflow_events WHERE workflow_id=$1 AND event_type='MONITORING_STARTED'`,[w.id])).rows[0]?.n||0);if(previous>0)return reply.code(409).send({error:'MONITORING_ALREADY_STARTED'});
+    const role=actorRole(ctx);if(!canTransitionPhase3(w.workflow_status as Phase3WorkflowStatus,'MONITORING',role))return reply.code(409).send({error:'INVALID_WORKFLOW_TRANSITION',from:w.workflow_status,to:'MONITORING'});const publicationAnalysis=(await pool.query('SELECT 1 FROM issue_publication_analysis_snapshots WHERE workflow_id=$1 LIMIT 1',[w.id])).rows[0];if(!publicationAnalysis)return reply.code(409).send({error:'PUBLICATION_ANALYSIS_REQUIRED'});const previous=Number((await pool.query(`SELECT count(*) n FROM issue_workflow_events WHERE workflow_id=$1 AND event_type='MONITORING_STARTED'`,[w.id])).rows[0]?.n||0);if(previous>0)return reply.code(409).send({error:'MONITORING_ALREADY_STARTED'});
     await pool.query(`UPDATE issue_workflows SET workflow_status='MONITORING',closed_at=NULL,updated_by=$1,updated_at=NOW() WHERE id=$2`,[ctx.id,w.id]);
     await event(w.id,p.data.id,ctx,'MONITORING_STARTED',w.workflow_status,'MONITORING');
     return{data:await workflow(p.data.id)};
