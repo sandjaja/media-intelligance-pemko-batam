@@ -30,7 +30,7 @@ export async function recalculateIssueRisk(db:Db,issueId:number){
          WHERE al.action IN ('ARTICLE_CLASSIFICATION_VERIFIED','ARTICLE_CLASSIFICATION_REOPENED')
            AND al.metadata->>'articleId'=a.id::text
          ORDER BY al.created_at DESC,al.id DESC LIMIT 1)='ARTICLE_CLASSIFICATION_VERIFIED'
-    AND a.sentiment IS NOT NULL AND COALESCE(a.risk_score,0)>0) valid
+    AND a.sentiment IS NOT NULL AND a.risk_score IS NOT NULL) valid
   FROM issue_articles x JOIN articles a ON a.id=x.article_id WHERE x.issue_id=$1`,[issueId])).rows;
  const print=(await db.query(`
   SELECT 'print' source,pa.sentiment,NULL::float "sentimentScore",COALESCE(pa.risk_score,0)::float risk,
@@ -43,7 +43,7 @@ export async function recalculateIssueRisk(db:Db,issueId:number){
     AND COALESCE(pa.ai_metadata->'v16Routing'->>'keywordId','')<>''
     AND pa.ai_metadata->'v16Routing'->>'keywordVerification'='ACCEPTED'
     AND pa.ai_metadata->'intelligence'->>'riskStatus'='FINAL'
-    AND pa.sentiment IS NOT NULL AND COALESCE(pa.risk_score,0)>0) valid
+    AND pa.sentiment IS NOT NULL AND pa.risk_score IS NOT NULL) valid
   FROM issue_print_articles x JOIN print_articles pa ON pa.id=x.print_article_id JOIN print_editions pe ON pe.id=pa.edition_id
   WHERE x.issue_id=$1 AND x.linkage_status='linked'`,[issueId])).rows;
  const social=(await db.query(`
@@ -58,7 +58,7 @@ export async function recalculateIssueRisk(db:Db,issueId:number){
     AND (sm.metadata->'socialVerification'->>'status'='LOCKED'
       OR sm.metadata->'manualClassification'->>'locked'='true')
     AND COALESCE(sm.metadata->'intelligence'->>'riskStatus','')='FINAL'
-    AND sm.sentiment IS NOT NULL AND COALESCE(sm.risk_score,0)>0) valid
+    AND sm.sentiment IS NOT NULL AND sm.risk_score IS NOT NULL) valid
   FROM social_mention_issues x JOIN social_mentions sm ON sm.id=x.mention_id
   WHERE x.issue_id=$1 AND sm.source_kind='external'`,[issueId])).rows;
  const linked=[...online,...print,...social] as Evidence[], valid=linked.filter(x=>x.valid);
