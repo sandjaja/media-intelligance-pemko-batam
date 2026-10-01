@@ -1,6 +1,6 @@
 export const PHASE3_WORKFLOW_STATUSES = [
   'NEW','ASSIGNED','IN_PROGRESS','SUBMITTED','REVISION_REQUIRED',
-  'APPROVED','PUBLISHED','MONITORING','CLOSED',
+  'APPROVED','STRATEGY','PUBLISHED','MONITORING','CLOSED',
 ] as const;
 
 export type Phase3WorkflowStatus = typeof PHASE3_WORKFLOW_STATUSES[number];
@@ -12,7 +12,8 @@ const TRANSITIONS: Record<Phase3WorkflowStatus, readonly Phase3WorkflowStatus[]>
   IN_PROGRESS: ['SUBMITTED'],
   SUBMITTED: ['REVISION_REQUIRED','APPROVED'],
   REVISION_REQUIRED: ['IN_PROGRESS','SUBMITTED'],
-  APPROVED: ['PUBLISHED'],
+  APPROVED: ['STRATEGY'],
+  STRATEGY: ['PUBLISHED'],
   PUBLISHED: ['MONITORING'],
   MONITORING: ['CLOSED'],
   CLOSED: [],
@@ -31,7 +32,7 @@ export function canTransitionPhase3(
 
   if (actorRole === 'super_admin' || actorRole === 'humas') {
     return [
-      'ASSIGNED','REVISION_REQUIRED','APPROVED','PUBLISHED','MONITORING','CLOSED',
+      'ASSIGNED','REVISION_REQUIRED','APPROVED','STRATEGY','PUBLISHED','MONITORING','CLOSED',
     ].includes(to) || (from === 'REVISION_REQUIRED' && to === 'IN_PROGRESS');
   }
 
