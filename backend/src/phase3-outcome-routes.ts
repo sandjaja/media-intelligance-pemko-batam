@@ -56,19 +56,26 @@ PRINSIP WAJIB:
 - Bukti publikasi (website/PDF/gambar) adalah realisasi aktual. Jangan mengarang isi yang tidak terlihat/terbaca.
 - Tahap ini menilai KUALITAS EKSEKUSI STRATEGI dalam publikasi, BUKAN dampak publik, perubahan opini, engagement, pickup media, atau keberhasilan monitoring.
 - Kritik harus konkret dan proporsional. Rekomendasi harus menjelaskan apa yang perlu dipertahankan atau diperbaiki pada publikasi berikutnya.
+- achieved hanya berisi PENCAPAIAN TUJUAN STRATEGIS: hasil komunikasi pada level konten yang memang ditargetkan Strakom dan telah diwujudkan publikasi.
+- strengths hanya berisi KEKUATAN EKSEKUSI PUBLIKASI: kualitas framing, struktur, headline, kutipan, data, keterbacaan, konkretisasi manfaat, atau teknik penyampaian. JANGAN mengulang daftar achieved.
+- gaps hanya berisi kekurangan eksekusi yang material terhadap inti Strakom, bukan daftar semua field yang tidak disebut.
+- CLAIM_PERSISTENCE hanya boleh digunakan untuk claim/problem/gap lama yang memang ingin dikoreksi/diredam dan masih perlu dipantau setelah publikasi. Pesan resmi atau narasi yang INGIN diperkuat bukan CLAIM_PERSISTENCE; gunakan MESSAGE_PICKUP.
+- MESSAGE_PICKUP digunakan untuk memantau apakah pesan/framing/fakta strategis yang sengaja dibawa publikasi kemudian muncul dalam evidence media.
+- Jika tidak ada baseline claim/problem lama yang jelas dari Strakom, jangan membuat CLAIM_PERSISTENCE.
 
 HASILKAN:
 1. strategyEssence: sintesis singkat tentang inti Strakom, bukan salinan field.
 2. executionAssessment: apakah publikasi secara substansi menjalankan inti tersebut; status ALIGNED|PARTIAL|MISALIGNED|INSUFFICIENT_EVIDENCE, disertai alasan.
 3. achieved: unsur strategis penting yang sudah terealisasi dalam materi publikasi.
 4. gaps: unsur penting yang seharusnya hadir/lebih kuat berdasarkan maksud Strakom tetapi belum cukup terealisasi. Jangan memasukkan detail minor.
-5. communicationStyle: gaya komunikasi aktual publikasi, kekuatan gaya tersebut, dan kecocokannya dengan kebutuhan strategi.
-6. audienceAndMessage: apakah framing/pesan dapat dipahami oleh audiens yang dituju secara substantif.
-7. improvements: perbaikan prioritas dan operasional untuk publikasi berikutnya; hindari saran generik.
+5. communicationStyle: gaya komunikasi aktual publikasi dan kecocokannya dengan kebutuhan strategi.
+6. strengths: kekuatan TEKNIK/EKSEKUSI publikasi yang membuat strategi tersampaikan; jangan mengulang achieved.
+7. audienceAndMessage: apakah framing/pesan dapat dipahami oleh audiens yang dituju secara substantif.
+8. improvements: perbaikan prioritas dan operasional untuk publikasi berikutnya; hindari saran generik.
 8. monitoringFocus: turunkan hanya hal yang memang perlu diamati SETELAH publikasi untuk mengetahui pickup/persistensi claim/sinyal baru/sentimen-risiko/amplifikasi. Gunakan evidence yang tersedia di sistem (ONLINE, PRINT, SOCIAL, OWNED), jangan mengandalkan komentar/share/engagement jika tidak tersedia.
 
 Output JSON:
-{"strategyEssence":{"summary":"...","essentialIntent":["..."],"priorityAudience":["..."],"coreMessage":["..."],"intendedApproach":"..."},"executionAssessment":{"status":"ALIGNED|PARTIAL|MISALIGNED|INSUFFICIENT_EVIDENCE","assessment":"..."},"achieved":["..."],"gaps":["..."],"communicationStyle":{"observed":"...","strengths":["..."],"fitAssessment":"..."},"audienceAndMessage":{"assessment":"...","potentialMisunderstanding":["..."]},"improvements":[{"priority":"HIGH|MEDIUM|LOW","recommendation":"...","reason":"..."}],"monitoringFocus":[{"type":"MESSAGE_PICKUP|CLAIM_PERSISTENCE|NEW_CLAIM|SENTIMENT_RISK|OFFICIAL_AMPLIFICATION","target":"...","rationale":"...","expectedSignal":"...","sourceTypes":["ONLINE","PRINT","SOCIAL","OWNED"]}]}
+{"strategyEssence":{"summary":"...","essentialIntent":["..."],"priorityAudience":["..."],"coreMessage":["..."],"intendedApproach":"..."},"executionAssessment":{"status":"ALIGNED|PARTIAL|MISALIGNED|INSUFFICIENT_EVIDENCE","assessment":"..."},"achieved":["..."],"gaps":["..."],"communicationStyle":{"observed":"...","fitAssessment":"..."},"strengths":["..."],"audienceAndMessage":{"assessment":"...","potentialMisunderstanding":["..."]},"improvements":[{"priority":"HIGH|MEDIUM|LOW","recommendation":"...","reason":"..."}],"monitoringFocus":[{"type":"MESSAGE_PICKUP|CLAIM_PERSISTENCE|NEW_CLAIM|SENTIMENT_RISK|OFFICIAL_AMPLIFICATION","target":"...","rationale":"...","expectedSignal":"...","sourceTypes":["ONLINE","PRINT","SOCIAL","OWNED"]}]}
 
 DATA:
 ${JSON.stringify(input).slice(0,50000)}`;
