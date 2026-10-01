@@ -216,8 +216,8 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
       (SELECT e.metadata FROM issue_workflow_events e WHERE e.workflow_id=w.id AND e.event_type='RESPONSE_PUBLISHED' ORDER BY e.created_at DESC LIMIT 1) publication,
       (SELECT e.note FROM issue_workflow_events e WHERE e.workflow_id=w.id AND e.event_type='ISSUE_CLOSED' ORDER BY e.created_at DESC LIMIT 1) close_note
       FROM issue_workflows w JOIN issues i ON i.id=w.issue_id LEFT JOIN taxonomy_categories t ON t.id=i.taxonomy_category_id LEFT JOIN opd o ON o.id=w.lead_opd_id LEFT JOIN LATERAL (SELECT m.risk_score,m.positive_count,m.neutral_count,m.negative_count,m.metadata FROM issue_metrics m WHERE m.issue_id=i.id ORDER BY m.measured_at DESC,m.id DESC LIMIT 1) im ON true
-      WHERE w.workflow_status IN ('APPROVED','PUBLISHED','MONITORING','CLOSED') ${scope}
-      ORDER BY CASE w.workflow_status WHEN 'APPROVED' THEN 0 WHEN 'PUBLISHED' THEN 1 WHEN 'MONITORING' THEN 2 ELSE 3 END,w.updated_at DESC`,params);
+      WHERE w.workflow_status IN ('APPROVED','STRATEGY','PUBLISHED','MONITORING','CLOSED') ${scope}
+      ORDER BY CASE w.workflow_status WHEN 'APPROVED' THEN 0 WHEN 'STRATEGY' THEN 1 WHEN 'PUBLISHED' THEN 2 WHEN 'MONITORING' THEN 2 ELSE 3 END,w.updated_at DESC`,params);
     return{data:rows};
   });
 
