@@ -13,7 +13,7 @@ const strategyFields=z.object({
  keyMessages:z.array(z.any()).default([]),
  talkingPoints:z.array(z.any()).default([]),
  channelStrategy:z.array(z.any()).default([]),
- timingStrategy:z.record(z.any()).default({}),
+ timingStrategy:z.record(z.string(),z.any()).default({}),
  spokespersonStrategy:z.array(z.any()).default([]),
  contentFormats:z.array(z.any()).default([]),
  communicationRisks:z.array(z.any()).default([]),
