@@ -248,10 +248,13 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
         materials.push({id:e.id,type:e.evidence_type,channel:e.channel,caption:e.caption,files:fileMeta});
       }
       const existing=(await pool.query('SELECT result,source,gap_analyzed_at,analyzed_at FROM issue_publication_analysis_snapshots WHERE workflow_id=$1',[w.id])).rows[0]||null;
-      if(existing)return{data:{source:existing.source,gapAnalyzedAt:existing.gap_analyzed_at,analysis:existing.result,analyzedAt:existing.analyzed_at,saved:true}};
+      // Smoke-test mode: allow Humas to re-run publication analysis while the cycle is still PUBLISHED.
+      // Existing snapshots are replaced only after a successful analysis; MONITORING/CLOSED remain immutable.
+      const smokeRetest=Boolean(existing&&String(w.workflow_status)==='PUBLISHED');
+      if(existing&&!smokeRetest)return{data:{source:existing.source,gapAnalyzedAt:existing.gap_analyzed_at,analysis:existing.result,analyzedAt:existing.analyzed_at,saved:true}};
       const analysis=await analyzePublicationPackage({issueTitle:String(w.title||''),gap:gap?.result||null,finalResponse,publicationEvidence:materials},mediaParts);
       const source={type:'package',evidenceCount:evidence.length,saved_at:w.publication_evidence_saved_at};
-      const saved=(await pool.query(`INSERT INTO issue_publication_analysis_snapshots(workflow_id,issue_id,result,source,gap_analyzed_at,analyzed_by) VALUES($6,$1,$2::jsonb,$3::jsonb,$4,$5) ON CONFLICT(workflow_id) DO NOTHING RETURNING analyzed_at`,[p.data.id,JSON.stringify(analysis),JSON.stringify(source),gap?.analyzed_at||null,ctx.id,w.id])).rows[0];
+      const saved=(await pool.query(`INSERT INTO issue_publication_analysis_snapshots(workflow_id,issue_id,result,source,gap_analyzed_at,analyzed_by) VALUES($6,$1,$2::jsonb,$3::jsonb,$4,$5) ON CONFLICT(workflow_id) DO UPDATE SET result=EXCLUDED.result,source=EXCLUDED.source,gap_analyzed_at=EXCLUDED.gap_analyzed_at,analyzed_by=EXCLUDED.analyzed_by,analyzed_at=NOW() WHERE issue_publication_analysis_snapshots.workflow_id=EXCLUDED.workflow_id AND $7::boolean RETURNING analyzed_at`,[p.data.id,JSON.stringify(analysis),JSON.stringify(source),gap?.analyzed_at||null,ctx.id,w.id,smokeRetest])).rows[0];
       if(!saved){const concurrent=(await pool.query('SELECT result,source,gap_analyzed_at,analyzed_at FROM issue_publication_analysis_snapshots WHERE workflow_id=$1',[w.id])).rows[0];return{data:{source:concurrent.source,gapAnalyzedAt:concurrent.gap_analyzed_at,analysis:concurrent.result,analyzedAt:concurrent.analyzed_at,saved:true}}}
       return{data:{source,gapAnalyzedAt:gap?.analyzed_at||null,analysis,analyzedAt:saved.analyzed_at,saved:true}};
     }catch(error:any){const reason=String(error?.message||error||'UNKNOWN').slice(0,240);request.log.warn({issueId:p.data.id,reason},'publication analysis failed');return reply.code(422).send({error:'PUBLICATION_ANALYSIS_FAILED',reason});}
