@@ -7,7 +7,9 @@ CREATE TABLE communication_strategies (
   issue_id BIGINT NOT NULL REFERENCES issues(id) ON DELETE RESTRICT,
   version INTEGER NOT NULL CHECK (version > 0),
   status VARCHAR(20) NOT NULL DEFAULT 'DRAFT'
-    CHECK (status IN ('DRAFT','IN_REVIEW','APPROVED')),
+    CHECK (status IN ('DRAFT','IN_REVIEW','APPROVED','SUPERSEDED')),
+  is_current BOOLEAN NOT NULL DEFAULT FALSE,
+  executive_summary TEXT,
   input_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
   communication_objectives JSONB NOT NULL DEFAULT '[]'::jsonb,
   target_audiences JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -33,9 +35,32 @@ CREATE TABLE communication_strategies (
   UNIQUE(workflow_id, version)
 );
 
-CREATE UNIQUE INDEX uq_communication_strategies_approved_workflow
+CREATE UNIQUE INDEX uq_communication_strategies_current_workflow
   ON communication_strategies(workflow_id)
-  WHERE status='APPROVED';
+  WHERE is_current=TRUE;
+
+CREATE TABLE communication_strategy_districts (
+  id BIGSERIAL PRIMARY KEY,
+  strategy_id BIGINT NOT NULL REFERENCES communication_strategies(id) ON DELETE CASCADE,
+  workflow_id BIGINT NOT NULL REFERENCES issue_workflows(id) ON DELETE RESTRICT,
+  district_id BIGINT NOT NULL REFERENCES districts(id) ON DELETE RESTRICT,
+  evidence_context JSONB NOT NULL DEFAULT '{}'::jsonb,
+  local_audiences JSONB NOT NULL DEFAULT '[]'::jsonb,
+  communication_focus JSONB NOT NULL DEFAULT '[]'::jsonb,
+  local_messages JSONB NOT NULL DEFAULT '[]'::jsonb,
+  talking_points JSONB NOT NULL DEFAULT '[]'::jsonb,
+  local_channels JSONB NOT NULL DEFAULT '[]'::jsonb,
+  coordination_opds JSONB NOT NULL DEFAULT '[]'::jsonb,
+  timing_strategy JSONB NOT NULL DEFAULT '{}'::jsonb,
+  success_kpis JSONB NOT NULL DEFAULT '[]'::jsonb,
+  field_update_requirements JSONB NOT NULL DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(strategy_id, district_id)
+);
+
+CREATE INDEX idx_communication_strategy_districts_workflow
+  ON communication_strategy_districts(workflow_id, district_id);
 
 CREATE INDEX idx_communication_strategies_workflow
   ON communication_strategies(workflow_id, version DESC);
