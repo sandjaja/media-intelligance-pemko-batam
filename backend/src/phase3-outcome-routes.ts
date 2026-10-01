@@ -61,6 +61,10 @@ PRINSIP WAJIB:
 - gaps hanya berisi kekurangan eksekusi yang material terhadap inti Strakom, bukan daftar semua field yang tidak disebut.
 - CLAIM_PERSISTENCE hanya boleh digunakan untuk claim/problem/gap lama yang memang ingin dikoreksi/diredam dan masih perlu dipantau setelah publikasi. Pesan resmi atau narasi yang INGIN diperkuat bukan CLAIM_PERSISTENCE; gunakan MESSAGE_PICKUP.
 - MESSAGE_PICKUP digunakan untuk memantau apakah pesan/framing/fakta strategis yang sengaja dibawa publikasi kemudian muncul dalam evidence media.
+- monitoringFocus HARUS dapat diverifikasi dari data/evidence yang benar-benar tersedia pada 4 sumber sistem: ONLINE, PRINT, SOCIAL, OWNED.
+- Jangan membuat indikator berupa jumlah/tingkat share, retweet, repost, like, komentar, reach, impression, page view, kunjungan portal, atau metrik engagement lain kecuali metrik tersebut secara eksplisit tersedia pada input evidence.
+- Jika metrik engagement tidak tersedia, ubah indikator menjadi sinyal yang dapat dibuktikan dari konten/evidence, misalnya kemunculan ulang pesan, pickup media, publikasi lanjutan, konsistensi framing, atau amplifikasi pesan resmi pada evidence baru.
+- expectedSignal harus berupa kondisi yang dapat diuji oleh mesin monitoring terhadap evidence yang tersimpan, bukan target abstrak seperti "tingginya penyebaran".
 - Jika tidak ada baseline claim/problem lama yang jelas dari Strakom, jangan membuat CLAIM_PERSISTENCE.
 - coordinationRequirements dari Strakom adalah kebutuhan substansi/koordinasi untuk membuat komunikasi lengkap. Saat bukti publikasi belum memuat informasi yang dibutuhkan, nyatakan sebagai "belum tercantum/belum dapat diverifikasi dari bukti publikasi", BUKAN bahwa OPD/kecamatan belum bertindak.
 - expectedCommunicationOutcomes adalah TARGET pemahaman/tindakan audiens. Analisa Publikasi hanya boleh menilai apakah konten menyediakan informasi/pesan yang mendukung target itu; jangan menyatakan outcome masyarakat sudah terjadi.
