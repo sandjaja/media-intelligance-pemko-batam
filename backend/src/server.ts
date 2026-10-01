@@ -14,6 +14,7 @@ import { registerAskIntelligence } from './ask-intelligence.js';
 import { registerCollectionSchedulerRoutes } from './collection-scheduler-routes.js';
 import { registerAdminRoutes } from './admin-routes.js';
 import { registerDistrictRoutes } from './district-routes.js';
+import { registerPhase5StrategyRoutes } from './phase5-strategy-routes.js';
 import { runYouTubeShortsCollection } from './youtube-shorts-runner.js';
 import { decryptIntegrationCredential, encryptIntegrationCredential, integrationCredentialHint } from './integration-credentials.js';
 import { probeInstagramPublicProfile } from './instagram-public-profile.js';
@@ -328,5 +329,6 @@ app.post('/api/incidents/:id/decisions/:decisionId/approve',{preHandler:[require
 app.post('/api/incidents/:id/escalate',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{const id=incidentId.safeParse((request.params as any).id);if(!id.success)return reply.code(400).send({error:'INVALID_INCIDENT_ID'});const parsed=z.object({reason:z.string().min(3).max(1000).optional()}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_REQUEST'});const scope=request.user?.role==='admin'?'':` AND opd_id=$2`;const params:unknown[]=[id.data];if(request.user?.role!=='admin')params.push(request.user?.opdId);const {rows}=await pool.query(`UPDATE incidents SET status='ESCALATED',updated_at=NOW() WHERE id=$1${scope} RETURNING *`,params);if(!rows[0])return reply.code(404).send({error:'INCIDENT_NOT_FOUND'});await pool.query(`INSERT INTO incident_events(incident_id,event_type,payload,created_by) VALUES($1,'INCIDENT_ESCALATED',$2,$3)`,[id.data,{reason:parsed.data.reason||'Manual escalation'},request.user?.id]);await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'INCIDENT_ESCALATED',$2)`,[request.user?.id,{incidentId:id.data,reason:parsed.data.reason||'Manual escalation'}]);return{data:rows[0]};});
 await registerCollectionSchedulerRoutes(app,pool,env.jwtSecret);
 await registerAskIntelligence(app,pool,env.jwtSecret);
+await registerPhase5StrategyRoutes(app,pool,env.jwtSecret);
 app.setErrorHandler((error,_request,reply)=>{app.log.error(error);const statusCode=typeof (error as any)?.statusCode==='number'?(error as any).statusCode:500;return reply.code(statusCode).send({error:'INTERNAL_SERVER_ERROR'});});
 app.addHook('onClose',async()=>pool.end()); await app.listen({port:env.port,host:'0.0.0.0'});
