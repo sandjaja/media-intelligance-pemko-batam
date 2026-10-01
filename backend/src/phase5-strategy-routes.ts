@@ -66,6 +66,11 @@ export async function registerPhase5StrategyRoutes(app:FastifyInstance,pool:Pool
   const p=paramsSchema.safeParse(request.params);if(!p.success)return reply.code(400).send({error:'INVALID_WORKFLOW'});const ctx=request.phase5Auth!;if(!requireRead(ctx))return reply.code(403).send({error:'FORBIDDEN'});const w=await workflow(p.data.issueId,p.data.workflowId);if(!w)return reply.code(404).send({error:'WORKFLOW_NOT_FOUND'});
   const rows=(await pool.query('SELECT * FROM communication_strategies WHERE workflow_id=$1 ORDER BY version DESC',[w.id])).rows;return{data:{workflow:w,strategies:rows}};
  });
+ app.get('/api/phase5/issues/:issueId/workflows/:workflowId/strategy/:version/districts',{preHandler:auth},async(request,reply)=>{
+  const p=paramsSchema.extend({version:z.coerce.number().int().positive()}).safeParse(request.params);if(!p.success)return reply.code(400).send({error:'INVALID_STRATEGY'});const ctx=request.phase5Auth!;if(!requireRead(ctx)||!ctx.roles.some(r=>['super_admin','humas'].includes(r)))return reply.code(403).send({error:'FORBIDDEN'});
+  const rows=(await pool.query(`SELECT d.*,x.name district_name FROM communication_strategy_districts d JOIN communication_strategies s ON s.id=d.strategy_id JOIN districts x ON x.id=d.district_id WHERE s.workflow_id=$1 AND s.issue_id=$2 AND s.version=$3 ORDER BY x.name`,[p.data.workflowId,p.data.issueId,p.data.version])).rows;return{data:rows};
+ });
+
  app.get('/api/phase5/issues/:issueId/workflows/:workflowId/strategy/district',{preHandler:auth},async(request,reply)=>{
   const p=paramsSchema.safeParse(request.params);if(!p.success)return reply.code(400).send({error:'INVALID_WORKFLOW'});const ctx=request.phase5Auth!;if(!ctx.roles.includes('district')||!ctx.districtId)return reply.code(403).send({error:'DISTRICT_ACCOUNT_REQUIRED'});const w=await workflow(p.data.issueId,p.data.workflowId);if(!w)return reply.code(404).send({error:'WORKFLOW_NOT_FOUND'});
   const involved=(await pool.query("SELECT 1 FROM issue_workflow_contributors WHERE workflow_id=$1 AND contributor_type='DISTRICT' AND district_id=$2 UNION SELECT 1 FROM issue_districts WHERE issue_id=$3 AND district_id=$2 LIMIT 1",[w.id,ctx.districtId,w.issue_id])).rows[0];if(!involved)return reply.code(403).send({error:'DISTRICT_NOT_INVOLVED'});
