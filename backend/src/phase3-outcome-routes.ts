@@ -256,7 +256,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
     const p=idParam.safeParse(request.params);if(!p.success)return reply.code(400).send({error:'INVALID_ISSUE_ID'});
     const ctx=request.phase3OutcomeAuth!;if(!isManager(ctx))return reply.code(403).send({error:'FORBIDDEN'});
     const w=await workflow(p.data.id);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});
-    const role=actorRole(ctx);if(!canTransitionPhase3(w.workflow_status as Phase3WorkflowStatus,'MONITORING',role))return reply.code(409).send({error:'INVALID_WORKFLOW_TRANSITION',from:w.workflow_status,to:'MONITORING'});const previous=Number((await pool.query(`SELECT count(*) n FROM issue_workflow_events WHERE workflow_id=$1 AND event_type='MONITORING_STARTED'`,[p.data.id])).rows[0]?.n||0);if(previous>0)return reply.code(409).send({error:'MONITORING_ALREADY_STARTED'});
+    const role=actorRole(ctx);if(!canTransitionPhase3(w.workflow_status as Phase3WorkflowStatus,'MONITORING',role))return reply.code(409).send({error:'INVALID_WORKFLOW_TRANSITION',from:w.workflow_status,to:'MONITORING'});const previous=Number((await pool.query(`SELECT count(*) n FROM issue_workflow_events WHERE workflow_id=$1 AND event_type='MONITORING_STARTED'`,[w.id])).rows[0]?.n||0);if(previous>0)return reply.code(409).send({error:'MONITORING_ALREADY_STARTED'});
     await pool.query(`UPDATE issue_workflows SET workflow_status='MONITORING',closed_at=NULL,updated_by=$1,updated_at=NOW() WHERE id=$2`,[ctx.id,w.id]);
     await event(p.data.id,ctx,'MONITORING_STARTED',w.workflow_status,'MONITORING');
     return{data:await workflow(p.data.id)};
