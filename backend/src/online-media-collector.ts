@@ -318,7 +318,7 @@ async function crawlDiscoveryListings(source:OnlineSource,baseUrl:string,homepag
 export async function collectOnlineSource(source:OnlineSource,scope?:OrganizationMediaScope|null):Promise<OnlineArticle[]>{
   if(source.active===false)return[];
   const targetUrl=normalizeSourceUrl(source);
-  let homepageError:Error|null=null;
+  let homepageError:Error|null=null,homepageHtml='',homepageUrl=targetUrl;
   const discoveredItems:OnlineArticle[]=[];
   const add=(items:OnlineArticle[])=>{discoveredItems.push(...items)};
   try{
