@@ -46,25 +46,29 @@ async function fetchWebsitePublication(rawUrl:string){
 async function analyzePublicationPackage(input:any,mediaParts:any[]=[]){
   const key=process.env.GEMINI_API_KEY;if(!key)throw new Error('GEMINI_API_KEY_MISSING');
   const model=process.env.GEMINI_MODEL||'gemini-3.5-flash-lite';
-  const prompt=`Anda adalah analis komunikasi pemerintah daerah. Evaluasi MATERI PUBLIKASI resmi dengan membandingkan Analisis Gap Awal, Respons Final OPD, dan isi publikasi. Jangan menambah fakta dan jangan menilai keberhasilan monitoring media; tahap ini hanya menilai kualitas/substansi publikasi sebelum monitoring dimulai.
+  const prompt=`Anda adalah analis komunikasi pemerintah daerah. Tugas Anda menilai apakah MATERI PUBLIKASI resmi benar-benar mengeksekusi INTI STRATEGI KOMUNIKASI (Strakom) yang sudah disetujui Humas.
 
-Nilai:
-1. summary: ringkasan publikasi.
-2. gapCoverage: apakah gap awal dijawab oleh publikasi; jelaskan covered, partial, missing.
-3. opdClarification: bagian respons/klarifikasi OPD yang masuk dan yang tidak masuk.
-4. keyMessage: apakah pesan utama tersampaikan dan seberapa jelas.
-5. massCommunication: evaluasi framing, kejelasan bagi publik, konteks, dan potensi salah tafsir.
-6. monitoringFocus: JANGAN membuat saran pekerjaan internal OPD atau survei generik. Buat objek fokus monitoring yang dapat DIBUKTIKAN oleh KONTEN evidence yang memang dikoleksi sistem: judul/isi Media Online, Media Cetak, posting Media Sosial yang masuk sistem, dan konten Owned Channel setelah publikasi. Sistem TIDAK menjamin memiliki komentar, jumlah share/repost, engagement, thread diskusi, atau reaksi audiens; karena itu JANGAN menjadikan data tersebut sebagai indikator kecuali data itu secara eksplisit tersedia pada evidence. Setiap fokus harus diturunkan dari gap awal, respons OPD, atau isi publikasi. Gunakan jenis:
-   - MESSAGE_PICKUP: apakah pesan/fakta penting publikasi diangkat media.
-   - CLAIM_PERSISTENCE: apakah claim/gap lama masih muncul setelah publikasi.
-   - NEW_CLAIM: apakah muncul claim/masalah baru yang tidak ada pada baseline.
-   - SENTIMENT_RISK: apakah framing/sentimen/risiko bergerak positif, netral, atau negatif.
-   - OFFICIAL_AMPLIFICATION: apakah substansi/pesan resmi muncul kembali pada KONTEN Owned Channel atau evidence lain yang tersedia; jangan memakai share/repost/engagement sebagai indikator.
-Untuk tiap fokus berikan target yang spesifik, rationale singkat, expectedSignal (indikator evidence yang menunjukkan fokus terpenuhi), dan sourceTypes yang relevan dari ONLINE, PRINT, SOCIAL, OWNED.
-Contoh: bukan "evaluasi lanjutan OPD", tetapi "Pantau apakah media mengangkat Kecamatan Sagulung sebagai juara umum" bila fakta itu memang ada pada publikasi.
+PRINSIP WAJIB:
+- Strakom Approved adalah SATU-SATUNYA baseline strategi. Jangan menggunakan Analisis Gap atau Klarifikasi/Respons OPD sebagai baseline tambahan; keduanya sudah dirangkum saat Strakom disusun.
+- Pahami Strakom secara HOLISTIK lebih dahulu. Temukan maksud strategisnya: tujuan komunikasi, perubahan pemahaman yang ingin dicapai, audiens prioritas, pesan/framing yang paling penting, pendekatan/gaya yang diinginkan, kanal/format yang relevan, serta risiko komunikasi utama.
+- JANGAN membandingkan setiap field Strakom satu per satu secara mekanis. Tidak semua unsur strategi harus tertulis literal dalam satu materi publikasi. Nilai substansi, fungsi, prioritas, dan konteksnya.
+- Bedakan unsur ESENSIAL dari unsur PENDUKUNG. Kekurangan unsur pendukung tidak boleh otomatis membuat publikasi dianggap gagal.
+- Bukti publikasi (website/PDF/gambar) adalah realisasi aktual. Jangan mengarang isi yang tidak terlihat/terbaca.
+- Tahap ini menilai KUALITAS EKSEKUSI STRATEGI dalam publikasi, BUKAN dampak publik, perubahan opini, engagement, pickup media, atau keberhasilan monitoring.
+- Kritik harus konkret dan proporsional. Rekomendasi harus menjelaskan apa yang perlu dipertahankan atau diperbaiki pada publikasi berikutnya.
+
+HASILKAN:
+1. strategyEssence: sintesis singkat tentang inti Strakom, bukan salinan field.
+2. executionAssessment: apakah publikasi secara substansi menjalankan inti tersebut; status ALIGNED|PARTIAL|MISALIGNED|INSUFFICIENT_EVIDENCE, disertai alasan.
+3. achieved: unsur strategis penting yang sudah terealisasi dalam materi publikasi.
+4. gaps: unsur penting yang seharusnya hadir/lebih kuat berdasarkan maksud Strakom tetapi belum cukup terealisasi. Jangan memasukkan detail minor.
+5. communicationStyle: gaya komunikasi aktual publikasi, kekuatan gaya tersebut, dan kecocokannya dengan kebutuhan strategi.
+6. audienceAndMessage: apakah framing/pesan dapat dipahami oleh audiens yang dituju secara substantif.
+7. improvements: perbaikan prioritas dan operasional untuk publikasi berikutnya; hindari saran generik.
+8. monitoringFocus: turunkan hanya hal yang memang perlu diamati SETELAH publikasi untuk mengetahui pickup/persistensi claim/sinyal baru/sentimen-risiko/amplifikasi. Gunakan evidence yang tersedia di sistem (ONLINE, PRINT, SOCIAL, OWNED), jangan mengandalkan komentar/share/engagement jika tidak tersedia.
 
 Output JSON:
-{"summary":"...","gapCoverage":{"status":"ADDRESSED|PARTIAL|NOT_ADDRESSED|UNASSESSED","covered":["..."],"partial":["..."],"missing":["..."],"assessment":"..."},"opdClarification":{"included":["..."],"missing":["..."],"assessment":"..."},"keyMessage":{"status":"CLEAR|PARTIAL|MISSING","assessment":"..."},"massCommunication":{"framing":"...","clarity":"...","strengths":["..."],"risks":["..."]},"monitoringFocus":[{"type":"MESSAGE_PICKUP|CLAIM_PERSISTENCE|NEW_CLAIM|SENTIMENT_RISK|OFFICIAL_AMPLIFICATION","target":"...","rationale":"...","expectedSignal":"...","sourceTypes":["ONLINE","PRINT","SOCIAL","OWNED"]}]}
+{"strategyEssence":{"summary":"...","essentialIntent":["..."],"priorityAudience":["..."],"coreMessage":["..."],"intendedApproach":"..."},"executionAssessment":{"status":"ALIGNED|PARTIAL|MISALIGNED|INSUFFICIENT_EVIDENCE","assessment":"..."},"achieved":["..."],"gaps":["..."],"communicationStyle":{"observed":"...","strengths":["..."],"fitAssessment":"..."},"audienceAndMessage":{"assessment":"...","potentialMisunderstanding":["..."]},"improvements":[{"priority":"HIGH|MEDIUM|LOW","recommendation":"...","reason":"..."}],"monitoringFocus":[{"type":"MESSAGE_PICKUP|CLAIM_PERSISTENCE|NEW_CLAIM|SENTIMENT_RISK|OFFICIAL_AMPLIFICATION","target":"...","rationale":"...","expectedSignal":"...","sourceTypes":["ONLINE","PRINT","SOCIAL","OWNED"]}]}
 
 DATA:
 ${JSON.stringify(input).slice(0,50000)}`;
@@ -73,7 +77,6 @@ ${JSON.stringify(input).slice(0,50000)}`;
   const payload=await r.json() as any,raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');
   return JSON.parse(raw);
 }
-
 
 async function analyzeMonitoringAgainstPublication(input:any){
   const key=process.env.GEMINI_API_KEY;if(!key)throw new Error('GEMINI_API_KEY_MISSING');
@@ -237,8 +240,8 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
     const p=idParam.safeParse(request.params),b=publicationAnalysisInput.safeParse(request.body||{});if(!p.success||!b.success)return reply.code(400).send({error:'INVALID_PUBLICATION_ANALYSIS'});
     const ctx=request.phase3OutcomeAuth!;if(!isManager(ctx))return reply.code(403).send({error:'FORBIDDEN'});const w=await workflow(p.data.id);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});if(!['PUBLISHED','MONITORING','CLOSED'].includes(String(w.workflow_status)))return reply.code(409).send({error:'PUBLICATION_NOT_AVAILABLE'});if(!w.publication_evidence_saved_at)return reply.code(409).send({error:'PUBLICATION_EVIDENCE_NOT_SAVED'});
     const evidence=(await pool.query(`SELECT e.* FROM issue_publication_evidence e WHERE e.workflow_id=$1 ORDER BY e.is_primary DESC,e.created_at,e.id`,[w.id])).rows;if(!evidence.length)return reply.code(409).send({error:'PUBLICATION_EVIDENCE_REQUIRED'});
-    const gap=(await pool.query(`SELECT result,analyzed_at FROM issue_communication_gap_snapshots WHERE workflow_id=$1 LIMIT 1`,[w.id])).rows[0]||null;
-    const finalResponse=(await pool.query(`SELECT s.response_text,s.facts_data,s.key_message,s.supporting_links,o.name opd_name FROM issue_response_submissions s LEFT JOIN opd o ON o.id=s.opd_id WHERE s.workflow_id=$1 AND s.status='APPROVED' ORDER BY s.version DESC,s.updated_at DESC LIMIT 1`,[w.id])).rows[0]||null;
+    const approvedStrategy=(await pool.query(`SELECT id,version,executive_summary,communication_objectives,target_audiences,key_messages,talking_points,channel_strategy,timing_strategy,spokesperson_strategy,content_formats,communication_risks,success_kpis,approved_at FROM communication_strategies WHERE workflow_id=$1 AND status='APPROVED' AND is_current=TRUE ORDER BY version DESC LIMIT 1`,[w.id])).rows[0]||null;
+    if(!approvedStrategy)return reply.code(409).send({error:'APPROVED_COMMUNICATION_STRATEGY_REQUIRED'});
     try{
       const materials:any[]=[],mediaParts:any[]=[];
       for(const e of evidence){
@@ -252,11 +255,11 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
       // Existing snapshots are replaced only after a successful analysis; MONITORING/CLOSED remain immutable.
       const smokeRetest=Boolean(existing&&String(w.workflow_status)==='PUBLISHED');
       if(existing&&!smokeRetest)return{data:{source:existing.source,gapAnalyzedAt:existing.gap_analyzed_at,analysis:existing.result,analyzedAt:existing.analyzed_at,saved:true}};
-      const analysis=await analyzePublicationPackage({issueTitle:String(w.title||''),gap:gap?.result||null,finalResponse,publicationEvidence:materials},mediaParts);
-      const source={type:'package',evidenceCount:evidence.length,saved_at:w.publication_evidence_saved_at};
-      const saved=(await pool.query(`INSERT INTO issue_publication_analysis_snapshots(workflow_id,issue_id,result,source,gap_analyzed_at,analyzed_by) VALUES($6,$1,$2::jsonb,$3::jsonb,$4,$5) ON CONFLICT(workflow_id) DO UPDATE SET result=EXCLUDED.result,source=EXCLUDED.source,gap_analyzed_at=EXCLUDED.gap_analyzed_at,analyzed_by=EXCLUDED.analyzed_by,analyzed_at=NOW() WHERE issue_publication_analysis_snapshots.workflow_id=EXCLUDED.workflow_id AND $7::boolean RETURNING analyzed_at`,[p.data.id,JSON.stringify(analysis),JSON.stringify(source),gap?.analyzed_at||null,ctx.id,w.id,smokeRetest])).rows[0];
+      const analysis=await analyzePublicationPackage({issueTitle:String(w.title||''),approvedStrategy,publicationEvidence:materials},mediaParts);
+      const source={type:'strategy-vs-publication',strategyId:Number(approvedStrategy.id),strategyVersion:Number(approvedStrategy.version),evidenceCount:evidence.length,saved_at:w.publication_evidence_saved_at};
+      const saved=(await pool.query(`INSERT INTO issue_publication_analysis_snapshots(workflow_id,issue_id,result,source,gap_analyzed_at,analyzed_by) VALUES($6,$1,$2::jsonb,$3::jsonb,$4,$5) ON CONFLICT(workflow_id) DO UPDATE SET result=EXCLUDED.result,source=EXCLUDED.source,gap_analyzed_at=EXCLUDED.gap_analyzed_at,analyzed_by=EXCLUDED.analyzed_by,analyzed_at=NOW() WHERE issue_publication_analysis_snapshots.workflow_id=EXCLUDED.workflow_id AND $7::boolean RETURNING analyzed_at`,[p.data.id,JSON.stringify(analysis),JSON.stringify(source),approvedStrategy?.approved_at||null,ctx.id,w.id,smokeRetest])).rows[0];
       if(!saved){const concurrent=(await pool.query('SELECT result,source,gap_analyzed_at,analyzed_at FROM issue_publication_analysis_snapshots WHERE workflow_id=$1',[w.id])).rows[0];return{data:{source:concurrent.source,gapAnalyzedAt:concurrent.gap_analyzed_at,analysis:concurrent.result,analyzedAt:concurrent.analyzed_at,saved:true}}}
-      return{data:{source,gapAnalyzedAt:gap?.analyzed_at||null,analysis,analyzedAt:saved.analyzed_at,saved:true}};
+      return{data:{source,gapAnalyzedAt:approvedStrategy?.approved_at||null,analysis,analyzedAt:saved.analyzed_at,saved:true}};
     }catch(error:any){const reason=String(error?.message||error||'UNKNOWN').slice(0,240);request.log.warn({issueId:p.data.id,reason},'publication analysis failed');return reply.code(422).send({error:'PUBLICATION_ANALYSIS_FAILED',reason});}
   });
 
