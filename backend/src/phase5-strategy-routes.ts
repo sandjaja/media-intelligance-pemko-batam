@@ -44,7 +44,7 @@ export async function registerPhase5StrategyRoutes(app:FastifyInstance,pool:Pool
  const snapshot=async(w:any)=>{
   const [gap,response,publication,monitoring,keywords,districts]=await Promise.all([
    pool.query('SELECT * FROM issue_communication_gap_snapshots WHERE workflow_id=$1',[w.id]),
-   pool.query("SELECT response_text,facts_data,key_message,supporting_links,version,approved_at FROM issue_response_submissions WHERE workflow_id=$1 AND status='APPROVED' ORDER BY version DESC LIMIT 1",[w.id]),
+   pool.query("SELECT response_text,facts_data,key_message,supporting_links,version,reviewed_at AS approved_at FROM issue_response_submissions WHERE workflow_id=$1 AND status='APPROVED' ORDER BY version DESC LIMIT 1",[w.id]),
    pool.query('SELECT result,gap_analyzed_at,analyzed_at FROM issue_publication_analysis_snapshots WHERE workflow_id=$1',[w.id]),
    pool.query('SELECT period_number,result,evidence_summary,period_started_at,period_ended_at,analyzed_at FROM issue_monitoring_analysis_snapshots WHERE workflow_id=$1 ORDER BY period_number',[w.id]),
    pool.query("SELECT k.term,ik.keyword_role FROM issue_keywords ik JOIN keywords k ON k.id=ik.keyword_id WHERE ik.issue_id=$1 ORDER BY CASE WHEN ik.keyword_role='PRIMARY' THEN 0 ELSE 1 END,k.term",[w.issue_id]),
