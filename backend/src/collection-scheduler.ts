@@ -6,6 +6,7 @@ import { rebuildOwnedContentClusters } from './owned-content-clustering.js';
 import { ingestSocialBatch } from './social-collector.js';
 import { getExternalSocialProvider, loadExternalSocialProviderContext } from './external-social-provider.js';
 import { loadOrganizationMediaScope } from './organization-media-scope.js';
+import { persistSocialConversationClusters } from './social-conversation-clustering.js';
 
 export type CollectionSource='online'|'owned'|'social';
 export type CollectionTrigger='SCHEDULED'|'MANUAL';
@@ -85,11 +86,13 @@ async function collectSocial(pool:Pool,trigger:CollectionTrigger){
       received+=ingested.received;savedOrUpdated+=results.filter(x=>x.ok===true&&x.skipped!==true).length;skipped+=results.filter(x=>x.skipped===true).length;ingestionFailed+=ingested.failed;allResults.push(...results);
     }catch(error){ingestionFailed++;allResults.push({ok:false,query,error:error instanceof Error?error.message:String(error)});}
   }
+  let clustering:any=null;
+  if(savedOrUpdated>0){try{clustering=await persistSocialConversationClusters(pool,orgId,7)}catch(error){clustering={error:error instanceof Error?error.message:String(error)}}}
   const manualLocked=allResults.filter(x=>x.reason==='MANUAL_CLASSIFICATION_LOCKED').length;
   const scopeReview=allResults.filter(x=>x.reason==='ORGANIZATION_SCOPE_REVIEW').length;
   const outOfScope=allResults.filter(x=>x.reason==='ORGANIZATION_SCOPE_OUT_OF_SCOPE').length;
   const ingestionErrors=allResults.filter(x=>x.ok===false).slice(0,5).map(x=>({platform:x.platform??'youtube',externalId:x.externalId??null,query:x.query??null,error:String(x.error||'UNKNOWN_ERROR').slice(0,240)}));
-  return {providers:1,succeeded:ingestionFailed<queries.length?1:0,failed:ingestionFailed>=queries.length?1:0,diagnostics:{discovery:'ORGANIZATION_PLUS_ACTIVE_WATCH_ISSUES',organizationQueries,issueQueries,queries,maxResults,collectionWindowDays,publishedAfter,watermarkSource:lastSuccessful?'LAST_SUCCESSFUL_SOCIAL_RUN_WITH_6H_OVERLAP':'FALLBACK_WINDOW',commentsMode:scheduled?'SKIPPED_SCHEDULED':'FULL_MANUAL',crossQueryDuplicates,searchedVideos,shortCandidates,videosWithComments,commentsCollected,received,savedOrUpdated,skipped,ingestionFailed,manualLocked,outOfScope,scopeReview,ingestionErrors},results:[{provider:'youtube',queries,maxResults,results:allResults}]};
+  return {providers:1,succeeded:ingestionFailed<queries.length?1:0,failed:ingestionFailed>=queries.length?1:0,diagnostics:{discovery:'ORGANIZATION_PLUS_ACTIVE_WATCH_ISSUES',organizationQueries,issueQueries,queries,maxResults,collectionWindowDays,publishedAfter,watermarkSource:lastSuccessful?'LAST_SUCCESSFUL_SOCIAL_RUN_WITH_6H_OVERLAP':'FALLBACK_WINDOW',commentsMode:scheduled?'SKIPPED_SCHEDULED':'FULL_MANUAL',crossQueryDuplicates,searchedVideos,shortCandidates,videosWithComments,commentsCollected,received,savedOrUpdated,skipped,ingestionFailed,manualLocked,outOfScope,scopeReview,clustering,ingestionErrors},results:[{provider:'youtube',queries,maxResults,results:allResults}]};
 }
 
 function summarizeOnline(batch:{results:Record<string,unknown>[],clustering:any}){
