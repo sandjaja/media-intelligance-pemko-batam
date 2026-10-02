@@ -367,6 +367,64 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
     return{data:{...payload,saved:true,analyzedAt:savedMonitoring.analyzed_at}};
   });
 
+  app.post('/api/phase3/issues/:id/workflows/:workflowId/monitoring-periods/:period/analyze',{preHandler:auth},async(request,reply)=>{
+    const parsed=z.object({id:z.string().regex(/^\d+$/),period:z.string().regex(/^\d+$/)}).safeParse(request.params);
+    if(!parsed.success)return reply.code(400).send({error:'INVALID_MONITORING_PERIOD'});
+    const ctx=request.phase3OutcomeAuth!;if(!isManager(ctx))return reply.code(403).send({error:'FORBIDDEN'});
+    const issueId=parsed.data.id,periodNo=Number(parsed.data.period);const w=(await pool.query('SELECT w.*,i.title FROM issue_workflows w JOIN issues i ON i.id=w.issue_id WHERE w.id=$1 AND w.issue_id=$2',[parsed.data.workflowId,issueId])).rows[0];if(!w)return reply.code(404).send({error:'WORKFLOW_NOT_FOUND'});if(!(await canSeeOutcome(ctx,w)))return reply.code(403).send({error:'FORBIDDEN'});if(w.workflow_status!=='CLOSED')return reply.code(409).send({error:'WORKFLOW_NOT_CLOSED'});
+    const events=(await pool.query(`SELECT event_type,created_at,note FROM issue_workflow_events WHERE workflow_id=$1 AND event_type IN ('RESPONSE_PUBLISHED','MONITORING_STARTED','ISSUE_CLOSED') ORDER BY created_at ASC,id ASC`,[w.id])).rows;
+    const periods:any[]=[];let publishedAt:any=null;for(const e of events){if(e.event_type==='RESPONSE_PUBLISHED')publishedAt=e.created_at;else if(e.event_type==='MONITORING_STARTED')periods.push({number:periods.length+1,started_at:publishedAt||e.created_at,monitoring_started_at:e.created_at,ended_at:null,status:'MONITORING'});else{const open=[...periods].reverse().find(x=>!x.ended_at);if(open)open.ended_at=e.created_at;}}
+    const period=periods.find(x=>x.number===periodNo);if(!period)return reply.code(404).send({error:'MONITORING_PERIOD_NOT_FOUND'});if(!period.ended_at)return reply.code(409).send({error:'MONITORING_MUST_BE_CLOSED_BEFORE_ANALYSIS'});const end=period.ended_at;
+    const online=(await pool.query(`SELECT a.id,a.title,a.published_at FROM issue_articles ia JOIN articles a ON a.id=ia.article_id WHERE ia.issue_id=$1 AND a.published_at >= $2 AND a.published_at <= $3 ORDER BY a.published_at ASC`,[issueId,period.started_at,end])).rows;
+    const print=(await pool.query(`SELECT pa.id,pa.title,pe.edition_date published_at,pa.body_text content FROM issue_print_articles ipa JOIN print_articles pa ON pa.id=ipa.print_article_id JOIN print_editions pe ON pe.id=pa.edition_id WHERE ipa.issue_id=$1 AND ipa.linkage_status='linked' AND pe.edition_date >= $2::date AND pe.edition_date <= $3::date ORDER BY pe.edition_date ASC,pa.id ASC`,[issueId,period.started_at,end])).rows;
+    const social=(await pool.query(`SELECT sm.id,sm.title,sm.published_at,sm.source_kind FROM social_mention_issues smi JOIN social_mentions sm ON sm.id=smi.mention_id WHERE smi.issue_id=$1 AND sm.published_at >= $2 AND sm.published_at <= $3 ORDER BY sm.published_at ASC`,[issueId,period.started_at,end])).rows;
+    const externalSocial=social.filter((x:any)=>x.source_kind==='external'),owned=social.filter((x:any)=>x.source_kind==='owned'),external=[...online.map((x:any)=>({...x,source:'online'})),...print.map((x:any)=>({...x,source:'print'})),...externalSocial.map((x:any)=>({...x,source:'social'}))];
+    const angleResult=await extractDynamicIssueClaims(external),coverageResult=await matchDynamicOfficialResponseCoverage(angleResult.angles,owned);
+    let publicationAnalysis:any=null,focusAssessment:any=null;
+    try{
+      const publicationEvidence=(await pool.query(`SELECT e.* FROM issue_publication_evidence e WHERE e.workflow_id=$1 ORDER BY e.is_primary DESC,e.created_at,e.id`,[w.id])).rows;
+      if(publicationEvidence.length){
+        const materials:any[]=[],mediaParts:any[]=[];
+        for(const e of publicationEvidence){
+          if(e.evidence_type==='WEBSITE'&&e.url){
+            const article=await fetchWebsitePublication(String(e.url));
+            materials.push({id:e.id,type:'WEBSITE',channel:e.channel,url:e.url,caption:e.caption,title:article.title,text:article.text});
+            continue;
+          }
+          const files=(await pool.query('SELECT id,storage_key,file_name,mime_type,file_order FROM issue_publication_evidence_files WHERE evidence_id=$1 ORDER BY file_order,id',[e.id])).rows;
+          const fileMeta:any[]=[];
+          for(const file of files){
+            const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');
+            const chunks:any[]=[];for await(const chunk of Readable.fromWeb(result.stream as any))chunks.push(Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk));
+            const buf=Buffer.concat(chunks);if(buf.length>8_000_000)throw new Error('PUBLICATION_EVIDENCE_TOO_LARGE');
+            mediaParts.push({inlineData:{mimeType:file.mime_type,data:buf.toString('base64')}});
+            fileMeta.push({id:file.id,file_name:file.file_name,mime_type:file.mime_type,file_order:file.file_order});
+          }
+          materials.push({id:e.id,type:e.evidence_type,channel:e.channel,caption:e.caption,files:fileMeta});
+        }
+        const gapForPublication=(await pool.query(`SELECT result FROM issue_communication_gap_snapshots WHERE workflow_id=$1 LIMIT 1`,[w.id])).rows[0]||null;
+        const responseForPublication=(await pool.query(`SELECT s.response_text,s.facts_data,s.key_message,s.supporting_links,o.name opd_name FROM issue_response_submissions s LEFT JOIN opd o ON o.id=s.opd_id WHERE s.workflow_id=$1 AND s.status='APPROVED' ORDER BY s.version DESC,s.updated_at DESC LIMIT 1`,[w.id])).rows[0]||null;
+        publicationAnalysis=await analyzePublicationPackage({issueTitle:String(w.title||''),gap:gapForPublication?.result||null,finalResponse:responseForPublication,publicationEvidence:materials},mediaParts);
+        const evidenceForAi=[
+          ...online.map((x:any)=>({ref:`online:${x.id}`,source:'ONLINE',title:x.title||'',text:String(x.summary||x.content||'').slice(0,3500)})),
+          ...print.map((x:any)=>({ref:`print:${x.id}`,source:'PRINT',title:x.title||'',text:String(x.content||'').slice(0,3500)})),
+          ...externalSocial.map((x:any)=>({ref:`social:${x.id}`,source:'SOCIAL',title:x.title||'',text:String(x.content||'').slice(0,3500)})),
+          ...owned.map((x:any)=>({ref:`owned:${x.id}`,source:'OWNED',title:x.title||'',text:String(x.content||'').slice(0,3500)}))
+        ];
+        if(Array.isArray(publicationAnalysis?.monitoringFocus)&&publicationAnalysis.monitoringFocus.length){
+          focusAssessment=await analyzeMonitoringAgainstPublication({monitoringFocus:publicationAnalysis.monitoringFocus,evidence:evidenceForAi,evidenceCounts:{online:online.length,print:print.length,social:externalSocial.length,owned:owned.length,total:evidenceForAi.length}});
+        }
+      }
+    }catch(error:any){request.log.warn({issueId,reason:String(error?.message||error).slice(0,180)},'publication-package monitoring analysis unavailable');}
+    const gapSnapshot=(await pool.query(`SELECT result,analyzed_at FROM issue_communication_gap_snapshots WHERE workflow_id=$1 LIMIT 1`,[w.id])).rows[0]||null;
+    const finalResponse=(await pool.query(`SELECT s.id,s.version,s.response_text,s.facts_data,s.key_message,s.supporting_links,s.reviewed_at,s.submitted_at,o.name opd_name FROM issue_response_submissions s LEFT JOIN opd o ON o.id=s.opd_id WHERE s.workflow_id=$1 AND s.status='APPROVED' ORDER BY s.version DESC,s.updated_at DESC LIMIT 1`,[w.id])).rows[0]||null;
+    const payload={period,evidence:{total:external.length+owned.length,online:online.length,print:print.length,social:externalSocial.length,owned:owned.length},baseline:{gap:gapSnapshot?.result||null,gapAnalyzedAt:gapSnapshot?.analyzed_at||null,finalResponse},analysis:{externalAngles:angleResult,semanticAssessment:coverageResult,publicationAnalysis,focusAssessment},items:{online,print,social:externalSocial,owned}};
+    const savedMonitoring=(await pool.query(`INSERT INTO issue_monitoring_analysis_snapshots(workflow_id,issue_id,period_number,result,evidence_summary,period_started_at,period_ended_at,analyzed_by) VALUES($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8) ON CONFLICT(workflow_id,period_number) DO UPDATE SET result=EXCLUDED.result,evidence_summary=EXCLUDED.evidence_summary,period_started_at=EXCLUDED.period_started_at,period_ended_at=EXCLUDED.period_ended_at,analyzed_by=EXCLUDED.analyzed_by,analyzed_at=NOW() RETURNING analyzed_at`,[w.id,issueId,periodNo,JSON.stringify(payload),JSON.stringify(payload.evidence),period.started_at,period.ended_at,ctx.id])).rows[0];
+    if(!savedMonitoring){const concurrent=(await pool.query('SELECT result,analyzed_at FROM issue_monitoring_analysis_snapshots WHERE workflow_id=$1 AND period_number=$2',[w.id,periodNo])).rows[0];return{data:{...concurrent.result,saved:true,analyzedAt:concurrent.analyzed_at}}}
+    return{data:{...payload,saved:true,analyzedAt:savedMonitoring.analyzed_at}};
+  });
+
+
   app.get('/api/phase3/issues/:id/analysis-snapshots',{preHandler:auth},async(request,reply)=>{const p=idParam.safeParse(request.params);if(!p.success)return reply.code(400).send({error:'INVALID_ISSUE_ID'});const w=await workflow(p.data.id);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});if(!(await canSeeOutcome(request.phase3OutcomeAuth!,w)))return reply.code(403).send({error:'FORBIDDEN'});const publication=(await pool.query('SELECT result,source,gap_analyzed_at,analyzed_at FROM issue_publication_analysis_snapshots WHERE workflow_id=$1',[w.id])).rows[0]||null;const monitoring=(await pool.query('SELECT period_number,result,evidence_summary,period_started_at,period_ended_at,analyzed_at FROM issue_monitoring_analysis_snapshots WHERE workflow_id=$1 ORDER BY period_number',[w.id])).rows;return{data:{publication,monitoring}};});
 
   app.post('/api/phase3/issues/:id/close',{preHandler:auth},async(request,reply)=>{
