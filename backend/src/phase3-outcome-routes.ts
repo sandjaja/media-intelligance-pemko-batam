@@ -112,6 +112,19 @@ ATURAN:
 - Untuk SENTIMENT_RISK jangan menyatakan tren membaik/memburuk dari satu evidence saja.
 - sourceType otoritatif: ONLINE=Media Online, PRINT=Media Cetak, SOCIAL=Media Sosial, OWNED=Owned Channel.
 
+DISIPLIN KESIMPULAN:
+- Pisahkan TEMUAN, RISIKO, ANTISIPASI, dan REKOMENDASI. newSignals berisi fakta/sinyal baru yang benar-benar terlihat pada evidence. emergingRisks.signal berisi potensi masalah/claim/celah yang dapat berkembang; JANGAN isi signal dengan kata kerja tindakan seperti "melakukan", "menjaga", "meningkatkan", "menyelesaikan", atau rekomendasi.
+- emergingRisks.basis wajib menyebut dasar evidence/baseline. emergingRisks.anticipation baru berisi tindakan komunikasi untuk mengantisipasi risiko tersebut.
+- Jika tidak ada risiko baru yang didukung evidence, emergingRisks harus [] dan nyatakan keterbatasannya pada remainingGap/watchNext. Jangan menciptakan risiko agar field terisi.
+- opdAnticipation dan districtAnticipation bukan daftar tugas administratif/operasional. Isinya hanya kesiapan INFORMASI/KOMUNIKASI yang relevan dengan sinyal monitoring. Jika tidak ada implikasi komunikasi spesifik untuk OPD/wilayah tersebut, gunakan [].
+- Jangan menyimpulkan "berhasil", "efektif", "komprehensif", "tidak ada risiko", "tidak ada gap", atau "telah tersampaikan dengan baik" sebagai kesimpulan keseluruhan bila evidenceSufficiency LIMITED/INSUFFICIENT. Boleh mengatakan evidence yang tersedia konsisten/mendukung pesan tertentu, lalu nyatakan batas inferensinya.
+- Bila evidenceSufficiency=INSUFFICIENT, issueOutlook harus BELUM_CUKUP_DATA kecuali ada sinyal eskalasi konkret. Bila LIMITED, MEREDA/BERLANJUT/BERPOTENSI_BERKEMBANG hanya boleh dipilih jika ada indikator langsung yang cukup; assessment wajib menyebut bahwa keyakinan terbatas.
+- NO_FURTHER_ACTION hanya layak bila evidence cukup dan tidak ada gap/risiko material. Bila evidence LIMITED/INSUFFICIENT, prioritaskan KEEP_WATCHING atau NEXT_CYCLE_REVIEW sesuai konteks, kecuali data secara eksplisit menunjukkan siklus memang selesai dan keterbatasan evidence tidak memengaruhi keputusan komunikasi.
+- Jangan mengubah fakta lama menjadi "sinyal baru". newSignals harus benar-benar berasal dari evidence monitoring dan relevan terhadap perubahan setelah publikasi.
+- Jangan menilai koordinasi antar-OPD "baik/buruk" kecuali ada evidence proses koordinasi. Jangan mengklaim keberhasilan substansi pelaksanaan kegiatan hanya dari publikasi komunikasi.
+- Bedakan "isu substantif selesai" dari "evidence komunikasi cukup". Event yang sudah selesai dapat membuat isu substantif mereda, tetapi tidak otomatis membuktikan efektivitas komunikasi.
+- cycleConclusion harus menjawab: apa yang dapat disimpulkan dari evidence, apa yang belum dapat disimpulkan, dan konsekuensi komunikasinya berikutnya. Maksimal 3 kalimat substantif.
+
 HASILKAN JSON:
 {"focusResults":[{"type":"...","target":"...","status":"PROVEN|PARTIAL|NOT_PROVEN|INSUFFICIENT_DATA","assessment":"...","evidenceRefs":["print:38"],"signal":"..."}],
 "evidenceSufficiency":"SUFFICIENT|LIMITED|INSUFFICIENT",
