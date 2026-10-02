@@ -94,7 +94,7 @@ s.id strategy_id,s.version strategy_version,s.status strategy_status,s.is_curren
 
  app.get('/api/phase5/issues/:issueId/workflows/:workflowId/strategy',{preHandler:auth},async(request,reply)=>{
   const p=paramsSchema.safeParse(request.params);if(!p.success)return reply.code(400).send({error:'INVALID_WORKFLOW'});const ctx=request.phase5Auth!;if(!requireRead(ctx)||!ctx.roles.some(r=>['super_admin','humas'].includes(r)))return reply.code(403).send({error:'FORBIDDEN'});const w=await workflow(p.data.issueId,p.data.workflowId);if(!w)return reply.code(404).send({error:'WORKFLOW_NOT_FOUND'});
-  const rows=(await pool.query('SELECT * FROM communication_strategies WHERE workflow_id=$1 ORDER BY version DESC',[w.id])).rows;return{data:{workflow:w,strategies:rows}};
+  const rows=(await pool.query(`SELECT cs.*,COALESCE(cs.input_snapshot->'productionRecommendations','[]'::jsonb) production_recommendations FROM communication_strategies cs WHERE cs.workflow_id=$1 ORDER BY cs.version DESC`,[w.id])).rows;return{data:{workflow:w,strategies:rows}};
  });
  app.get('/api/phase5/issues/:issueId/workflows/:workflowId/strategy/:version/districts',{preHandler:auth},async(request,reply)=>{
   const p=paramsSchema.extend({version:z.coerce.number().int().positive()}).safeParse(request.params);if(!p.success)return reply.code(400).send({error:'INVALID_STRATEGY'});const ctx=request.phase5Auth!;if(!requireRead(ctx)||!ctx.roles.some(r=>['super_admin','humas'].includes(r)))return reply.code(403).send({error:'FORBIDDEN'});
