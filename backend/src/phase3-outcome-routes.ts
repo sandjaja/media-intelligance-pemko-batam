@@ -124,6 +124,11 @@ DISIPLIN KESIMPULAN:
 - Jangan menilai koordinasi antar-OPD "baik/buruk" kecuali ada evidence proses koordinasi. Jangan mengklaim keberhasilan substansi pelaksanaan kegiatan hanya dari publikasi komunikasi.
 - Bedakan "isu substantif selesai" dari "evidence komunikasi cukup". Event yang sudah selesai dapat membuat isu substantif mereda, tetapi tidak otomatis membuktikan efektivitas komunikasi.
 - cycleConclusion harus menjawab: apa yang dapat disimpulkan dari evidence, apa yang belum dapat disimpulkan, dan konsekuensi komunikasinya berikutnya. Maksimal 3 kalimat substantif.
+- Untuk opdAnticipation/districtAnticipation gunakan UJI KEBUTUHAN: (1) ada sinyal/risiko/gap komunikasi spesifik pada evidence, (2) OPD/wilayah tersebut relevan langsung dengan sinyal itu, dan (3) ada antisipasi INFORMASI/KOMUNIKASI yang konkret. Jika salah satu tidak terpenuhi, JANGAN isi entri. Dokumentasi laporan pertanggungjawaban, kondusifitas wilayah, koordinasi umum, pelaksanaan program, atau tugas administratif bukan antisipasi komunikasi.
+- Jangan mengisi opdAnticipation/districtAnticipation hanya karena OPD/kecamatan tersedia di routing. Array kosong adalah hasil yang valid dan lebih baik daripada rekomendasi generik.
+- Workflow yang dianalisis sudah selesai/CLOSED. nextCommunication tidak boleh menyuruh mempertahankan, melanjutkan, atau membuka kembali monitoring pada siklus yang sama. KEEP_WATCHING berarti hanya mencatat indikator untuk pemantauan isu berikutnya/kemunculan baru, bukan memperpanjang siklus CLOSED.
+- Jika isu substantif sudah selesai/mereda, tidak ada emerging risk material, dan evidence komunikasi LIMITED, bedakan keputusan: siklus saat ini tetap selesai; keterbatasan evidence dicatat sebagai kelemahan metodologis. Jangan membuat rekomendasi yang sekaligus berkata "tetap dipantau" dan "akhiri pemantauan".
+- nextCommunication.recommendation harus konsisten dengan action, issueOutlook, evidenceSufficiency, emergingRisks, dan status CLOSED. Bila tidak diperlukan komunikasi lanjutan pada siklus ini tetapi ada indikator yang layak diperhatikan bila isu muncul kembali, gunakan NO_FURTHER_ACTION untuk siklus ini dan taruh indikator tersebut di watchNext.
 
 HASILKAN JSON:
 {"focusResults":[{"type":"...","target":"...","status":"PROVEN|PARTIAL|NOT_PROVEN|INSUFFICIENT_DATA","assessment":"...","evidenceRefs":["print:38"],"signal":"..."}],
