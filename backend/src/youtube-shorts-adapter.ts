@@ -7,7 +7,7 @@ export type YouTubeShortParent={
  description?:string|null;
  channelTitle?:string|null;
  channelId?:string|null;
- publishedAt?:string|null;
+ publishedAt?:string|number|Date|null;
  canonicalUrl?:string|null;
 };
 
@@ -20,6 +20,8 @@ export type YouTubeCommentInput={
  parentCommentId?:string|null;
  rawPayload?:unknown;
 };
+
+function normalizePublishedAt(value:string|number|Date|null|undefined):string|null{if(value==null)return null;const d=value instanceof Date?value:new Date(typeof value==='number'&&Number.isFinite(value)&&value>0&&value<1e12?value*1000:value);return Number.isNaN(d.getTime())?null:d.toISOString();}
 
 function videoUrl(video:YouTubeShortParent){
  return video.canonicalUrl||`https://www.youtube.com/shorts/${encodeURIComponent(video.videoId)}`;
@@ -35,7 +37,7 @@ export function youtubeShortToSocialCandidate(input:{video:YouTubeShortParent;di
  return{
   platform:'youtube',externalId:video.videoId,contentType:'short',sourceKind:'external',
   authorName:video.channelTitle??null,canonicalUrl:videoUrl(video),title:video.title??null,
-  content:video.description??null,publishedAt:video.publishedAt??null,collector:'youtube-shorts',
+  content:video.description??null,publishedAt:normalizePublishedAt(video.publishedAt),collector:'youtube-shorts',
   rawPayload:input.rawPayload??{},context:{discovery:input.discovery??null},
   metadata:{provider:'youtube-data-api',channelId:video.channelId??null}
  };
@@ -57,7 +59,7 @@ export function youtubeShortCommentToSocialCandidate(input:{
   canonicalUrl:videoUrl(video),
   title:null,
   content:comment.text,
-  publishedAt:comment.publishedAt??null,
+  publishedAt:normalizePublishedAt(comment.publishedAt),
   collector:'youtube-shorts',
   rawPayload:comment.rawPayload??{},
   context:{
