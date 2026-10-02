@@ -97,27 +97,32 @@ ${JSON.stringify(input).slice(0,50000)}`;
 async function analyzeMonitoringAgainstPublication(input:any){
   const key=process.env.GEMINI_API_KEY;if(!key)throw new Error('GEMINI_API_KEY_MISSING');
   const model=process.env.GEMINI_MODEL||'gemini-3.5-flash-lite';
-  const prompt=`Anda adalah evaluator monitoring pascapublikasi pemerintah daerah. Bandingkan Fokus Monitoring yang ditetapkan saat Analisa Publikasi dengan evidence 4 media yang benar-benar tersedia SETELAH publikasi. Jangan mengarang isi evidence dan jangan menyimpulkan efektivitas keseluruhan bila evidence belum cukup.
+  const prompt=`Anda adalah analis komunikasi strategis pemerintah daerah pada AKHIR satu siklus respons isu. Monitoring sudah selesai. Tugas Anda bukan sekadar memeriksa apakah fokus monitoring ditemukan, tetapi menyimpulkan apa arti seluruh evidence pascapublikasi bagi langkah komunikasi berikutnya.
 
-ATURAN PENILAIAN:
-- Status per fokus menunjukkan apakah SINYAL ditemukan pada evidence, bukan otomatis berarti respons komunikasi efektif secara keseluruhan.
-- Jika hanya satu/sangat sedikit evidence atau hanya satu kanal terwakili, evidenceSufficiency harus LIMITED/INSUFFICIENT dan overallAssessment wajib menyebut bahwa efektivitas keseluruhan belum dapat disimpulkan.
-- Untuk MESSAGE_PICKUP: PROVEN hanya bila pesan/inti respons jelas muncul pada evidence.
-- Untuk OFFICIAL_AMPLIFICATION: nilai sebagai pickup/amplifikasi PESAN RESMI oleh media/kanal. Kutipan pernyataan resmi di media eksternal boleh menjadi sinyal pickup, tetapi jangan menyebutnya amplifikasi kanal resmi milik Pemko.
-- Untuk SENTIMENT_RISK: jangan menyatakan perbaikan/penurunan sentimen atau risiko hanya karena satu evidence bernada positif. Bandingkan dengan baseline bila tersedia; bila evidence tidak cukup untuk tren, gunakan PARTIAL atau INSUFFICIENT_DATA dan jelaskan sinyal yang ditemukan.
-- CLAIM_PERSISTENCE dan NEW_CLAIM harus menunjuk claim konkret dalam evidence.
-- Nilai HANYA konten evidence yang diberikan. Jangan meminta atau menyimpulkan komentar, share/repost, engagement, atau reaksi audiens yang tidak ada.
-- Perlakukan sourceType sebagai identitas sumber yang otoritatif: online=Media Online, print=Media Cetak, social=Media Sosial, owned=Owned Channel. Jangan mengubah atau menebak bentuk sumber (misalnya menyebut print sebagai screenshot/kanal pemerintah) kecuali metadata/konten evidence secara eksplisit menyatakannya.
-- evidenceRefs wajib mempertahankan sourceType:id yang diberikan.
+Gunakan secara terpadu: konteks issue dan routing OPD/wilayah, Analisis Gap awal, respons final OPD bila ada, Analisa Publikasi beserta monitoringFocus, dan evidence 4 media setelah publikasi. Semua kesimpulan harus dapat ditelusuri ke data yang diberikan. Jangan mengarang fakta, OPD, kecamatan, tindakan lapangan, reaksi audiens, engagement, atau kejadian masa depan.
 
-Untuk SETIAP monitoringFocus beri:
-status: PROVEN|PARTIAL|NOT_PROVEN|INSUFFICIENT_DATA
-assessment: alasan singkat berbasis evidence
-evidenceRefs: referensi source:id
-signal: sinyal konkret yang terlihat
+ATURAN:
+- Pertahankan penilaian setiap monitoringFocus: PROVEN|PARTIAL|NOT_PROVEN|INSUFFICIENT_DATA dan evidenceRefs source:id.
+- evidenceSufficiency SUFFICIENT|LIMITED|INSUFFICIENT tetap wajib. Keterbatasan evidence harus disebut, tetapi tetap berikan arahan berikutnya yang proporsional.
+- issueOutlook bukan ramalan. Pilih MEREDA|BERLANJUT|BERPOTENSI_BERKEMBANG|BELUM_CUKUP_DATA berdasarkan sinyal evidence, claim yang bertahan/baru, pickup pesan, sentimen/risk yang tersedia, dan gap yang tersisa. Jelaskan indikatornya.
+- emergingRisks hanya masalah/claim/celah komunikasi yang mempunyai dasar pada evidence atau baseline. Bedakan fakta yang sudah terlihat dari risiko yang perlu diantisipasi.
+- strengths dan weaknesses menilai HASIL SATU SIKLUS komunikasi: Gap -> keputusan Humas/klarifikasi bila ada -> Strakom/publikasi -> monitoring. Jangan hanya menilai gaya artikel.
+- opdAnticipation hanya menggunakan OPD utama/pendukung yang diberikan. districtAnticipation hanya menggunakan kecamatan/wilayah yang diberikan. Jika konteks tidak cukup, kosongkan; jangan membuat routing baru.
+- nextCommunication harus operasional tetapi tetap dalam ranah komunikasi: NO_FURTHER_ACTION|KEEP_WATCHING|REINFORCE_MESSAGE|ADDITIONAL_CLARIFICATION|FOLLOWUP_PUBLICATION|NEXT_CYCLE_REVIEW. Jangan memerintahkan kebijakan operasional di luar evidence.
+- Untuk SENTIMENT_RISK jangan menyatakan tren membaik/memburuk dari satu evidence saja.
+- sourceType otoritatif: ONLINE=Media Online, PRINT=Media Cetak, SOCIAL=Media Sosial, OWNED=Owned Channel.
 
-overallAssessment harus menjadi KESIMPULAN SEMENTARA yang ringkas dan operasional: apa yang ditemukan, apa yang belum dapat disimpulkan, kanal apa yang belum terwakili, dan apakah evidence masih perlu ditambah.
-Output JSON {"focusResults":[{"type":"...","target":"...","status":"PROVEN|PARTIAL|NOT_PROVEN|INSUFFICIENT_DATA","assessment":"...","evidenceRefs":["print:38"],"signal":"..."}],"overallAssessment":"...","evidenceSufficiency":"SUFFICIENT|LIMITED|INSUFFICIENT","remainingGap":["..."],"newSignals":["..."]}.
+HASILKAN JSON:
+{"focusResults":[{"type":"...","target":"...","status":"PROVEN|PARTIAL|NOT_PROVEN|INSUFFICIENT_DATA","assessment":"...","evidenceRefs":["print:38"],"signal":"..."}],
+"evidenceSufficiency":"SUFFICIENT|LIMITED|INSUFFICIENT",
+"cycleConclusion":"kesimpulan strategis akhir siklus",
+"issueOutlook":{"status":"MEREDA|BERLANJUT|BERPOTENSI_BERKEMBANG|BELUM_CUKUP_DATA","assessment":"...","indicators":["..."]},
+"strengths":["..."],"weaknesses":["..."],
+"emergingRisks":[{"signal":"...","basis":"...","anticipation":"..."}],
+"opdAnticipation":[{"opd":"nama dari context","anticipation":"...","reason":"..."}],
+"districtAnticipation":[{"district":"nama dari context","anticipation":"...","reason":"..."}],
+"nextCommunication":{"action":"NO_FURTHER_ACTION|KEEP_WATCHING|REINFORCE_MESSAGE|ADDITIONAL_CLARIFICATION|FOLLOWUP_PUBLICATION|NEXT_CYCLE_REVIEW","priority":"HIGH|MEDIUM|LOW","recommendation":"...","reason":"..."},
+"watchNext":["..."],"remainingGap":["..."],"newSignals":["..."]}.
 
 DATA:
 ${JSON.stringify(input).slice(0,50000)}`;
@@ -355,7 +360,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
           ...owned.map((x:any)=>({ref:`owned:${x.id}`,source:'OWNED',title:x.title||'',text:String(x.content||'').slice(0,3500)}))
         ];
         if(Array.isArray(publicationAnalysis?.monitoringFocus)&&publicationAnalysis.monitoringFocus.length){
-          focusAssessment=await analyzeMonitoringAgainstPublication({monitoringFocus:publicationAnalysis.monitoringFocus,evidence:evidenceForAi,evidenceCounts:{online:online.length,print:print.length,social:externalSocial.length,owned:owned.length,total:evidenceForAi.length}});
+          const issueContext=(gapForPublication?.result as any)?.data?.issueContext||(gapForPublication?.result as any)?.issueContext||{};focusAssessment=await analyzeMonitoringAgainstPublication({issue:{title:String(w.title||''),riskLevel:w.risk_level||null,momentum:w.momentum||null},routing:{leadOpd:w.lead_opd_name||responseForPublication?.opd_name||issueContext?.opds?.primary?.name||null,supportingOpds:issueContext?.opds?.supporting||[],geographicScope:issueContext?.geographicScope||null,districts:issueContext?.districts||issueContext?.geography?.districts||[]},gap:gapForPublication?.result||null,finalResponse:responseForPublication||null,publicationAnalysis,monitoringFocus:publicationAnalysis.monitoringFocus,evidence:evidenceForAi,evidenceCounts:{online:online.length,print:print.length,social:externalSocial.length,owned:owned.length,total:evidenceForAi.length}});
         }
       }
     }catch(error:any){request.log.warn({issueId,reason:String(error?.message||error).slice(0,180)},'publication-package monitoring analysis unavailable');}
@@ -412,7 +417,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
           ...owned.map((x:any)=>({ref:`owned:${x.id}`,source:'OWNED',title:x.title||'',text:String(x.content||'').slice(0,3500)}))
         ];
         if(Array.isArray(publicationAnalysis?.monitoringFocus)&&publicationAnalysis.monitoringFocus.length){
-          focusAssessment=await analyzeMonitoringAgainstPublication({monitoringFocus:publicationAnalysis.monitoringFocus,evidence:evidenceForAi,evidenceCounts:{online:online.length,print:print.length,social:externalSocial.length,owned:owned.length,total:evidenceForAi.length}});
+          const issueContext=(gapForPublication?.result as any)?.data?.issueContext||(gapForPublication?.result as any)?.issueContext||{};focusAssessment=await analyzeMonitoringAgainstPublication({issue:{title:String(w.title||''),riskLevel:w.risk_level||null,momentum:w.momentum||null},routing:{leadOpd:w.lead_opd_name||responseForPublication?.opd_name||issueContext?.opds?.primary?.name||null,supportingOpds:issueContext?.opds?.supporting||[],geographicScope:issueContext?.geographicScope||null,districts:issueContext?.districts||issueContext?.geography?.districts||[]},gap:gapForPublication?.result||null,finalResponse:responseForPublication||null,publicationAnalysis,monitoringFocus:publicationAnalysis.monitoringFocus,evidence:evidenceForAi,evidenceCounts:{online:online.length,print:print.length,social:externalSocial.length,owned:owned.length,total:evidenceForAi.length}});
         }
       }
     }catch(error:any){request.log.warn({issueId,reason:String(error?.message||error).slice(0,180)},'publication-package monitoring analysis unavailable');}
