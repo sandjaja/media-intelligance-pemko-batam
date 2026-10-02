@@ -14,9 +14,10 @@ export type SocialCandidate = {
   platform: SocialPlatform; externalId?: string|null; contentType?: SocialContentType; sourceKind?: 'owned'|'external'|'manual'; ownedAccountId?: number|null; opdId?: number|null; authorName?: string|null; authorHandle?: string|null; authorProfileUrl?: string|null; canonicalUrl?: string|null; title?: string|null; content?: string|null; language?: string|null; publishedAt?: string|Date|null; collector?: string|null; rawPayload?: unknown; metadata?: unknown; context?: SocialConversationContext|null;
 };
 const normalized=(value:string)=>value.toLowerCase().replace(/\s+/g,' ').trim();
+function normalizedPublishedAt(value:SocialCandidate['publishedAt']){if(value==null)return null;const d=value instanceof Date?value:new Date(typeof value==='number'&&Number.isFinite(value)&&value>0&&value<1e12?value*1000:value);return Number.isNaN(d.getTime())?null:d.toISOString();}
 
 export function socialContentHash(candidate:SocialCandidate){
- const raw=[candidate.platform,candidate.authorHandle||'',candidate.canonicalUrl||'',candidate.title||'',candidate.content||'',candidate.publishedAt?new Date(candidate.publishedAt).toISOString():''].join('|').toLowerCase();
+ const raw=[candidate.platform,candidate.authorHandle||'',candidate.canonicalUrl||'',candidate.title||'',candidate.content||'',normalizedPublishedAt(candidate.publishedAt)||''].join('|').toLowerCase();
  return crypto.createHash('sha256').update(raw).digest('hex');
 }
 
@@ -26,7 +27,7 @@ export async function ingestSocialCandidate(pool:Pool,candidate:SocialCandidate,
  const scopeDecision=classifySocialOrganizationScope({title:candidate.title,content:candidate.content,context:candidate.context},scope);
  if(candidate.sourceKind!=='owned'&&scopeDecision.status==='OUT_OF_SCOPE')return{skipped:true,reason:'ORGANIZATION_SCOPE_OUT_OF_SCOPE',scopeDecision,platform:candidate.platform,externalId:candidate.externalId??null};
  if(candidate.sourceKind!=='owned'&&scopeDecision.status==='REVIEW'){
-  const contentHash=socialContentHash(candidate),publishedAt=candidate.publishedAt?new Date(candidate.publishedAt):null;
+  const contentHash=socialContentHash(candidate),publishedAt=normalizedPublishedAt(candidate.publishedAt);
   const metadata={...(candidate.metadata&&typeof candidate.metadata==='object'&&!Array.isArray(candidate.metadata)?candidate.metadata as Record<string,unknown>:{}),socialContext:candidate.context??null,organizationScope:scopeDecision};
   const values=[candidate.platform,candidate.externalId??null,candidate.contentType??'post',candidate.sourceKind??'external',candidate.ownedAccountId??null,null,candidate.authorName??null,candidate.authorHandle??null,candidate.authorProfileUrl??null,candidate.canonicalUrl??null,candidate.title??null,candidate.content??null,candidate.language??null,publishedAt,null,null,null,null,null,null,contentHash,candidate.collector??defaultCollector,JSON.stringify(candidate.rawPayload??{}),JSON.stringify(metadata),'captured',null];
   const columns=`platform,external_id,content_type,source_kind,owned_account_id,opd_id,author_name,author_handle,author_profile_url,canonical_url,title,content,language,published_at,sentiment,sentiment_score,importance_score,influence_score,risk_score,risk_level,content_hash,collector,raw_payload,metadata,processing_status,curation_status`,placeholders=values.map((_,i)=>`${i+1}`).join(',');
@@ -53,10 +54,10 @@ export async function ingestSocialCandidate(pool:Pool,candidate:SocialCandidate,
   sourceTier:null,
   mediaKind:'social',
   opdId:routing.primaryOpdId,
-  publishedAt:candidate.publishedAt??null
+  publishedAt:normalizedPublishedAt(candidate.publishedAt)
  },query,1);
  const finalRisk=calculateRisk({importance:analysis.importanceScore,impact:analysis.impactScore,velocity:analysis.velocityScore,sentiment:analysis.sentiment,sentimentScore:analysis.sentimentScore});
- const contentHash=socialContentHash(candidate),publishedAt=candidate.publishedAt?new Date(candidate.publishedAt):null;
+ const contentHash=socialContentHash(candidate),publishedAt=normalizedPublishedAt(candidate.publishedAt);
  const curationStatus=candidate.sourceKind==='owned'&&candidate.platform==='website'?'candidate':null;
  const metadata={...(candidate.metadata&&typeof candidate.metadata==='object'&&!Array.isArray(candidate.metadata)?candidate.metadata as Record<string,unknown>:{}),socialContext:candidate.context??null,v16Routing:routing,intelligence:{...analysis,riskLevel:finalRisk.level,riskReasons:finalRisk.reasons,riskStatus:'PROVISIONAL'}};
  const values=[candidate.platform,candidate.externalId??null,candidate.contentType??'post',candidate.sourceKind??'external',candidate.ownedAccountId??null,routing.primaryOpdId,candidate.authorName??null,candidate.authorHandle??null,candidate.authorProfileUrl??null,candidate.canonicalUrl??null,candidate.title??null,candidate.content??null,candidate.language??null,publishedAt,analysis.sentiment,analysis.sentimentScore,analysis.importanceScore,analysis.impactScore,finalRisk.score,finalRisk.level,contentHash,candidate.collector??defaultCollector,JSON.stringify(candidate.rawPayload??{}),JSON.stringify(metadata),routing.routingStatus==='ROUTED'?'classified':'captured',curationStatus];
