@@ -382,6 +382,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
         }
       }
     }catch(error:any){request.log.warn({issueId,reason:String(error?.message||error).slice(0,180)},'publication-package monitoring analysis unavailable');}
+    if(!focusAssessment)return reply.code(503).send({error:'MONITORING_ANALYSIS_UNAVAILABLE',message:'Analisa Monitoring belum berhasil dibuat. Isu belum dapat ditutup.'});
     const gapSnapshot=(await pool.query(`SELECT result,analyzed_at FROM issue_communication_gap_snapshots WHERE workflow_id=$1 LIMIT 1`,[w.id])).rows[0]||null;
     const finalResponse=(await pool.query(`SELECT s.id,s.version,s.response_text,s.facts_data,s.key_message,s.supporting_links,s.reviewed_at,s.submitted_at,o.name opd_name FROM issue_response_submissions s LEFT JOIN opd o ON o.id=s.opd_id WHERE s.workflow_id=$1 AND s.status='APPROVED' ORDER BY s.version DESC,s.updated_at DESC LIMIT 1`,[w.id])).rows[0]||null;
     const payload={period:analysisPeriod,evidence:{total:external.length+owned.length,online:online.length,print:print.length,social:externalSocial.length,owned:owned.length},baseline:{gap:gapSnapshot?.result||null,gapAnalyzedAt:gapSnapshot?.analyzed_at||null,finalResponse},analysis:{externalAngles:angleResult,semanticAssessment:coverageResult,publicationAnalysis,focusAssessment},items:{online,print,social:externalSocial,owned}};
@@ -455,7 +456,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
     const ctx=request.phase3OutcomeAuth!;if(!isManager(ctx))return reply.code(403).send({error:'FORBIDDEN'});
     const w=await workflow(p.data.id);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});
     const role=actorRole(ctx);if(!canTransitionPhase3(w.workflow_status as Phase3WorkflowStatus,'CLOSED',role))return reply.code(409).send({error:'INVALID_WORKFLOW_TRANSITION',from:w.workflow_status,to:'CLOSED'});
-    const monitoringSnapshot=(await pool.query('SELECT id,analyzed_at,period_ended_at FROM issue_monitoring_analysis_snapshots WHERE workflow_id=$1 ORDER BY period_number DESC LIMIT 1',[w.id])).rows[0];if(!monitoringSnapshot)return reply.code(409).send({error:'MONITORING_ANALYSIS_REQUIRED_BEFORE_CLOSE',message:'Analisa Monitoring wajib berhasil sebelum isu ditutup.'});
+    const monitoringSnapshot=(await pool.query(`SELECT id,analyzed_at,period_ended_at FROM issue_monitoring_analysis_snapshots WHERE workflow_id=$1 AND result->'analysis'->'focusAssessment' IS NOT NULL ORDER BY period_number DESC LIMIT 1`,[w.id])).rows[0];if(!monitoringSnapshot)return reply.code(409).send({error:'MONITORING_ANALYSIS_REQUIRED_BEFORE_CLOSE',message:'Analisa Monitoring wajib berhasil sebelum isu ditutup.'});
     await pool.query(`UPDATE issue_workflows SET workflow_status='CLOSED',closed_at=NOW(),updated_by=$1,updated_at=NOW() WHERE id=$2`,[ctx.id,w.id]);
     await event(w.id,p.data.id,ctx,'ISSUE_CLOSED',w.workflow_status,'CLOSED',b.data.note);
     return{data:await workflow(p.data.id)};
