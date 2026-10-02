@@ -54,7 +54,8 @@ export async function collectYouTubeShortCandidatesWithDiagnostics(options:YouTu
  const discovery:SocialDiscoveryContext={method:'keyword',query:options.query};
  const search=await getJson('/search',{part:'snippet',type:'video',q:options.query,maxResults:max,order:'date',publishedAfter:options.publishedAfter},apiKey);
  const ids=(search.items??[]).map((x:any)=>x?.id?.videoId).filter(Boolean); if(!ids.length)return{candidates:[],diagnostics:{searchedVideos:0,shortCandidates:0,videosWithComments:0,commentsCollected:0}};
- const details=await getJson('/videos',{part:'snippet,contentDetails',id:ids.join(',')},apiKey);
+ const uniqueIds=[...new Set(ids.map((id:any)=>String(id)))];
+ const details=await getJson('/videos',{part:'snippet,contentDetails',id:uniqueIds.join(',')},apiKey);
  const candidates:SocialCandidate[]=[];
  const shortVideos=(details.items??[]).filter(looksLikeShort); let videosWithComments=0;
  const includeComments=options.includeComments!==false;
@@ -87,7 +88,7 @@ export async function collectYouTubeShortCandidatesWithDiagnostics(options:YouTu
    }
   }
  }
- return{candidates,diagnostics:{searchedVideos:ids.length,shortCandidates:shortVideos.length,videosWithComments,commentsCollected:candidates.filter(c=>c.contentType==='comment'||c.contentType==='reply').length}};
+ return{candidates,diagnostics:{searchedVideos:uniqueIds.length,shortCandidates:shortVideos.length,videosWithComments,commentsCollected:candidates.filter(c=>c.contentType==='comment'||c.contentType==='reply').length}};
 }
 
 export async function collectYouTubeShortCandidates(options:YouTubeShortsCollectorOptions):Promise<SocialCandidate[]>{
