@@ -368,7 +368,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
   });
 
   app.post('/api/phase3/issues/:id/workflows/:workflowId/monitoring-periods/:period/analyze',{preHandler:auth},async(request,reply)=>{
-    const parsed=z.object({id:z.string().regex(/^\d+$/),period:z.string().regex(/^\d+$/)}).safeParse(request.params);
+    const parsed=z.object({id:z.string().regex(/^\d+$/),workflowId:z.string().regex(/^\d+$/),period:z.string().regex(/^\d+$/)}).safeParse(request.params);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_MONITORING_PERIOD'});
     const ctx=request.phase3OutcomeAuth!;if(!isManager(ctx))return reply.code(403).send({error:'FORBIDDEN'});
     const issueId=parsed.data.id,periodNo=Number(parsed.data.period);const w=(await pool.query('SELECT w.*,i.title FROM issue_workflows w JOIN issues i ON i.id=w.issue_id WHERE w.id=$1 AND w.issue_id=$2',[parsed.data.workflowId,issueId])).rows[0];if(!w)return reply.code(404).send({error:'WORKFLOW_NOT_FOUND'});if(!(await canSeeOutcome(ctx,w)))return reply.code(403).send({error:'FORBIDDEN'});if(w.workflow_status!=='CLOSED')return reply.code(409).send({error:'WORKFLOW_NOT_CLOSED'});
