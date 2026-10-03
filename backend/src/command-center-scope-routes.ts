@@ -80,7 +80,16 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
       "WHERE source_type<>'owned' ORDER BY (COALESCE(risk_score,0)*.6+COALESCE(impact_score,0)*.4) DESC,published_at DESC NULLS LAST LIMIT " + limit;
     const { rows } = await pool.query(sql, params);
     const ownedParams: unknown[] = [];
-    const ownedBind = (value: unknown) => { ownedParams.push(value); return '" +
+    const ownedBind = (value: unknown) => { ownedParams.push(value); return '$' + ownedParams.length; };
+    const ownedOp = opdId ? ownedBind(opdId) : null;
+    const ownedDist = districtId ? ownedBind(districtId) : null;
+    const ownedSince = ownedBind(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
+    const ownedScope = [
+      ownedOp ? 'sm.opd_id=' + ownedOp : '',
+      ownedDist ? 'sm.district_id=' + ownedDist : '',
+    ].filter(Boolean).join(' AND ');
+    const ownedSql =
+      "SELECT sm.id,COALESCE(sm.title,left(sm.content,240)) title,left(sm.content,1200) summary,sm.canonical_url::text url," +
       "COALESCE(sm.published_at,sm.captured_at) published_at,sm.sentiment,sm.risk_score::float,sm.risk_level::text,sm.importance_score::float,sm.influence_score::float impact_score," +
       "COALESCE(osa.account_name,sm.author_name,sm.platform)::text source_name,sm.opd_id,sm.district_id " +
       "FROM social_mentions sm LEFT JOIN owned_social_accounts osa ON osa.id=sm.owned_account_id " +
