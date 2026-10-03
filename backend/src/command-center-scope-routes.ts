@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
+import { loadAuthorizationContext, hasPermission, type AuthorizationContext } from './rbac.js';
 import { z } from 'zod';
 
 type ScopeUser = { id: string; role: 'admin'|'operator'|'viewer'; opdId: string | null };
@@ -12,8 +13,10 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
     if (!token) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
     try {
       const d = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
-      if (typeof d.sub !== 'string' || !['admin','operator','viewer'].includes(String(d.role))) throw new Error('invalid');
-      request.scopeUser = { id: d.sub, role: d.role as ScopeUser['role'], opdId: d.opdId ? String(d.opdId) : null };
+      if (typeof d.sub !== 'string') throw new Error('invalid');
+      const ctx = await loadAuthorizationContext(pool, d.sub);
+      if (!ctx?.active) return reply.code(403).send({ error: 'ACCOUNT_INACTIVE' });
+      request.scopeUser = ctx;
     } catch {
       return reply.code(401).send({ error: 'INVALID_ACCESS_TOKEN' });
     }
@@ -33,7 +36,8 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
     if (!parsed.success) return reply.code(400).send({ error: 'INVALID_QUERY' });
 
     const user = request.scopeUser;
-    const opdId = user?.role === 'admin' ? (parsed.data.opdId ?? null) : (user?.opdId ?? null);
+    const canReadAll = Boolean(user && (user.legacyRole === 'admin' || user.roles.includes('super_admin') || user.roles.includes('humas') || hasPermission(user,'platform.admin') || hasPermission(user,'intelligence.read.all')));
+    const opdId = canReadAll ? (parsed.data.opdId ?? null) : (user?.opdId ?? null);
     const districtId = parsed.data.districtId ?? null;
     const params: unknown[] = [];
     const bind = (value: unknown) => { params.push(value); return '$' + params.length; };
@@ -128,7 +132,8 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
     if (!parsed.success) return reply.code(400).send({ error: 'INVALID_QUERY' });
 
     const user = request.scopeUser;
-    const opdId = user?.role === 'admin' ? (parsed.data.opdId ?? null) : (user?.opdId ?? null);
+    const canReadAll = Boolean(user && (user.legacyRole === 'admin' || user.roles.includes('super_admin') || user.roles.includes('humas') || hasPermission(user,'platform.admin') || hasPermission(user,'intelligence.read.all')));
+    const opdId = canReadAll ? (parsed.data.opdId ?? null) : (user?.opdId ?? null);
     const districtId = parsed.data.districtId ?? null;
     const params: unknown[] = [];
     const where: string[] = [];
