@@ -24,7 +24,6 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
     return { data: rows };
   });
 
-
   app.get('/api/command-center/trusted-evidence', { preHandler: auth }, async (request, reply) => {
     const parsed=z.object({opdId:z.string().regex(/^\\d+$/).optional(),districtId:z.string().regex(/^\\d+$/).optional(),limit:z.coerce.number().int().min(1).max(100).default(50)}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
@@ -122,44 +121,24 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
 }
 +params.length};
     const op=opdId?bind(opdId):null,dist=districtId?bind(districtId):null;
-    const onlineScope=[op?`a.opd_id=${op}`:'',dist?`a.district_id=${dist}`:''].filter(Boolean).join(' AND ');
-    const printScope=[op?`pa.opd_id=${op}`:'',dist?`pa.district_id=${dist}`:''].filter(Boolean).join(' AND ');
-    const socialScope=[op?`sm.opd_id=${op}`:'',dist?`sm.district_id=${dist}`:''].filter(Boolean).join(' AND ');
+    const onlineScope=[op?'a.opd_id='+op:'',dist?'a.district_id='+dist:''].filter(Boolean).join(' AND ');
+    const printScope=[op?'pa.opd_id='+op:'',dist?'pa.district_id='+dist:''].filter(Boolean).join(' AND ');
+    const socialScope=[op?'sm.opd_id='+op:'',dist?'sm.district_id='+dist:''].filter(Boolean).join(' AND ');
     const limit=bind(parsed.data.limit);
-    const sql=`
-      WITH trusted AS (
-       SELECT 'online'::text source_type,a.id,a.title,a.summary::text summary,a.url::text url,a.published_at,
-        a.sentiment,a.risk_score::float,a.risk_level::text,a.importance_score::float,a.impact_score::float,ms.name::text source_name,a.opd_id,a.district_id
-       FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id
-       WHERE a.news_classification='UTAMA' AND a.sentiment IS NOT NULL AND COALESCE(a.risk_score,0)>0
-        AND (SELECT al.action FROM audit_logs al WHERE al.action IN ('ARTICLE_CLASSIFICATION_VERIFIED','ARTICLE_CLASSIFICATION_REOPENED') AND al.metadata->>'articleId'=a.id::text ORDER BY al.created_at DESC,al.id DESC LIMIT 1)='ARTICLE_CLASSIFICATION_VERIFIED'
-        ${onlineScope?' AND '+onlineScope:''}
-       UNION ALL
-       SELECT 'print',pa.id,pa.title,pa.summary::text,NULL::text,pe.edition_date::timestamptz,pa.sentiment,pa.risk_score::float,
-        COALESCE(NULLIF(pa.ai_metadata->'intelligence'->>'riskLevel',''),CASE WHEN pa.risk_score>=80 THEN 'critical' WHEN pa.risk_score>=60 THEN 'high' WHEN pa.risk_score>=35 THEN 'medium' ELSE 'low' END),
-        pa.importance_score::float,NULLIF(pa.ai_metadata->'intelligence'->>'impactScore','')::float,ms.name::text,pa.opd_id,pa.district_id
-       FROM print_articles pa JOIN print_editions pe ON pe.id=pa.edition_id JOIN media_sources ms ON ms.id=pe.source_id
-       WHERE lower(pa.status)='analyzed' AND pa.opd_id IS NOT NULL AND pa.ai_metadata->'v16Routing'->>'routingStatus'='ROUTED'
-        AND COALESCE(pa.ai_metadata->'v16Routing'->>'keywordId','')<>'' AND pa.ai_metadata->'v16Routing'->>'keywordVerification'='ACCEPTED'
-        AND pa.ai_metadata->'intelligence'->>'riskStatus'='FINAL' AND pa.sentiment IS NOT NULL AND COALESCE(pa.risk_score,0)>0
-        ${printScope?' AND '+printScope:''}
-       UNION ALL
-       SELECT CASE WHEN sm.source_kind='owned' THEN 'owned' ELSE 'social' END,sm.id,COALESCE(sm.title,left(sm.content,240)),left(sm.content,1200),sm.canonical_url,
-        COALESCE(sm.published_at,sm.captured_at),sm.sentiment,sm.risk_score::float,sm.risk_level::text,sm.importance_score::float,sm.influence_score::float,
-        COALESCE(osa.account_name,sm.author_name,sm.platform)::text,sm.opd_id,sm.district_id
-       FROM social_mentions sm LEFT JOIN owned_social_accounts osa ON osa.id=sm.owned_account_id
-       WHERE sm.sentiment IS NOT NULL AND COALESCE(sm.risk_score,0)>0 AND (
-        (sm.source_kind='external' AND sm.metadata->'v16Routing'->>'newsClassification'='UTAMA' AND sm.metadata->'v16Routing'->>'routingStatus'='ROUTED'
-         AND sm.opd_id IS NOT NULL AND (sm.metadata->'socialVerification'->>'status'='LOCKED' OR sm.metadata->'manualClassification'->>'locked'='true')
-         AND sm.metadata->'intelligence'->>'riskStatus'='FINAL')
-        OR
-        (sm.source_kind='owned' AND sm.curation_status='approved' AND sm.metadata->'v16Routing'->>'verificationStatus'='LOCKED'
-         AND sm.metadata->'v16Routing'->>'routingStatus'='ROUTED' AND sm.metadata->'intelligence'->>'riskStatus'='FINAL')
-       ) ${socialScope?' AND '+socialScope:''}
-      )
-      SELECT *,COUNT(*) OVER()::int trusted_total,COUNT(*) FILTER(WHERE sentiment='negative') OVER()::int trusted_negative,
-       COUNT(*) FILTER(WHERE risk_level IN ('high','critical')) OVER()::int trusted_high
-      FROM trusted ORDER BY (COALESCE(risk_score,0)*.6+COALESCE(impact_score,0)*.4) DESC,published_at DESC NULLS LAST LIMIT ${limit}`;
+    const sql=`WITH trusted AS (
+      SELECT 'online'::text source_type,a.id,a.title,a.summary::text summary,a.url::text url,a.published_at,a.sentiment,a.risk_score::float,a.risk_level::text,a.importance_score::float,a.impact_score::float,ms.name::text source_name,a.opd_id,a.district_id
+      FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id
+      WHERE a.news_classification='UTAMA' AND a.sentiment IS NOT NULL AND COALESCE(a.risk_score,0)>0
+       AND (SELECT al.action FROM audit_logs al WHERE al.action IN ('ARTICLE_CLASSIFICATION_VERIFIED','ARTICLE_CLASSIFICATION_REOPENED') AND al.metadata->>'articleId'=a.id::text ORDER BY al.created_at DESC,al.id DESC LIMIT 1)='ARTICLE_CLASSIFICATION_VERIFIED'`+(onlineScope?' AND '+onlineScope:'')+`
+      UNION ALL
+      SELECT 'print',pa.id,pa.title,pa.summary::text,NULL::text,pe.edition_date::timestamptz,pa.sentiment,pa.risk_score::float,COALESCE(NULLIF(pa.ai_metadata->'intelligence'->>'riskLevel',''),CASE WHEN pa.risk_score>=80 THEN 'critical' WHEN pa.risk_score>=60 THEN 'high' WHEN pa.risk_score>=35 THEN 'medium' ELSE 'low' END),pa.importance_score::float,NULLIF(pa.ai_metadata->'intelligence'->>'impactScore','')::float,ms.name::text,pa.opd_id,pa.district_id
+      FROM print_articles pa JOIN print_editions pe ON pe.id=pa.edition_id JOIN media_sources ms ON ms.id=pe.source_id
+      WHERE lower(pa.status)='analyzed' AND pa.opd_id IS NOT NULL AND pa.ai_metadata->'v16Routing'->>'routingStatus'='ROUTED' AND COALESCE(pa.ai_metadata->'v16Routing'->>'keywordId','')<>'' AND pa.ai_metadata->'v16Routing'->>'keywordVerification'='ACCEPTED' AND pa.ai_metadata->'intelligence'->>'riskStatus'='FINAL' AND pa.sentiment IS NOT NULL AND COALESCE(pa.risk_score,0)>0`+(printScope?' AND '+printScope:'')+`
+      UNION ALL
+      SELECT CASE WHEN sm.source_kind='owned' THEN 'owned' ELSE 'social' END,sm.id,COALESCE(sm.title,left(sm.content,240)),left(sm.content,1200),sm.canonical_url,COALESCE(sm.published_at,sm.captured_at),sm.sentiment,sm.risk_score::float,sm.risk_level::text,sm.importance_score::float,sm.influence_score::float,COALESCE(osa.account_name,sm.author_name,sm.platform)::text,sm.opd_id,sm.district_id
+      FROM social_mentions sm LEFT JOIN owned_social_accounts osa ON osa.id=sm.owned_account_id
+      WHERE sm.sentiment IS NOT NULL AND COALESCE(sm.risk_score,0)>0 AND ((sm.source_kind='external' AND sm.metadata->'v16Routing'->>'newsClassification'='UTAMA' AND sm.metadata->'v16Routing'->>'routingStatus'='ROUTED' AND sm.opd_id IS NOT NULL AND (sm.metadata->'socialVerification'->>'status'='LOCKED' OR sm.metadata->'manualClassification'->>'locked'='true') AND sm.metadata->'intelligence'->>'riskStatus'='FINAL') OR (sm.source_kind='owned' AND sm.curation_status='approved' AND sm.metadata->'v16Routing'->>'verificationStatus'='LOCKED' AND sm.metadata->'v16Routing'->>'routingStatus'='ROUTED' AND sm.metadata->'intelligence'->>'riskStatus'='FINAL'))`+(socialScope?' AND '+socialScope:'')+`
+    ) SELECT *,COUNT(*) OVER()::int trusted_total,COUNT(*) FILTER(WHERE sentiment='negative') OVER()::int trusted_negative,COUNT(*) FILTER(WHERE risk_level IN ('high','critical')) OVER()::int trusted_high FROM trusted ORDER BY (COALESCE(risk_score,0)*.6+COALESCE(impact_score,0)*.4) DESC,published_at DESC NULLS LAST LIMIT `+limit;
     const {rows}=await pool.query(sql,params);
     const totals=rows[0]?{total:Number(rows[0].trusted_total||0),negative:Number(rows[0].trusted_negative||0),high:Number(rows[0].trusted_high||0)}:{total:0,negative:0,high:0};
     return{data:rows.map(({trusted_total,trusted_negative,trusted_high,...x}:any)=>x),metrics:totals,scope:{opdId,districtId},policy:'FINAL_LOCKED_ANALYZED_ONLY'};
