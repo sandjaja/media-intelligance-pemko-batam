@@ -1,0 +1,33 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main, 'fix/**']
+    paths:
+      - 'backend/**'
+      - 'phase3-outcome-ui.js'
+      - '.github/workflows/backend.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'phase3-outcome-ui.js'
+      - '.github/workflows/backend.yml'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check Phase 3 frontend syntax
+        working-directory: .
+        run: node --check phase3-outcome-ui.js
+      - run: npm install
+      - run: npm run check
+      - run: npm test
+      - run: npm run build

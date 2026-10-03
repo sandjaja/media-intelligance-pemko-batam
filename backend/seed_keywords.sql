@@ -1,0 +1,3 @@
+-- Tenant-neutral installation: keywords must be configured from Admin > Keywords
+-- after organization and OPD master data are created. No city-, province-,
+-- media-, or OPD-code-specific seed data is inserted by default.

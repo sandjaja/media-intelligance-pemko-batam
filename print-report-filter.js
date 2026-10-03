@@ -1,0 +1,1 @@
+(()=>{'use strict';/* Legacy print interceptor disabled. Authoritative Phase 2G print paths are print-archive-official.js and phase2g-ui-regression-fix.js. */})();
