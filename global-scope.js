@@ -21,7 +21,7 @@
   try{const r=await api('/command-center/scope'+(q.toString()?`?${q}`:''));state.metrics=r.metrics||{};state.articles=r.articles||[];state.highlights=r.highlights||[];state.alerts=r.alerts||[];renderHighlights();renderSoWhat();renderSources();renderAsk();if(typeof window.renderPhase2gDashboard==='function')await window.renderPhase2gDashboard();}catch(err){console.warn('Scope refresh failed',err);window.toast?.('Filter gagal dimuat: '+err.message)}
  }
  const changed=()=>window.dispatchEvent(new CustomEvent('command-center-scope-changed'));
- if(opdGroupSelect)opdGroupSelect.onchange=async()=>{state.opd='all';renderOpdOptions();changed();await refresh()};opdSelect.onchange=async e=>{state.opd=e.target.value;changed();await refresh()};districtSelect.onchange=async e=>{state.district=e.target.value;changed();await refresh()};
+ if(opdGroupSelect)opdGroupSelect.addEventListener('change',async()=>{state.opd='all';renderOpdOptions();changed();await refresh()});opdSelect.addEventListener('change',async e=>{state.opd=e.target.value;changed();await refresh()});districtSelect.addEventListener('change',async e=>{state.district=e.target.value;changed();await refresh()});
  window.addEventListener('media-branding-ready',()=>void options());
  const centerAdmin=()=>{const a=document.getElementById('adminNavBtn');if(a){a.style.textAlign='center';a.style.justifyContent='center';a.style.alignItems='center';a.style.display='flex'}};centerAdmin();new MutationObserver(centerAdmin).observe(document.body,{childList:true,subtree:true});
  options().then(refresh).catch(e=>console.warn('Scope init failed',e));
