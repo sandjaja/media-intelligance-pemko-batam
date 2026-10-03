@@ -31,7 +31,7 @@ let activeFilter='all';function render(data){const root=document.getElementById(
 }
 let reloadQueued=false;
 async function load(){if(window.__ccLoading){reloadQueued=true;return}window.__ccLoading=true;try{const q=qs(),suffix=q.toString()?'?'+q.toString():'';const articleQ=new URLSearchParams(q);articleQ.set('limit','50');const trustedQ=new URLSearchParams(q);trustedQ.set('limit','50');const [dash,trusted,als,owned,issueRes]=await Promise.all([api('/command-center/scope'+suffix),api('/command-center/trusted-evidence?'+trustedQ.toString()),api('/command-center/scope'+suffix),api('/admin/owned-social-accounts').catch(()=>({data:[]})),api('/admin/issue-taxonomy/issues'+suffix).catch(()=>({data:[]}))]);const selectedOpd=q.get('opdId'),selectedDist=q.get('districtId');render({metrics:dash.metrics||{},rows:trusted.data||[],alerts:als.alerts||als.data||[],issues:issueRes.data||[],trustedMetrics:trusted.metrics||{},ownedFocus:trusted.ownedFocus||{}});}catch(e){const root=document.getElementById('dashboard');if(root)root.innerHTML='<div class="glass rounded-2xl p-5 text-sm text-rose-300">Command Center gagal dimuat: '+esc(e.message)+'</div>'}finally{window.__ccLoading=false;if(reloadQueued){reloadQueued=false;setTimeout(load,0)}}}
-window.renderCommandCenter=load;
+window.renderCommandCenter=load;window.__commandCenterOwnsDashboard=true;
 window.addEventListener('media:authenticated',()=>{if((window.state?.tab||'dashboard')==='dashboard')load()});
 window.addEventListener('media-intelligence-tab',e=>{if(e.detail==='dashboard')load()});
 window.addEventListener('command-center-scope-changed',()=>load());
