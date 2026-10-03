@@ -33,7 +33,8 @@ async function load(){if(window.__ccLoading)return;window.__ccLoading=true;try{c
 window.renderCommandCenter=load;
 window.addEventListener('media:authenticated',()=>{if((window.state?.tab||'dashboard')==='dashboard')load()});
 window.addEventListener('media-intelligence-tab',e=>{if(e.detail==='dashboard')load()});
-document.getElementById('opdSelect')?.addEventListener('change',()=>setTimeout(load,120));
-document.getElementById('districtSelect')?.addEventListener('change',()=>setTimeout(load,120));
+document.getElementById('opdSelect')?.addEventListener('change',()=>setTimeout(load,350));
+document.getElementById('districtSelect')?.addEventListener('change',()=>setTimeout(load,350));
+window.addEventListener('command-center-scope-changed',()=>setTimeout(load,80));
 setTimeout(()=>{if(document.body.dataset.auth==='ok')load()},1600);
 })();
