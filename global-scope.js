@@ -16,8 +16,9 @@
   if(state.tab==='printarchive'){
    try{await window.renderPrintArchive?.();setTimeout(()=>window.applyPrintArchiveGlobalScope?.(),80);return}catch(err){console.warn('Print archive scope refresh failed',err);window.toast?.('Filter Arsip Media Cetak gagal dimuat: '+err.message);return}
   }
+  if(state.tab==='dashboard')return;
   const q=new URLSearchParams();if(state.opd!=='all')q.set('opdId',String(state.opd));if(state.district!=='all')q.set('districtId',String(state.district));
-  try{const r=await api('/command-center/scope'+(q.toString()?`?${q}`:''));state.metrics=r.metrics||{};state.articles=r.articles||[];state.highlights=r.highlights||[];state.alerts=r.alerts||[];renderHighlights();renderSoWhat();renderSources();renderAsk();if(state.tab==='dashboard'&&typeof window.renderPhase2gDashboard==='function')await window.renderPhase2gDashboard();}catch(err){console.warn('Scope refresh failed',err);window.toast?.('Filter gagal dimuat: '+err.message)}
+  try{const r=await api('/command-center/scope'+(q.toString()?`?${q}`:''));state.metrics=r.metrics||{};state.articles=r.articles||[];state.highlights=r.highlights||[];state.alerts=r.alerts||[];renderHighlights();renderSoWhat();renderSources();renderAsk();if(typeof window.renderPhase2gDashboard==='function')await window.renderPhase2gDashboard();}catch(err){console.warn('Scope refresh failed',err);window.toast?.('Filter gagal dimuat: '+err.message)}
  }
  const changed=()=>window.dispatchEvent(new CustomEvent('command-center-scope-changed'));
  if(opdGroupSelect)opdGroupSelect.onchange=async()=>{state.opd='all';renderOpdOptions();changed();await refresh()};opdSelect.onchange=async e=>{state.opd=e.target.value;changed();await refresh()};districtSelect.onchange=async e=>{state.district=e.target.value;changed();await refresh()};
