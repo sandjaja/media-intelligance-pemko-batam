@@ -43,6 +43,7 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
     const printScope = [op ? 'pa.opd_id=' + op : '', dist ? 'pa.district_id=' + dist : ''].filter(Boolean).join(' AND ');
     const socialScope = [op ? 'sm.opd_id=' + op : '', dist ? 'sm.district_id=' + dist : ''].filter(Boolean).join(' AND ');
     const limit = bind(parsed.data.limit);
+    const since7 = bind(new Date(Date.now()-7*24*60*60*1000).toISOString());
 
     const onlineSql =
       "SELECT 'online'::text source_type,a.id,a.title,a.summary::text summary,a.url::text url,a.published_at,a.sentiment,a.risk_score::float,a.risk_level::text,a.importance_score::float,a.impact_score::float,ms.name::text source_name,a.opd_id,a.district_id " +
@@ -74,10 +75,26 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
       (socialScope ? ' AND ' + socialScope : '');
 
     const sql = 'WITH trusted AS (' + onlineSql + ' UNION ALL ' + printSql + ' UNION ALL ' + socialSql + ') ' +
-      "SELECT *,COUNT(*) OVER()::int trusted_total,COUNT(*) FILTER(WHERE sentiment='negative') OVER()::int trusted_negative," +
-      "COUNT(*) FILTER(WHERE risk_level IN ('high','critical')) OVER()::int trusted_high FROM trusted " +
-      'ORDER BY (COALESCE(risk_score,0)*.6+COALESCE(impact_score,0)*.4) DESC,published_at DESC NULLS LAST LIMIT ' + limit;
+      "SELECT *,COUNT(*) FILTER(WHERE source_type<>'owned') OVER()::int trusted_total," +
+      "COUNT(*) FILTER(WHERE source_type<>'owned' AND sentiment='negative') OVER()::int trusted_negative," +
+      "COUNT(*) FILTER(WHERE source_type<>'owned' AND risk_level IN ('high','critical')) OVER()::int trusted_high FROM trusted " +
+      "WHERE source_type<>'owned' ORDER BY (COALESCE(risk_score,0)*.6+COALESCE(impact_score,0)*.4) DESC,published_at DESC NULLS LAST LIMIT " + limit;
     const { rows } = await pool.query(sql, params);
+    const ownedSql =
+      "SELECT sm.id,COALESCE(sm.title,left(sm.content,240)) title,left(sm.content,1200) summary,sm.canonical_url::text url," +
+      "COALESCE(sm.published_at,sm.captured_at) published_at,sm.sentiment,sm.risk_score::float,sm.risk_level::text,sm.importance_score::float,sm.influence_score::float impact_score," +
+      "COALESCE(osa.account_name,sm.author_name,sm.platform)::text source_name,sm.opd_id,sm.district_id " +
+      "FROM social_mentions sm LEFT JOIN owned_social_accounts osa ON osa.id=sm.owned_account_id " +
+      "WHERE sm.source_kind='owned' AND sm.curation_status='approved' AND sm.metadata->'v16Routing'->>'verificationStatus'='LOCKED' " +
+      "AND sm.metadata->'v16Routing'->>'routingStatus'='ROUTED' AND sm.metadata->'intelligence'->>'riskStatus'='FINAL' " +
+      "AND sm.sentiment IS NOT NULL AND COALESCE(sm.risk_score,0)>0 AND COALESCE(sm.published_at,sm.captured_at)>=" + since7 +
+      (socialScope ? ' AND ' + socialScope : '') +
+      " ORDER BY sm.risk_score DESC,COALESCE(sm.published_at,sm.captured_at) DESC";
+    const ownedResult = await pool.query(ownedSql, params);
+    const ownedRows = ownedResult.rows;
+    const sentiment = ownedRows.reduce((a:any,x:any)=>{const k=String(x.sentiment||'neutral').toLowerCase();a[k]=(a[k]||0)+1;return a;},{});
+    const channelCounts = ownedRows.reduce((a:any,x:any)=>{const k=String(x.source_name||'Tidak diketahui');a[k]=(a[k]||0)+1;return a;},{});
+    const topChannel = Object.entries(channelCounts).sort((a:any,b:any)=>b[1]-a[1])[0] || null;
     const totals = rows[0] ? {
       total: Number(rows[0].trusted_total || 0),
       negative: Number(rows[0].trusted_negative || 0),
@@ -87,7 +104,8 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
       data: rows.map(({ trusted_total, trusted_negative, trusted_high, ...x }: any) => x),
       metrics: totals,
       scope: { opdId, districtId },
-      policy: 'FINAL_LOCKED_ANALYZED_ONLY',
+      policy: 'EXTERNAL_FINAL_LOCKED_ANALYZED_ONLY',
+      ownedFocus: { periodDays: 7, total: ownedRows.length, sentiment, highestRisk: ownedRows[0] || null, topChannel: topChannel ? { name: topChannel[0], count: topChannel[1] } : null, items: ownedRows.slice(0,5) },
     };
   });
 
