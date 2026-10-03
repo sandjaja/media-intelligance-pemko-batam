@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import { loadAuthorizationContext, hasPermission, type AuthorizationContext } from './rbac.js';
 import { z } from 'zod';
 
-type ScopeUser = { id: string; role: 'admin'|'operator'|'viewer'; opdId: string | null };
+type ScopeUser = AuthorizationContext;
 declare module 'fastify' { interface FastifyRequest { scopeUser?: ScopeUser } }
 
 export async function registerCommandCenterScopeRoutes(app: FastifyInstance, pool: Pool, jwtSecret: string) {
