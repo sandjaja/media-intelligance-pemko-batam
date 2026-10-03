@@ -6,7 +6,7 @@ const n=v=>Number(v||0), risk=x=>String(x||'low').toLowerCase(), roles=()=>new S
 const roleLabel=()=>roles().has('super_admin')?'Super Admin':roles().has('humas')?'Humas':roles().has('opd')?'OPD':roles().has('district')?'Kecamatan':'Pengguna';
 const badge=l=>{const x=risk(l),m={critical:'bg-rose-500/15 text-rose-300 border-rose-500/30',high:'bg-orange-500/15 text-orange-300 border-orange-500/30',medium:'bg-amber-500/15 text-amber-300 border-amber-500/30',low:'bg-emerald-500/10 text-emerald-300 border-emerald-500/20'};return '<span class="px-2 py-1 rounded-lg border text-[10px] font-black uppercase '+(m[x]||m.low)+'">'+esc(x)+'</span>'};
 const kpi=(label,value,sub,icon,accent='text-cyan-300')=>'<div class="glass rounded-xl p-4"><div class="flex justify-between gap-3"><div><div class="text-[10px] font-black tracking-wider text-slate-500">'+label+'</div><div class="text-2xl font-black mt-1 '+accent+'">'+esc(value)+'</div></div><i class="fa-solid fa-'+icon+' text-slate-500"></i></div><div class="text-[10px] text-slate-500 mt-2">'+sub+'</div></div>';
-function qs(){const q=new URLSearchParams(),opd=document.getElementById('opdSelect')?.value,dist=document.getElementById('districtSelect')?.value;if(opd&&opd!=='all')q.set('opdId',opd);if(dist&&dist!=='all')q.set('districtId',dist);return q}
+function qs(){const q=new URLSearchParams(),opd=(typeof state!=='undefined'&&state.opd!=null?state.opd:document.getElementById('opdSelect')?.value),dist=(typeof state!=='undefined'&&state.district!=null?state.district:document.getElementById('districtSelect')?.value);if(opd&&opd!=='all')q.set('opdId',String(opd));if(dist&&dist!=='all')q.set('districtId',String(dist));return q}
 function derive(rows,alerts){const sorted=[...rows].sort((a,b)=>n(b.risk_score)-n(a.risk_score)||n(b.impact_score)-n(a.impact_score));const neg=rows.filter(x=>String(x.sentiment||'').toLowerCase()==='negative');const high=rows.filter(x=>['high','critical'].includes(risk(x.risk_level)));return{sorted,neg,high,top:sorted[0],alerts:alerts||[]}}
 const fmt=v=>{if(!v)return'-';const d=new Date(v);return Number.isNaN(d.getTime())?'-':d.toLocaleString('id-ID',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'})};
 function issueSignal(i){const m=i.latest_metrics||{},meta=m.metadata||{},sources=meta.sources||{},valid=Number(i.online_valid_count||0)+Number(i.print_valid_count||0)+Number(i.social_valid_count||0),linked=Number(i.online_count||0)+Number(i.print_count||0)+Number(i.social_count||0),velocity=Number(m.velocity_score||0),score=i.risk_score==null?null:Number(i.risk_score);return{...i,valid,linked,velocity,score,sources,level:String(i.risk_level||'unassessed').toLowerCase()}}
@@ -34,8 +34,6 @@ async function load(){if(window.__ccLoading){reloadQueued=true;return}window.__c
 window.renderCommandCenter=load;
 window.addEventListener('media:authenticated',()=>{if((window.state?.tab||'dashboard')==='dashboard')load()});
 window.addEventListener('media-intelligence-tab',e=>{if(e.detail==='dashboard')load()});
-document.getElementById('opdSelect')?.addEventListener('change',()=>setTimeout(load,350));
-document.getElementById('districtSelect')?.addEventListener('change',()=>setTimeout(load,350));
-window.addEventListener('command-center-scope-changed',()=>setTimeout(load,80));
+window.addEventListener('command-center-scope-changed',()=>load());
 setTimeout(()=>{if(document.body.dataset.auth==='ok')load()},1600);
 })();
