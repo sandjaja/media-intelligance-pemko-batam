@@ -171,7 +171,8 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     if(!mention)return reply.code(404).send({error:'MENTION_NOT_FOUND'});
     if(mention.source_kind!=='external')return reply.code(409).send({error:'EXTERNAL_SOCIAL_REQUIRED'});
     if(mention.metadata?.manualClassification?.locked===true||mention.metadata?.socialVerification?.status==='LOCKED')return reply.code(423).send({error:'SOCIAL_CLASSIFICATION_LOCKED'});
-    if(mention.metadata?.organizationScope?.status!=='REVIEW')return reply.code(409).send({error:'SOCIAL_SCOPE_REVIEW_NOT_PENDING'});
+    if(!['REVIEW','RELEVANT'].includes(String(mention.metadata?.organizationScope?.status||'')))return reply.code(409).send({error:'SOCIAL_SCOPE_REJECTION_NOT_ALLOWED'});
+    if(mention.metadata?.manualClassification?.locked===true||mention.metadata?.socialVerification?.status==='LOCKED')return reply.code(423).send({error:'SOCIAL_CLASSIFICATION_LOCKED'});
     const rejectedScope={...(mention.metadata.organizationScope||{}),status:'OUT_OF_SCOPE',rejectedBy:actor.id,rejectedAt:new Date().toISOString(),rejectionSource:'HUMAN',reason:p.data.reason};
     const {v16Routing:_routing,intelligence:_intel,socialVerification:_verification,manualClassification:_manual,...rest}=mention.metadata||{};
     const client=await pool.connect();try{await client.query('BEGIN');
