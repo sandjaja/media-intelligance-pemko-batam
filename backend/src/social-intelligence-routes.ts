@@ -332,7 +332,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
          LEFT JOIN opd o ON o.id=sm.opd_id
          LEFT JOIN owned_social_accounts osa ON osa.id=sm.owned_account_id
          ${filterSql}
-         ORDER BY sm.risk_score DESC, sm.published_at DESC NULLS LAST, sm.captured_at DESC
+         ORDER BY sm.published_at DESC NULLS LAST, sm.captured_at DESC, sm.risk_score DESC
          LIMIT ${limitParam} OFFSET ${offsetParam}`,
       params,
     );
