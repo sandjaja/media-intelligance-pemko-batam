@@ -88,8 +88,8 @@ async function collectSocial(pool:Pool,trigger:CollectionTrigger){
   }
   let clustering:any=null;
   if(savedOrUpdated>0){try{clustering=await persistSocialConversationClusters(pool,orgId,7)}catch(error){clustering={error:error instanceof Error?error.message:String(error)}}}
-  const manualLocked=allResults.filter(x=>x.reason==='MANUAL_CLASSIFICATION_LOCKED').length;
-  const scopeReview=allResults.filter(x=>x.reason==='ORGANIZATION_SCOPE_REVIEW').length;
+  const manualLocked=allResults.filter(x=>x.reason==='CLASSIFICATION_LOCKED').length;
+  const scopeReview=allResults.filter(x=>x.reason==='ORGANIZATION_SCOPE_REVIEW_REQUIRED').length;
   const outOfScope=allResults.filter(x=>x.reason==='ORGANIZATION_SCOPE_OUT_OF_SCOPE').length;
   const ingestionErrors=allResults.filter(x=>x.ok===false).slice(0,5).map(x=>({platform:x.platform??'youtube',externalId:x.externalId??null,query:x.query??null,error:String(x.error||'UNKNOWN_ERROR').slice(0,240)}));
   return {providers:1,succeeded:ingestionFailed<queries.length?1:0,failed:ingestionFailed>=queries.length?1:0,diagnostics:{discovery:'ORGANIZATION_PLUS_ACTIVE_WATCH_ISSUES',organizationQueries,issueQueries,queries,maxResults,collectionWindowDays,publishedAfter,watermarkSource:lastSuccessful?'LAST_SUCCESSFUL_SOCIAL_RUN_WITH_6H_OVERLAP':'FALLBACK_WINDOW',commentsMode:scheduled?'SKIPPED_SCHEDULED':'FULL_MANUAL',crossQueryDuplicates,searchedVideos,shortCandidates,videosWithComments,commentsCollected,received,savedOrUpdated,skipped,ingestionFailed,manualLocked,outOfScope,scopeReview,clustering,ingestionErrors},results:[{provider:'youtube',queries,maxResults,results:allResults}]};
