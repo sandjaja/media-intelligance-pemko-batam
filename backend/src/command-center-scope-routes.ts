@@ -123,122 +123,29 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
 
 
   app.get('/api/command-center/workflow-pipeline', { preHandler: auth }, async (request, reply) => {
-    const parsed = z.object({ opdId: z.coerce.number().int().positive().optional(), districtId: z.coerce.number().int().positive().optional() }).safeParse(request.query);
-    if (!parsed.success) return reply.code(400).send({ error: 'INVALID_QUERY' });
-    const user = request.scopeUser;
-    const canReadAll = Boolean(user && (user.legacyRole === 'admin' || user.roles.includes('super_admin') || user.roles.includes('humas') || hasPermission(user,'platform.admin') || hasPermission(user,'intelligence.read.all')));
-    const opdId = canReadAll ? (parsed.data.opdId ?? null) : (user?.opdId ?? null);
-    const districtId = parsed.data.districtId ?? null;
-    const params: unknown[] = [];
-    const bind = (value: unknown) => { params.push(value); return '
-    const parsed = z.object({
-      opdId: z.string().regex(/^\d+$/).optional(),
-      districtId: z.string().regex(/^\d+$/).optional(),
-      articleLimit: z.coerce.number().int().min(1).max(100).default(25),
-      highlightLimit: z.coerce.number().int().min(1).max(50).default(10),
-      alertLimit: z.coerce.number().int().min(1).max(100).default(25),
-    }).safeParse(request.query);
-    if (!parsed.success) return reply.code(400).send({ error: 'INVALID_QUERY' });
-
-    const user = request.scopeUser;
-    const canReadAll = Boolean(user && (user.legacyRole === 'admin' || user.roles.includes('super_admin') || user.roles.includes('humas') || hasPermission(user,'platform.admin') || hasPermission(user,'intelligence.read.all')));
-    const opdId = canReadAll ? (parsed.data.opdId ?? null) : (user?.opdId ?? null);
-    const districtId = parsed.data.districtId ?? null;
-    const params: unknown[] = [];
-    const where: string[] = [];
-    if (opdId) { params.push(opdId); where.push(`a.opd_id=$${params.length}`); }
-    if (districtId) { params.push(districtId); where.push(`a.district_id=$${params.length}`); }
-    const filterSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-
-    const metricResult = await pool.query(
-      `SELECT COUNT(*)::int total_articles,
-              COUNT(*) FILTER(WHERE is_highlight)::int highlights,
-              COUNT(*) FILTER(WHERE sentiment='negative')::int negative,
-              COUNT(*) FILTER(WHERE risk_level IN ('high','critical'))::int critical,
-              COUNT(*) FILTER(WHERE risk_level='critical')::int critical_alerts,
-              COALESCE(ROUND(AVG(importance_score)),0)::int momentum
-         FROM articles a ${filterSql}`,
-      params,
-    );
-    const sourcesResult = await pool.query(`SELECT COUNT(*)::int count FROM media_sources WHERE active=true`);
-
-    const articleParams = [...params, parsed.data.articleLimit];
-    const articles = await pool.query(
-      `SELECT a.id,a.title,a.url,a.published_at,a.sentiment,a.importance_score,a.impact_score,a.velocity_score,
-              a.risk_score,a.risk_level,a.is_highlight,a.summary,a.opd_id,a.district_id,
-              ms.name source_name,o.name opd_name,d.name district_name
-         FROM articles a
-         LEFT JOIN media_sources ms ON ms.id=a.source_id
-         LEFT JOIN opd o ON o.id=a.opd_id
-         LEFT JOIN districts d ON d.id=a.district_id
-         ${filterSql}
-         ORDER BY a.importance_score DESC,a.published_at DESC NULLS LAST
-         LIMIT $${articleParams.length}`,
-      articleParams,
-    );
-
-    const highlightWhere = [...where, 'a.is_highlight=true'];
-    const highlightParams = [...params, parsed.data.highlightLimit];
-    const highlights = await pool.query(
-      `SELECT a.id,a.title,a.url,a.published_at,a.sentiment,a.importance_score,a.impact_score,a.velocity_score,
-              a.risk_score,a.risk_level,a.summary,a.opd_id,a.district_id,
-              ms.name source_name,o.name opd_name,d.name district_name
-         FROM articles a
-         LEFT JOIN media_sources ms ON ms.id=a.source_id
-         LEFT JOIN opd o ON o.id=a.opd_id
-         LEFT JOIN districts d ON d.id=a.district_id
-         WHERE ${highlightWhere.join(' AND ')}
-         ORDER BY a.risk_score DESC,a.importance_score DESC,a.published_at DESC NULLS LAST
-         LIMIT $${highlightParams.length}`,
-      highlightParams,
-    );
-
-    const alertParams: unknown[] = ['open'];
-    const alertWhere: string[] = ['aa.status=$1'];
-    if (opdId) { alertParams.push(opdId); alertWhere.push(`a.opd_id=$${alertParams.length}`); }
-    if (districtId) { alertParams.push(districtId); alertWhere.push(`a.district_id=$${alertParams.length}`); }
-    alertParams.push(parsed.data.alertLimit);
-    const alerts = await pool.query(
-      `SELECT aa.id,aa.article_id,aa.alert_type,aa.severity,aa.reason,aa.status,aa.created_at,
-              a.title,a.url,a.published_at,a.risk_score,a.risk_level,a.opd_id,a.district_id,
-              ms.name source_name,o.name opd_name,d.name district_name
-         FROM article_alerts aa
-         JOIN articles a ON a.id=aa.article_id
-         LEFT JOIN media_sources ms ON ms.id=a.source_id
-         LEFT JOIN opd o ON o.id=a.opd_id
-         LEFT JOIN districts d ON d.id=a.district_id
-         WHERE ${alertWhere.join(' AND ')}
-         ORDER BY aa.created_at DESC
-         LIMIT $${alertParams.length}`,
-      alertParams,
-    );
-
-    return {
-      scope: { opdId, districtId },
-      metrics: { ...metricResult.rows[0], sources: Number(sourcesResult.rows[0]?.count || 0) },
-      articles: articles.rows,
-      highlights: highlights.rows,
-      alerts: alerts.rows,
-    };
-  });
-}
- + params.length; };
-    const where: string[] = ["lower(i.status) IN ('watch','active')"];
-    if (opdId) { const p=bind(opdId); where.push('(EXISTS(SELECT 1 FROM issue_opd io WHERE io.issue_id=i.id AND io.opd_id='+p+') OR w.lead_opd_id='+p+')'); }
-    if (districtId) { const p=bind(districtId); where.push("(i.geographic_scope='CITYWIDE' OR EXISTS(SELECT 1 FROM issue_districts ids WHERE ids.issue_id=i.id AND ids.district_id="+p+"))"); }
-    const sql = "SELECT i.id issue_id,i.title issue_title,i.status issue_status,w.id workflow_id,w.cycle_number,w.workflow_status,w.lead_opd_id," +
-      "EXISTS(SELECT 1 FROM issue_communication_gap_snapshots g WHERE g.workflow_id=w.id) gap_done," +
-      "EXISTS(SELECT 1 FROM issue_response_submissions r WHERE r.workflow_id=w.id) clarification_started," +
-      "EXISTS(SELECT 1 FROM communication_strategies s WHERE s.workflow_id=w.id) strategy_started," +
-      "EXISTS(SELECT 1 FROM communication_strategies s WHERE s.workflow_id=w.id AND s.status='APPROVED') strategy_approved," +
-      "EXISTS(SELECT 1 FROM issue_publication_evidence p WHERE p.workflow_id=w.id) publication_done " +
-      "FROM issues i JOIN LATERAL(SELECT wx.* FROM issue_workflows wx WHERE wx.issue_id=i.id ORDER BY wx.cycle_number DESC,wx.id DESC LIMIT 1) w ON true " +
+    const parsed=z.object({opdId:z.coerce.number().int().positive().optional(),districtId:z.coerce.number().int().positive().optional()}).safeParse(request.query);
+    if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
+    const user=request.scopeUser;
+    const canReadAll=Boolean(user&&(user.legacyRole==='admin'||user.roles.includes('super_admin')||user.roles.includes('humas')||hasPermission(user,'platform.admin')||hasPermission(user,'intelligence.read.all')));
+    const opdId=canReadAll?(parsed.data.opdId??null):(user?.opdId??null),districtId=parsed.data.districtId??null;
+    const params:unknown[]=[];
+    const bind=(value:unknown)=>{params.push(value);return String.fromCharCode(36)+params.length};
+    const where:string[]=["lower(i.status) IN ('watch','active')"];
+    if(opdId){const p=bind(opdId);where.push('(EXISTS(SELECT 1 FROM issue_opd io WHERE io.issue_id=i.id AND io.opd_id='+p+') OR w.lead_opd_id='+p+')')}
+    if(districtId){const p=bind(districtId);where.push("(i.geographic_scope='CITYWIDE' OR EXISTS(SELECT 1 FROM issue_districts ids WHERE ids.issue_id=i.id AND ids.district_id="+p+"))")}
+    const sql="SELECT i.id issue_id,i.title issue_title,i.status issue_status,w.id workflow_id,w.cycle_number,w.workflow_status,w.lead_opd_id,"+
+      "EXISTS(SELECT 1 FROM issue_communication_gap_snapshots g WHERE g.workflow_id=w.id) gap_done,"+
+      "EXISTS(SELECT 1 FROM issue_response_submissions r WHERE r.workflow_id=w.id) clarification_started,"+
+      "EXISTS(SELECT 1 FROM communication_strategies s WHERE s.workflow_id=w.id) strategy_started,"+
+      "EXISTS(SELECT 1 FROM communication_strategies s WHERE s.workflow_id=w.id AND s.status='APPROVED') strategy_approved,"+
+      "EXISTS(SELECT 1 FROM issue_publication_evidence p WHERE p.workflow_id=w.id) publication_done "+
+      "FROM issues i JOIN LATERAL(SELECT wx.* FROM issue_workflows wx WHERE wx.issue_id=i.id ORDER BY wx.cycle_number DESC,wx.id DESC LIMIT 1) w ON true "+
       "WHERE "+where.join(' AND ')+" ORDER BY w.updated_at DESC,i.id DESC";
     const rows=(await pool.query(sql,params)).rows;
-    const stage=(x:any)=>{const ws=String(x.workflow_status||'').toUpperCase();if(ws==='CLOSED')return 'CLOSED';if(x.publication_done||ws==='PUBLISHED'||ws==='MONITORING')return 'MONITORING';if(x.strategy_approved)return 'PUBLICATION';if(x.strategy_started||ws==='STRATEGY')return 'STRATEGY';if(x.gap_done&&(x.clarification_started||ws==='APPROVED'))return 'CLARIFICATION';return 'GAP';};
+    const stage=(x:any)=>{const ws=String(x.workflow_status||'').toUpperCase();if(ws==='CLOSED')return'CLOSED';if(x.publication_done||ws==='PUBLISHED'||ws==='MONITORING')return'MONITORING';if(x.strategy_approved)return'PUBLICATION';if(x.strategy_started||ws==='STRATEGY')return'STRATEGY';if(x.gap_done&&(x.clarification_started||ws==='APPROVED'))return'CLARIFICATION';return'GAP'};
     const active=rows.map((x:any)=>({...x,stage:stage(x)})).filter((x:any)=>x.stage!=='CLOSED');
     const stages=['GAP','CLARIFICATION','STRATEGY','PUBLICATION','MONITORING'].map(key=>({key,count:active.filter((x:any)=>x.stage===key).length,items:active.filter((x:any)=>x.stage===key).map((x:any)=>({issueId:x.issue_id,title:x.issue_title,status:x.issue_status,workflowId:x.workflow_id,cycleNumber:x.cycle_number}))}));
-    return {scope:{opdId,districtId},total:active.length,closed:rows.filter((x:any)=>stage(x)==='CLOSED').length,stages};
+    return{scope:{opdId,districtId},total:active.length,closed:rows.filter((x:any)=>stage(x)==='CLOSED').length,stages};
   });
 
   app.get('/api/command-center/scope', { preHandler: auth }, async (request, reply) => {
