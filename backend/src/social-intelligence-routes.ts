@@ -300,6 +300,9 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
 
     const params: unknown[] = [];
     const where: string[] = [`sm.source_kind='${parsed.data.sourceKind}'`];
+    // Main monitoring feed shows publishable parent content only. Comments/replies stay stored
+    // for conversation context, clustering and analytics, but are not standalone feed cards.
+    where.push(`sm.content_type NOT IN ('comment','reply')`);
     if(parsed.data.sourceKind==='external'&&parsed.data.classification!=='SCOPE_REVIEW')where.push(`COALESCE(sm.metadata->'organizationScope'->>'status','RELEVANT')='RELEVANT'`);
     if(parsed.data.sourceKind==='external'&&parsed.data.classification==='SCOPE_REVIEW')where.push(`sm.metadata->'organizationScope'->>'status'='REVIEW'`);
     const bind = (value: unknown) => { params.push(value); return '$' + params.length; };
