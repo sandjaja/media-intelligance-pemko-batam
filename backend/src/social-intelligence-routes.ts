@@ -44,6 +44,13 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     }
   };
 
+  const requireRead = async (request: FastifyRequest, reply: any) => {
+    const ctx = request.socialAuth!;
+    if (!(ctx.legacyRole === 'admin' || ctx.roles.some(role => role === 'super_admin' || role === 'humas' || role === 'executive' || role === 'opd'))) {
+      return reply.code(403).send({ error: 'SOCIAL_MEDIA_READ_FORBIDDEN' });
+    }
+  };
+
   const manager = [auth, requireWrite];
 
   const scopedOpd = (ctx: AuthorizationContext, requested?: string) =>
@@ -282,7 +289,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     return{ok:true,data:{eligible:mentions.length,finalized,failed,affectedIssues:[...affectedIssueIds],errors}};
   });
 
-  app.get('/api/social/mentions', { preHandler: auth }, async (request, reply) => {
+  app.get('/api/social/mentions', { preHandler: [auth, requireRead] }, async (request, reply) => {
     const parsed = z.object({
       platform: platformSchema.optional(),
       opdId: z.string().regex(/^\d+$/).optional(),
@@ -473,7 +480,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   };
   const auditConversation=async(client:any,userId:string,action:string,metadata:any)=>client.query('INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,$2,$3::jsonb)',[userId,action,JSON.stringify(metadata)]);
 
-  app.get('/api/social/conversation-clusters',{preHandler:auth},async(request,reply)=>{
+  app.get('/api/social/conversation-clusters',{preHandler: [auth, requireRead]},async(request,reply)=>{
     const parsed=z.object({days:z.coerce.number().int().refine(v=>[1,7,14,30].includes(v)).default(7),platform:platformSchema.optional(),opdId:z.string().regex(/^\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional()}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
     const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
@@ -544,7 +551,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     const client=await pool.connect();try{await client.query('BEGIN');const current=(await client.query('SELECT canonical_title,origin_mode FROM social_conversation_clusters WHERE id=$1 AND organization_id=$2 AND status=$3',[params.data.id,organizationId,'ACTIVE'])).rows[0];if(!current){await client.query('ROLLBACK');return reply.code(404).send({error:'CLUSTER_NOT_FOUND'});}await client.query(`UPDATE social_conversation_clusters SET canonical_title=$3,origin_mode='MANUAL',updated_at=NOW() WHERE id=$1 AND organization_id=$2`,[params.data.id,organizationId,body.data.name]);await client.query(`UPDATE social_conversation_cluster_members SET assignment_mode='MANUAL',matched_by='manual' WHERE cluster_id=$1`,[params.data.id]);await auditConversation(client,request.socialAuth!.id,'SOCIAL_CONVERSATION_CLUSTER_RENAME',{organizationId,clusterId:params.data.id,fromName:current.canonical_title,toName:body.data.name,reason:body.data.reason??null});await client.query('COMMIT');return{ok:true};}catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
   });
 
-  app.get('/api/social/conversation-insights', { preHandler: auth }, async (request, reply) => {
+  app.get('/api/social/conversation-insights', { preHandler: [auth, requireRead] }, async (request, reply) => {
     const parsed=z.object({days:z.coerce.number().int().refine(v=>[1,7,14,30].includes(v)).default(7),platform:platformSchema.optional(),opdId:z.string().regex(/^\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional()}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
     const params:unknown[]=[parsed.data.days],where:string[]=["source_kind='external'","COALESCE(metadata->'organizationScope'->>'status','RELEVANT')='RELEVANT'","COALESCE(published_at,captured_at) >= NOW() - ($1::int * INTERVAL '1 day')"];
@@ -566,7 +573,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     return{trends:trends.rows,clusters};
   });
 
-  app.get('/api/social/summary', { preHandler: auth }, async (request, reply) => {
+  app.get('/api/social/summary', { preHandler: [auth, requireRead] }, async (request, reply) => {
     const parsed=z.object({opdId:z.string().regex(/^\d+$/).optional(),platform:platformSchema.optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional(),from:z.string().optional(),to:z.string().optional(),days:z.coerce.number().int().refine(v=>[1,7,14,30].includes(v)).default(7)}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
     const params:unknown[]=[],where:string[]=[`source_kind='external'`,`COALESCE(metadata->'organizationScope'->>'status','RELEVANT')='RELEVANT'`];const opdId=scopedOpd(request.socialAuth!,parsed.data.opdId);
