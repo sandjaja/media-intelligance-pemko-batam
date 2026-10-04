@@ -25,6 +25,8 @@ export async function ingestSocialCandidate(pool:Pool,candidate:SocialCandidate,
  const scope=await loadOrganizationMediaScope(pool);
  if(!scope)throw new Error('ACTIVE_ORGANIZATION_UNRESOLVED');
  const scopeDecision=classifySocialOrganizationScope({title:candidate.title,content:candidate.content,context:candidate.context},scope);
+ const existingByExternalId=candidate.externalId?(await pool.query(`SELECT id,metadata FROM social_mentions WHERE platform=$1 AND external_id=$2 LIMIT 1`,[candidate.platform,candidate.externalId])).rows[0]:null;
+ if(candidate.sourceKind!=='owned'&&existingByExternalId?.metadata?.organizationScope?.status==='OUT_OF_SCOPE'&&existingByExternalId?.metadata?.organizationScope?.rejectionSource==='HUMAN')return{...existingByExternalId,skipped:true,reason:'ORGANIZATION_SCOPE_OUT_OF_SCOPE',scopeDecision:existingByExternalId.metadata.organizationScope,platform:candidate.platform,externalId:candidate.externalId??null};
  if(candidate.sourceKind!=='owned'&&scopeDecision.status==='OUT_OF_SCOPE')return{skipped:true,reason:'ORGANIZATION_SCOPE_OUT_OF_SCOPE',scopeDecision,platform:candidate.platform,externalId:candidate.externalId??null};
  if(candidate.sourceKind!=='owned'&&scopeDecision.status==='REVIEW'){
   const contentHash=socialContentHash(candidate),publishedAt=normalizedPublishedAt(candidate.publishedAt);
