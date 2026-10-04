@@ -1,6 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
 
-type Mention={id:string;owned_account_id:string|null;account_name:string|null;ownership_level:'pemko'|'opd'|null;is_primary_source:boolean|null;source_priority:number|null;title:string|null;content:string|null;published_at:string|null;captured_at:string|null};
+type Mention={id:string;owned_account_id:string|null;account_name:string|null;ownership_level:'pemko'|'opd'|'district'|null;is_primary_source:boolean|null;source_priority:number|null;title:string|null;content:string|null;published_at:string|null;captured_at:string|null};
 type MemberType='identical'|'adapted'|'unique';
 type ReviewState={review_status:'confirmed'|'rejected';reviewed_by:string|null;reviewed_at:string|null;review_reason:string|null};
 type WorkingMember={mention:Mention;score:number;type:MemberType};
@@ -15,7 +15,7 @@ function dateMs(m:Mention){const n=new Date(m.published_at||m.captured_at||'').g
 function signals(a:Mention,b:Mention){const at=tokens(a.title,60),bt=tokens(b.title,60),ab=tokens(a.content,420),bb=tokens(b.content,420),title=jaccard(at,bt),body=jaccard(ab,bb),bodyContain=containment(ab,bb),phrase=jaccard(shingles(a.content),shingles(b.content)),phraseContain=containment(shingles(a.content),shingles(b.content));const score=Math.max(title,body*.92,bodyContain*.84,phrase,phraseContain*.90,.25*title+.75*body);return{title,body,bodyContain,phrase,phraseContain,score:Math.max(0,Math.min(1,score))}}
 function classify(s:ReturnType<typeof signals>):MemberType{if(s.title>=.88||(s.body>=.88&&s.phrase>=.68)||(s.bodyContain>=.94&&s.phraseContain>=.82))return'identical';if(s.score>=.54||s.body>=.56||s.bodyContain>=.66||s.phrase>=.27||s.phraseContain>=.42)return'adapted';return'unique'}
 function sourceRank(m:Mention){if(m.is_primary_source)return 0;if(m.ownership_level==='pemko')return 1;return 2}
-function chooseOriginal(ms:WorkingMember[]){return ms.slice().sort((a,b)=>sourceRank(a.mention)-sourceRank(b.mention)||(Number(b.mention.source_priority)||0)-(Number(a.mention.source_priority)||0)||dateMs(a.mention)-dateMs(b.mention)||Number(a.mention.id)-Number(b.mention.id))[0].mention}
+function chooseOriginal(ms:WorkingMember[]){const primaryPemko=ms.filter(x=>x.mention.ownership_level==='pemko'&&x.mention.is_primary_source);const pool=primaryPemko.length?primaryPemko:ms;return pool.slice().sort((a,b)=>sourceRank(a.mention)-sourceRank(b.mention)||(Number(b.mention.source_priority)||0)-(Number(a.mention.source_priority)||0)||dateMs(a.mention)-dateMs(b.mention)||Number(a.mention.id)-Number(b.mention.id))[0].mention}
 function bestSignals(m:Mention,c:WorkingCluster){let best=signals(m,c.representative);for(const x of c.members){const s=signals(m,x.mention);if(s.score>best.score)best=s}return best}
 function finalize(c:WorkingCluster){const original=chooseOriginal(c.members);c.representative=original;c.members=c.members.map(m=>{if(m.mention.id===original.id)return{...m,score:1,type:'unique'};const s=bestSignals(m.mention,{representative:original,members:c.members.filter(x=>x.mention.id!==m.mention.id)});return{...m,score:s.score,type:classify(s)}})}
 function hasRejected(c:WorkingCluster,rejected:Set<string>){return c.members.some(m=>rejected.has(String(m.mention.id)))}
