@@ -36,9 +36,9 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
     if (!parsed.success) return reply.code(400).send({ error: 'INVALID_QUERY' });
 
     const user = request.scopeUser;
-    const canReadAll = Boolean(user && (user.legacyRole === 'admin' || user.roles.includes('super_admin') || user.roles.includes('humas') || hasPermission(user,'platform.admin') || hasPermission(user,'intelligence.read.all')));
+    const canReadAll = Boolean(user && (user.legacyRole === 'admin' || user.roles.includes('super_admin') || user.roles.includes('humas') || user.roles.includes('executive') || hasPermission(user,'platform.admin')));
     const opdId = canReadAll ? (parsed.data.opdId ?? null) : (user?.opdId ?? null);
-    const districtId = parsed.data.districtId ?? null;
+    const districtId = canReadAll ? (parsed.data.districtId ?? null) : (user?.districtId ?? null);
     const params: unknown[] = [];
     const bind = (value: unknown) => { params.push(value); return '$' + params.length; };
     const op = opdId ? bind(opdId) : null;
@@ -133,9 +133,9 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
     if (!parsed.success) return reply.code(400).send({ error: 'INVALID_QUERY' });
 
     const user = request.scopeUser;
-    const canReadAll = Boolean(user && (user.legacyRole === 'admin' || user.roles.includes('super_admin') || user.roles.includes('humas') || hasPermission(user,'platform.admin') || hasPermission(user,'intelligence.read.all')));
+    const canReadAll = Boolean(user && (user.legacyRole === 'admin' || user.roles.includes('super_admin') || user.roles.includes('humas') || user.roles.includes('executive') || hasPermission(user,'platform.admin')));
     const opdId = canReadAll ? (parsed.data.opdId ?? null) : (user?.opdId ?? null);
-    const districtId = parsed.data.districtId ?? null;
+    const districtId = canReadAll ? (parsed.data.districtId ?? null) : (user?.districtId ?? null);
     const params: unknown[] = [];
     const bind = (value: unknown) => { params.push(value); return '$' + params.length; };
     const op = opdId ? bind(opdId) : null;
@@ -178,8 +178,8 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
     const parsed=z.object({opdId:z.coerce.number().int().positive().optional(),districtId:z.coerce.number().int().positive().optional()}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
     const user=request.scopeUser;
-    const canReadAll=Boolean(user&&(user.legacyRole==='admin'||user.roles.includes('super_admin')||user.roles.includes('humas')||hasPermission(user,'platform.admin')||hasPermission(user,'intelligence.read.all')));
-    const opdId=canReadAll?(parsed.data.opdId??null):(user?.opdId??null),districtId=parsed.data.districtId??null;
+    const canReadAll=Boolean(user&&(user.legacyRole==='admin'||user.roles.includes('super_admin')||user.roles.includes('humas')||user.roles.includes('executive')||hasPermission(user,'platform.admin')));
+    const opdId=canReadAll?(parsed.data.opdId??null):(user?.opdId??null),districtId=canReadAll?(parsed.data.districtId??null):(user?.districtId??null);
     const params:unknown[]=[];
     const bind=(value:unknown)=>{params.push(value);return String.fromCharCode(36)+params.length};
     const where:string[]=["lower(i.status) IN ('watch','active')"];
@@ -211,9 +211,9 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
     if (!parsed.success) return reply.code(400).send({ error: 'INVALID_QUERY' });
 
     const user = request.scopeUser;
-    const canReadAll = Boolean(user && (user.legacyRole === 'admin' || user.roles.includes('super_admin') || user.roles.includes('humas') || hasPermission(user,'platform.admin') || hasPermission(user,'intelligence.read.all')));
+    const canReadAll = Boolean(user && (user.legacyRole === 'admin' || user.roles.includes('super_admin') || user.roles.includes('humas') || user.roles.includes('executive') || hasPermission(user,'platform.admin')));
     const opdId = canReadAll ? (parsed.data.opdId ?? null) : (user?.opdId ?? null);
-    const districtId = parsed.data.districtId ?? null;
+    const districtId = canReadAll ? (parsed.data.districtId ?? null) : (user?.districtId ?? null);
     const params: unknown[] = [];
     const where: string[] = [];
     if (opdId) { params.push(opdId); where.push(`a.opd_id=$${params.length}`); }
