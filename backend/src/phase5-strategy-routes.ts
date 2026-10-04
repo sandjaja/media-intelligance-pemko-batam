@@ -73,7 +73,7 @@ export async function registerPhase5StrategyRoutes(app:FastifyInstance,pool:Pool
   return {capturedAt:new Date().toISOString(),previousCycleLearning:previous,issue:{id:w.issue_id,title:w.title,description:w.description,riskLevel:w.risk_level,momentum:w.momentum,geographicScope:w.geographic_scope},workflow:{id:w.id,cycleNumber:w.cycle_number,status:w.workflow_status,leadOpdId:w.lead_opd_id,leadOpdName:w.lead_opd_name},keywords:keywords.rows,districts:districts.rows,metrics:metrics.rows[0]||null,gap:gap.rows[0]||null,approvedResponse:response.rows[0]||null,publicationAnalysis:publication.rows[0]||null,monitoringAnalysis:monitoring.rows};
  };
  const requireRead=(ctx:AuthorizationContext)=>hasPermission(ctx,'strategy.read')||hasPermission(ctx,'strategy.manage');
- const requireManage=(ctx:AuthorizationContext)=>hasPermission(ctx,'strategy.manage');
+ const requireManage=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
 
  app.get('/api/phase5/strategies',{preHandler:auth},async(request,reply)=>{
   const ctx=request.phase5Auth!;if(!requireRead(ctx))return reply.code(403).send({error:'FORBIDDEN'});
