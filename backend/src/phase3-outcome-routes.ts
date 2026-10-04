@@ -167,7 +167,7 @@ export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,
     for(const role of ['super_admin','humas','opd','district','executive','viewer'] as Phase3ActorRole[])if(ctx.roles.includes(role))return role;
     return 'viewer';
   };
-  const isGlobalReader=(ctx:AuthorizationContext)=>ctx.roles.some(r=>['super_admin','humas','executive','viewer'].includes(r));
+  const isGlobalReader=(ctx:AuthorizationContext)=>ctx.roles.some(r=>['super_admin','humas','executive'].includes(r));
   const canSeeOutcome=async(ctx:AuthorizationContext,w:any)=>{
     if(isGlobalReader(ctx))return true;
     if(ctx.roles.includes('district')&&ctx.districtId){
