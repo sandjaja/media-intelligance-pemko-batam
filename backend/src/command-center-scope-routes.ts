@@ -147,7 +147,7 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
     const socialScope = [op ? 'sm.opd_id=' + op : '', dist ? 'sm.district_id=' + dist : ''].filter(Boolean).join(' AND ');
 
     const onlineSql =
-      "SELECT 'online'::text source_type,a.id,a.title,a.summary::text summary,a.url::text url,a.published_at,a.sentiment,a.risk_score::float,a.risk_level::text,ms.name::text source_name " +
+      "SELECT 'online'::text source_type,a.id,a.title,a.summary::text summary,a.url::text url,a.published_at,a.sentiment,a.risk_score::float,a.risk_level::text,ms.name::text source_name," +
       "NULL::bigint evidence_file_id,NULL::text evidence_mime_type FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE a.news_classification='UTAMA' AND a.sentiment IS NOT NULL AND COALESCE(a.risk_score,0)>0 " +
       "AND (SELECT al.action FROM audit_logs al WHERE al.action IN ('ARTICLE_CLASSIFICATION_VERIFIED','ARTICLE_CLASSIFICATION_REOPENED') AND al.metadata->>'articleId'=a.id::text ORDER BY al.created_at DESC,al.id DESC LIMIT 1)='ARTICLE_CLASSIFICATION_VERIFIED' " +
       "AND (a.published_at AT TIME ZONE 'Asia/Jakarta')::date=" + day + "::date" + (onlineScope ? ' AND ' + onlineScope : '');
