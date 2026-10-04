@@ -6,7 +6,7 @@
   async function api(path,options={}){const r=await fetch(API+path,{credentials:'include',cache:'no-store',headers:{'Content-Type':'application/json',...(options.headers||{})},...options});const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.error||`HTTP ${r.status}`);return data;}
   const workspace=$('#workspace');if(!workspace)return;
   const nav=workspace.querySelector('.flex.gap-2.border-b')||workspace.querySelector('.border-b');if(!nav)return;
-  [['districts','Kecamatan'],['keywords','Keyword OPD'],['users','Pengguna & RBAC']].forEach(([id,label])=>{const b=document.createElement('button');b.dataset.tab=id;b.className='tab px-4 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 font-bold text-sm';b.textContent=label;nav.appendChild(b)});
+  [['districts','Kecamatan'],['users','Pengguna & RBAC']].forEach(([id,label])=>{const b=document.createElement('button');b.dataset.tab=id;b.className='tab px-4 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 font-bold text-sm';b.textContent=label;nav.appendChild(b)});
 
   workspace.insertAdjacentHTML('beforeend',`
   <section id="districtsPanel" class="hidden space-y-4">
