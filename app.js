@@ -7,7 +7,7 @@ const RBAC_NAV={
  humas:{tabs:'*',media:'*'},
  executive:{tabs:['dashboard','highlights','mediamonitoring','issues','commgap','strategy','executiveguidance'],media:['printarchive','ownedchannels','online','socialmedia']},
  opd:{tabs:['dashboard','highlights','mediamonitoring','issues','commgap','strategy'],media:['printarchive','ownedchannels','online','socialmedia']},
- district:{tabs:['dashboard','highlights','issues','commgap','strategy'],media:[]},
+ district:{tabs:['dashboard','highlights','mediamonitoring','issues','commgap','strategy'],media:['ownedchannels']},
  viewer:{tabs:['dashboard','highlights'],media:[]}
 };
 function currentRoles(){return new Set(window.MEDIA_CURRENT_USER?.roles||[])}
