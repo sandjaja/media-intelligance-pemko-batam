@@ -73,7 +73,7 @@ async function collectSocial(pool:Pool,trigger:CollectionTrigger){
   const lastSuccessful=(await pool.query(`SELECT finished_at FROM collection_scheduler_runs WHERE status IN ('SUCCESS','PARTIAL') AND finished_at IS NOT NULL AND sources->'selected' ? 'social' ORDER BY finished_at DESC LIMIT 1`)).rows[0]?.finished_at;
   const overlapMs=6*60*60*1000;
   const watermarkAfter=lastSuccessful?new Date(lastSuccessful).getTime()-overlapMs:fallbackAfter;
-  const publishedAfter=new Date(Math.max(fallbackAfter,watermarkAfter)).toISOString();
+  const publishedAfter=new Date(scheduled?Math.max(fallbackAfter,watermarkAfter):fallbackAfter).toISOString();
   const allResults:any[]=[];const seenCandidates=new Set<string>();let searchedVideos=0,shortCandidates=0,videosWithComments=0,commentsCollected=0,received=0,savedOrUpdated=0,skipped=0,ingestionFailed=0,crossQueryDuplicates=0;
   for(const query of queries){
     try{
