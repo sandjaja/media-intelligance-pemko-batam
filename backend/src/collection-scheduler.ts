@@ -82,6 +82,8 @@ async function collectSocial(pool:Pool,trigger:CollectionTrigger){
       if(!collected.candidates.length)continue;
       const uniqueCandidates=collected.candidates.filter(candidate=>{const key=`${candidate.platform}:${candidate.externalId||candidate.canonicalUrl||''}`;if(seenCandidates.has(key)){crossQueryDuplicates++;return false}seenCandidates.add(key);return true});
       if(!uniqueCandidates.length)continue;
+      uniqueShorts+=uniqueCandidates.filter(candidate=>candidate.contentType==='short').length;
+      uniqueCommentsReplies+=uniqueCandidates.filter(candidate=>candidate.contentType==='comment'||candidate.contentType==='reply').length;
       const ingested=await ingestSocialBatch(pool,uniqueCandidates,'youtube-shorts'),results=ingested.results as any[];
       received+=ingested.received;savedOrUpdated+=results.filter(x=>x.ok===true&&x.skipped!==true).length;skipped+=results.filter(x=>x.skipped===true).length;ingestionFailed+=ingested.failed;allResults.push(...results);
     }catch(error){ingestionFailed++;allResults.push({ok:false,query,error:error instanceof Error?error.message:String(error)});}
