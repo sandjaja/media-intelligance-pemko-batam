@@ -50,9 +50,10 @@ test('YouTube runner accepts comments inheriting database-backed area context',a
  assert.deepEqual(inserted,['vid1','relevant','review']);
  const review=result.results.find((r:any)=>r.externalId==='review'||r.external_id==='review') as any;
  assert.equal(review?.ok,true,JSON.stringify(review));
- assert.equal(review?.skipped,true,JSON.stringify(review));
- assert.equal(review?.reason,'ORGANIZATION_SCOPE_REVIEW_REQUIRED');
-  assert.equal(result.succeeded,1);
+  assert.notEqual(review?.skipped,true,JSON.stringify(review));
+  assert.equal(review?.scopeDecision?.status,'RELEVANT');
+  assert.equal(review?.routing?.newsClassification,'PENDUKUNG');
+  assert.equal(result.succeeded,3);
 });
 
 test('YouTube runner returns empty summary when provider finds no candidates',async(t)=>{
