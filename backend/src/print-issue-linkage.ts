@@ -37,6 +37,7 @@ export async function evaluatePrintIssueLinkage(client:PoolClient,article:any,an
 export async function registerPrintIssueLinkageRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
  const auth=async(request:FastifyRequest,reply:any)=>{const token=request.cookies.access_token;if(!token)return reply.code(401).send({error:'UNAUTHENTICATED'});try{const decoded=jwt.verify(token,jwtSecret) as jwt.JwtPayload;if(typeof decoded.sub!=='string')throw new Error('invalid');const ctx=await loadAuthorizationContext(pool,decoded.sub);if(!ctx?.active)return reply.code(403).send({error:'ACCOUNT_INACTIVE'});request.printIssueAuth=ctx;}catch{return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'});}};const canManage=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
  app.get('/api/print/articles/:id/issue-linkage',{preHandler:auth},async(request,reply)=>{
+  const ctx=request.printIssueAuth!;if(!canManage(ctx))return reply.code(403).send({error:'ISSUE_LINKAGE_REQUIRES_HUMAS_OR_SUPER_ADMIN'});
   const id=z.coerce.number().int().positive().safeParse((request.params as any).id);
   if(!id.success)return reply.code(400).send({error:'INVALID_ID'});
   const client=await pool.connect();
