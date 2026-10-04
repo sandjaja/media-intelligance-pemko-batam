@@ -122,6 +122,56 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
   });
 
 
+
+  app.get('/api/command-center/daily-news', { preHandler: auth }, async (request, reply) => {
+    const parsed = z.object({
+      opdId: z.string().regex(/^\d+$/).optional(),
+      districtId: z.string().regex(/^\d+$/).optional(),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      perMedia: z.coerce.number().int().min(1).max(10).default(3),
+    }).safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ error: 'INVALID_QUERY' });
+
+    const user = request.scopeUser;
+    const canReadAll = Boolean(user && (user.legacyRole === 'admin' || user.roles.includes('super_admin') || user.roles.includes('humas') || hasPermission(user,'platform.admin') || hasPermission(user,'intelligence.read.all')));
+    const opdId = canReadAll ? (parsed.data.opdId ?? null) : (user?.opdId ?? null);
+    const districtId = parsed.data.districtId ?? null;
+    const params: unknown[] = [];
+    const bind = (value: unknown) => { params.push(value); return '$' + params.length; };
+    const op = opdId ? bind(opdId) : null;
+    const dist = districtId ? bind(districtId) : null;
+    const day = bind(parsed.data.date ?? new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()));
+    const perMedia = bind(parsed.data.perMedia);
+    const onlineScope = [op ? 'a.opd_id=' + op : '', dist ? 'a.district_id=' + dist : ''].filter(Boolean).join(' AND ');
+    const printScope = [op ? 'pa.opd_id=' + op : '', dist ? 'pa.district_id=' + dist : ''].filter(Boolean).join(' AND ');
+    const socialScope = [op ? 'sm.opd_id=' + op : '', dist ? 'sm.district_id=' + dist : ''].filter(Boolean).join(' AND ');
+
+    const onlineSql =
+      "SELECT 'online'::text source_type,a.id,a.title,a.summary::text summary,a.url::text url,a.published_at,a.sentiment,a.risk_score::float,a.risk_level::text,ms.name::text source_name " +
+      "FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE a.news_classification='UTAMA' AND a.sentiment IS NOT NULL AND COALESCE(a.risk_score,0)>0 " +
+      "AND (SELECT al.action FROM audit_logs al WHERE al.action IN ('ARTICLE_CLASSIFICATION_VERIFIED','ARTICLE_CLASSIFICATION_REOPENED') AND al.metadata->>'articleId'=a.id::text ORDER BY al.created_at DESC,al.id DESC LIMIT 1)='ARTICLE_CLASSIFICATION_VERIFIED' " +
+      "AND (a.published_at AT TIME ZONE 'Asia/Jakarta')::date=" + day + "::date" + (onlineScope ? ' AND ' + onlineScope : '');
+    const printSql =
+      "SELECT 'print'::text source_type,pa.id,pa.title,pa.summary::text summary,NULL::text url,pe.edition_date::timestamptz published_at,pa.sentiment,pa.risk_score::float," +
+      "COALESCE(NULLIF(pa.ai_metadata->'intelligence'->>'riskLevel',''),CASE WHEN pa.risk_score>=80 THEN 'critical' WHEN pa.risk_score>=60 THEN 'high' WHEN pa.risk_score>=35 THEN 'medium' ELSE 'low' END)::text risk_level,ms.name::text source_name " +
+      "FROM print_articles pa JOIN print_editions pe ON pe.id=pa.edition_id JOIN media_sources ms ON ms.id=pe.source_id WHERE lower(pa.status)='analyzed' AND pa.opd_id IS NOT NULL " +
+      "AND pa.ai_metadata->'v16Routing'->>'routingStatus'='ROUTED' AND COALESCE(pa.ai_metadata->'v16Routing'->>'keywordId','')<>'' AND pa.ai_metadata->'v16Routing'->>'keywordVerification'='ACCEPTED' " +
+      "AND pa.ai_metadata->'intelligence'->>'riskStatus'='FINAL' AND pa.sentiment IS NOT NULL AND COALESCE(pa.risk_score,0)>0 AND pe.edition_date=" + day + "::date" + (printScope ? ' AND ' + printScope : '');
+    const socialSql =
+      "SELECT CASE WHEN sm.source_kind='owned' THEN 'owned' ELSE 'social' END::text source_type,sm.id,COALESCE(sm.title,left(sm.content,240)) title,left(sm.content,1200) summary,sm.canonical_url::text url," +
+      "COALESCE(sm.published_at,sm.captured_at) published_at,sm.sentiment,sm.risk_score::float,sm.risk_level::text,COALESCE(osa.account_name,sm.author_name,sm.platform)::text source_name " +
+      "FROM social_mentions sm LEFT JOIN owned_social_accounts osa ON osa.id=sm.owned_account_id WHERE sm.sentiment IS NOT NULL AND COALESCE(sm.risk_score,0)>0 AND (" +
+      "(sm.source_kind='external' AND sm.metadata->'v16Routing'->>'newsClassification'='UTAMA' AND sm.metadata->'v16Routing'->>'routingStatus'='ROUTED' AND sm.opd_id IS NOT NULL AND (sm.metadata->'socialVerification'->>'status'='LOCKED' OR sm.metadata->'manualClassification'->>'locked'='true') AND sm.metadata->'intelligence'->>'riskStatus'='FINAL') OR " +
+      "(sm.source_kind='owned' AND sm.curation_status='approved' AND sm.metadata->'v16Routing'->>'verificationStatus'='LOCKED' AND sm.metadata->'v16Routing'->>'routingStatus'='ROUTED' AND sm.metadata->'intelligence'->>'riskStatus'='FINAL')) " +
+      "AND (COALESCE(sm.published_at,sm.captured_at) AT TIME ZONE 'Asia/Jakarta')::date=" + day + "::date" + (socialScope ? ' AND ' + socialScope : '');
+
+    const sql = "WITH daily AS (" + onlineSql + " UNION ALL " + printSql + " UNION ALL " + socialSql + "), ranked AS (SELECT *,row_number() OVER(PARTITION BY source_type ORDER BY published_at DESC NULLS LAST,id DESC) rn FROM daily) SELECT * FROM ranked WHERE rn<=" + perMedia + " ORDER BY CASE source_type WHEN 'online' THEN 1 WHEN 'print' THEN 2 WHEN 'social' THEN 3 ELSE 4 END,rn";
+    const { rows } = await pool.query(sql, params);
+    const groups: Record<string, any[]> = { online: [], print: [], social: [], owned: [] };
+    for (const row of rows) (groups[row.source_type] ||= []).push(row);
+    return { date: parsed.data.date ?? new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()), scope:{opdId,districtId}, perMedia:parsed.data.perMedia, groups };
+  });
+
   app.get('/api/command-center/workflow-pipeline', { preHandler: auth }, async (request, reply) => {
     const parsed=z.object({opdId:z.coerce.number().int().positive().optional(),districtId:z.coerce.number().int().positive().optional()}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
