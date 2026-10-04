@@ -39,8 +39,8 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
 
   const requireWrite = async (request: FastifyRequest, reply: any) => {
     const ctx = request.socialAuth!;
-    if (!hasPermission(ctx, 'intelligence.write') && !hasPermission(ctx, 'platform.admin')) {
-      return reply.code(403).send({ error: 'FORBIDDEN' });
+    if (!ctx.roles.some(role => role === 'super_admin' || role === 'humas')) {
+      return reply.code(403).send({ error: 'HUMAS_OR_SUPER_ADMIN_REQUIRED' });
     }
   };
 
