@@ -74,7 +74,7 @@ async function collectSocial(pool:Pool,trigger:CollectionTrigger){
   const overlapMs=6*60*60*1000;
   const watermarkAfter=lastSuccessful?new Date(lastSuccessful).getTime()-overlapMs:fallbackAfter;
   const publishedAfter=new Date(scheduled?Math.max(fallbackAfter,watermarkAfter):fallbackAfter).toISOString();
-  const allResults:any[]=[];const seenCandidates=new Set<string>();let searchedVideos=0,shortCandidates=0,videosWithComments=0,commentsCollected=0,received=0,savedOrUpdated=0,skipped=0,ingestionFailed=0,crossQueryDuplicates=0;
+  const allResults:any[]=[];const seenCandidates=new Set<string>();let searchedVideos=0,shortCandidates=0,videosWithComments=0,commentsCollected=0,uniqueShorts=0,uniqueCommentsReplies=0,received=0,savedOrUpdated=0,skipped=0,ingestionFailed=0,crossQueryDuplicates=0;
   for(const query of queries){
     try{
       const collected=await provider.collect(context,{query,maxResults,publishedAfter,includeComments:!scheduled});
@@ -92,7 +92,7 @@ async function collectSocial(pool:Pool,trigger:CollectionTrigger){
   const scopeReview=allResults.filter(x=>x.reason==='ORGANIZATION_SCOPE_REVIEW_REQUIRED').length;
   const outOfScope=allResults.filter(x=>x.reason==='ORGANIZATION_SCOPE_OUT_OF_SCOPE').length;
   const ingestionErrors=allResults.filter(x=>x.ok===false).slice(0,5).map(x=>({platform:x.platform??'youtube',externalId:x.externalId??null,query:x.query??null,error:String(x.error||'UNKNOWN_ERROR').slice(0,240)}));
-  return {providers:1,succeeded:ingestionFailed<queries.length?1:0,failed:ingestionFailed>=queries.length?1:0,diagnostics:{discovery:'ORGANIZATION_PLUS_ACTIVE_WATCH_ISSUES',organizationQueries,issueQueries,queries,maxResults,collectionWindowDays,publishedAfter,watermarkSource:lastSuccessful?'LAST_SUCCESSFUL_SOCIAL_RUN_WITH_6H_OVERLAP':'FALLBACK_WINDOW',commentsMode:scheduled?'SKIPPED_SCHEDULED':'FULL_MANUAL',crossQueryDuplicates,searchedVideos,shortCandidates,videosWithComments,commentsCollected,received,savedOrUpdated,skipped,ingestionFailed,manualLocked,outOfScope,scopeReview,clustering,ingestionErrors},results:[{provider:'youtube',queries,maxResults,results:allResults}]};
+  return {providers:1,succeeded:ingestionFailed<queries.length?1:0,failed:ingestionFailed>=queries.length?1:0,diagnostics:{discovery:'ORGANIZATION_PLUS_ACTIVE_WATCH_ISSUES',organizationQueries,issueQueries,queries,maxResults,collectionWindowDays,publishedAfter,watermarkSource:lastSuccessful?'LAST_SUCCESSFUL_SOCIAL_RUN_WITH_6H_OVERLAP':'FALLBACK_WINDOW',commentsMode:scheduled?'SKIPPED_SCHEDULED':'FULL_MANUAL',crossQueryDuplicates,searchedVideos,shortCandidates,videosWithComments,commentsCollected,uniqueShorts,uniqueCommentsReplies,received,savedOrUpdated,skipped,ingestionFailed,manualLocked,outOfScope,scopeReview,clustering,ingestionErrors},results:[{provider:'youtube',queries,maxResults,results:allResults}]};
 }
 
 function summarizeOnline(batch:{results:Record<string,unknown>[],clustering:any}){
