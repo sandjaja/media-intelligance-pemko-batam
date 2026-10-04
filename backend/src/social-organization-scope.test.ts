@@ -35,9 +35,9 @@ test('generic internal actor without organization or area context requires revie
  assert.equal(d.status,'REVIEW');
 });
 
-test('area-only conversation requires review instead of automatic relevance',()=>{
+test('database-backed area evidence is relevant like online media',()=>{
  const d=classifySocialOrganizationScope({content:'Jalan di Kota Contoh rusak parah'},scope);
- assert.equal(d.status,'REVIEW');
+ assert.equal(d.status,'RELEVANT');
 });
 
 test('discovery query is provenance and cannot make unrelated content relevant',()=>{
@@ -48,10 +48,10 @@ test('discovery query is provenance and cannot make unrelated content relevant',
  assert.equal(d.status,'OUT_OF_SCOPE');
 });
 
-test('external-looking parent with area name but no internal actor stays review',()=>{
+test('parent conversation inherits database-backed area evidence',()=>{
  const d=classifySocialOrganizationScope({
   content:'Pelayanannya lambat sekali',
   context:{parentContent:{content:'Badan Otorita Kota Contoh memperbarui layanan pelabuhan'}}
  },scope);
- assert.equal(d.status,'REVIEW');
+ assert.equal(d.status,'RELEVANT');
 });
