@@ -77,7 +77,7 @@ export async function registerDistrictRoutes(app: FastifyInstance, pool: Pool, j
          RETURNING id,organization_id,name,code,active,created_at`,
         [organizationId, parsed.data.name, parsed.data.code ? parsed.data.code.toUpperCase() : null, parsed.data.active],
       );
-      if(parsed.data.websiteUrl){await pool.query(`INSERT INTO owned_social_accounts(opd_id,district_id,platform,account_name,handle,profile_url,account_type,active,ownership_level,is_primary_source,source_priority) VALUES(NULL,$1,'website',$2,$3,$4,'official',$5,'district',true,10)`,[rows[0].id,rows[0].name,rows[0].code||rows[0].name,parsed.data.websiteUrl,rows[0].active]);}
+      if(parsed.data.websiteUrl){await pool.query(`INSERT INTO owned_social_accounts(opd_id,district_id,platform,account_name,handle,profile_url,account_type,active,ownership_level,is_primary_source,source_priority) VALUES(NULL,$1,'website',$2,$3,$4,'primary',$5,'district',true,10)`,[rows[0].id,rows[0].name,rows[0].code||rows[0].name,parsed.data.websiteUrl,rows[0].active]);}
       await pool.query(
         `INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'DISTRICT_CREATED',$2)`,
         [request.districtAuthz!.id, { organizationId, districtId: rows[0].id, name: rows[0].name, code: rows[0].code }],
@@ -111,7 +111,7 @@ export async function registerDistrictRoutes(app: FastifyInstance, pool: Pool, j
           RETURNING id,organization_id,name,code,active,created_at`,
         [next.name, next.code, next.active, id.data.id, organizationId],
       );
-      if(parsed.data.websiteUrl!==undefined){const existing=(await pool.query(`SELECT id FROM owned_social_accounts WHERE district_id=$1 AND platform='website' AND ownership_level='district' AND is_primary_source=true ORDER BY active DESC,id ASC LIMIT 1`,[id.data.id])).rows[0];if(existing){await pool.query(`UPDATE owned_social_accounts SET account_name=$1,handle=$2,profile_url=$3,active=$4,updated_at=NOW() WHERE id=$5`,[rows[0].name,rows[0].code||rows[0].name,parsed.data.websiteUrl||null,rows[0].active,existing.id]);}else if(parsed.data.websiteUrl){await pool.query(`INSERT INTO owned_social_accounts(opd_id,district_id,platform,account_name,handle,profile_url,account_type,active,ownership_level,is_primary_source,source_priority) VALUES(NULL,$1,'website',$2,$3,$4,'official',$5,'district',false,10)`,[id.data.id,rows[0].name,rows[0].code||rows[0].name,parsed.data.websiteUrl,rows[0].active]);}}
+      if(parsed.data.websiteUrl!==undefined){const existing=(await pool.query(`SELECT id FROM owned_social_accounts WHERE district_id=$1 AND platform='website' AND ownership_level='district' AND is_primary_source=true ORDER BY active DESC,id ASC LIMIT 1`,[id.data.id])).rows[0];if(existing){await pool.query(`UPDATE owned_social_accounts SET account_name=$1,handle=$2,profile_url=$3,active=$4,updated_at=NOW() WHERE id=$5`,[rows[0].name,rows[0].code||rows[0].name,parsed.data.websiteUrl||null,rows[0].active,existing.id]);}else if(parsed.data.websiteUrl){await pool.query(`INSERT INTO owned_social_accounts(opd_id,district_id,platform,account_name,handle,profile_url,account_type,active,ownership_level,is_primary_source,source_priority) VALUES(NULL,$1,'website',$2,$3,$4,'primary',$5,'district',true,10)`,[id.data.id,rows[0].name,rows[0].code||rows[0].name,parsed.data.websiteUrl,rows[0].active]);}}
       await pool.query(
         `INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'DISTRICT_UPDATED',$2)`,
         [request.districtAuthz!.id, { organizationId, districtId: id.data.id, changes: next }],
