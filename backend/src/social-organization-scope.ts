@@ -32,7 +32,7 @@ export function classifySocialOrganizationScope(input:SocialOrganizationScopeInp
 
  if(currentOrg.length)return{status:'RELEVANT',reason:'social content explicitly identifies the active organization',matchedTerms:currentOrg};
  if(currentActors.length&&contextEvidence.length)return{status:'RELEVANT',reason:'social content names an internal actor and the conversation context confirms organization/area scope',matchedTerms:[...new Set([...currentActors,...contextEvidence])]};
- if(currentArea.length||contextArea.length)return{status:'REVIEW',reason:'social conversation has database-backed local geographic evidence but no explicit active-organization/internal-actor evidence',matchedTerms:[...new Set([...currentArea,...contextArea])]};
+ if(currentArea.length||contextArea.length)return{status:'RELEVANT',reason:'social conversation contains database-backed Batam city/district/village/area evidence',matchedTerms:[...new Set([...currentArea,...contextArea])]};
  // Generic government/OPD terms are ambiguous location evidence, not proof that the
  // conversation belongs to another city. Keep them in REVIEW until Batam scope is confirmed.
  if(currentActors.length||currentSupportingOrg.length)return{status:'REVIEW',reason:'social content contains a known government/internal-actor term but lacks database-backed Batam organization or area evidence',matchedTerms:[...new Set([...currentActors,...currentSupportingOrg])]};
