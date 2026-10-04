@@ -10,7 +10,7 @@ const RBAC_NAV={
  district:{tabs:['dashboard','highlights','mediamonitoring','issues','commgap','strategy'],media:['ownedchannels']},
  viewer:{tabs:['dashboard','highlights'],media:[]}
 };
-function currentRoles(){return new Set(window.MEDIA_CURRENT_USER?.roles||[])}
+function currentRoles(){const u=window.MEDIA_CURRENT_USER||{},raw=[...(Array.isArray(u.roles)?u.roles:[]),u.role,u.normalizedRole].filter(Boolean);return new Set(raw.map(x=>String(x).trim().toLowerCase()))}
 function navPolicy(){const roles=currentRoles();for(const role of ['super_admin','humas','executive','opd','district','viewer'])if(roles.has(role))return RBAC_NAV[role];return {tabs:['dashboard'],media:[]}}
 function allowed(list,id){return list==='*'||list.includes(id)}
 function canOpenTab(id){const p=navPolicy();return allowed(p.tabs,id)||(['printarchive','ownedchannels','online','socialmedia'].includes(id)&&allowed(p.tabs,'mediamonitoring')&&allowed(p.media,id))}
