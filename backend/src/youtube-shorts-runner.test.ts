@@ -27,7 +27,7 @@ function dbFixture(){
  return{pool,inserted};
 }
 
-test('YouTube runner stops review contextual comments before classification',async(t)=>{
+test('YouTube runner accepts comments inheriting database-backed area context',async(t)=>{
  const original=globalThis.fetch;
  globalThis.fetch=async(input:any)=>{
   const url=new URL(String(input));
@@ -43,7 +43,7 @@ test('YouTube runner stops review contextual comments before classification',asy
  const {pool,inserted}=dbFixture();
  const result=await runYouTubeShortsCollection(pool,{apiKey:'fixture-key',query:'parkir Kota Contoh'});
  assert.equal(result.received,3);
- assert.equal(result.skipped,2);
+ assert.equal(result.skipped,0);
  const relevant=result.results.find((r:any)=>r.externalId==='relevant'||r.external_id==='relevant') as any;
  assert.ok(relevant,JSON.stringify(result.results));
  assert.equal(relevant.ok,true,JSON.stringify(relevant));
