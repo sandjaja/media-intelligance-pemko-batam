@@ -407,7 +407,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     return { data: rows[0] };
   });
 
-  app.get('/api/social/mentions/:id/issue-linkage', { preHandler: [auth] }, async (request, reply) => {
+  app.get('/api/social/mentions/:id/issue-linkage', { preHandler: manager }, async (request, reply) => {
     const id=z.coerce.number().int().positive().safeParse((request.params as any).id);if(!id.success)return reply.code(400).send({error:'INVALID_ID'});
     const mention=(await pool.query(`SELECT sm.id,sm.opd_id,sm.title,sm.content,sm.metadata,o.organization_id FROM social_mentions sm LEFT JOIN opd o ON o.id=sm.opd_id WHERE sm.id=$1 AND sm.source_kind='external'`,[id.data])).rows[0];if(!mention)return reply.code(404).send({error:'NOT_FOUND'});
     let organizationId=Number(mention.organization_id||0);if(!organizationId){const only=await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 2`);if(only.rowCount===1)organizationId=Number(only.rows[0].id);}if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
@@ -493,7 +493,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     return{data:rows};
   });
 
-  app.get('/api/social/conversation-clusters/:id/issue-linkage',{preHandler:auth},async(request,reply)=>{
+  app.get('/api/social/conversation-clusters/:id/issue-linkage',{preHandler:manager},async(request,reply)=>{
     const id=z.coerce.number().int().positive().safeParse((request.params as any).id);
     if(!id.success)return reply.code(400).send({error:'INVALID_ID'});
     const organizationId=await resolveOrganizationId(request.socialAuth!);
