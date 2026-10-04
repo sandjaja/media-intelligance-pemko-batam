@@ -33,6 +33,7 @@ export async function registerOnlineStoryClusterRoutes(app:FastifyInstance,pool:
   });
 
   app.get('/api/online/articles/:articleId/issue-linkage',{preHandler:auth},async(request,reply)=>{
+    const ctx=request.onlineStoryAuth!;if(!canRebuild(ctx))return reply.code(403).send({error:'ISSUE_LINKAGE_REQUIRES_HUMAS_OR_SUPER_ADMIN'});
     const id=z.coerce.number().int().positive().safeParse((request.params as any).articleId);if(!id.success)return reply.code(400).send({error:'INVALID_ARTICLE_ID'});
     const article=(await pool.query(`SELECT a.id,a.title,a.summary,a.news_classification,a.opd_id,(SELECT al.action FROM audit_logs al WHERE al.action IN ('ARTICLE_CLASSIFICATION_VERIFIED','ARTICLE_CLASSIFICATION_REOPENED') AND al.metadata->>'articleId'=a.id::text ORDER BY al.created_at DESC,al.id DESC LIMIT 1) verification_action FROM articles a WHERE a.id=$1`,[id.data])).rows[0];if(!article)return reply.code(404).send({error:'ARTICLE_NOT_FOUND'});
     const links=(await pool.query(`SELECT ia.issue_id,i.title,i.status,ia.relevance_score FROM issue_articles ia JOIN issues i ON i.id=ia.issue_id WHERE ia.article_id=$1 ORDER BY ia.relevance_score DESC NULLS LAST,i.updated_at DESC`,[id.data])).rows;
@@ -53,6 +54,7 @@ export async function registerOnlineStoryClusterRoutes(app:FastifyInstance,pool:
   });
 
   app.get('/api/online/story-clusters/:clusterId/issue-linkage',{preHandler:auth},async(request,reply)=>{
+    const ctx=request.onlineStoryAuth!;if(!canRebuild(ctx))return reply.code(403).send({error:'ISSUE_LINKAGE_REQUIRES_HUMAS_OR_SUPER_ADMIN'});
     const id=z.coerce.number().int().positive().safeParse((request.params as any).clusterId);if(!id.success)return reply.code(400).send({error:'INVALID_CLUSTER_ID'});
     const cluster=(await pool.query(`SELECT id,canonical_title,member_count FROM online_story_clusters WHERE id=$1`,[id.data])).rows[0];if(!cluster)return reply.code(404).send({error:'CLUSTER_NOT_FOUND'});
     const members=(await pool.query(`SELECT a.id,a.title,a.news_classification,a.opd_id,(SELECT al.action FROM audit_logs al WHERE al.action IN ('ARTICLE_CLASSIFICATION_VERIFIED','ARTICLE_CLASSIFICATION_REOPENED') AND al.metadata->>'articleId'=a.id::text ORDER BY al.created_at DESC,al.id DESC LIMIT 1) verification_action FROM online_story_cluster_members m JOIN articles a ON a.id=m.article_id WHERE m.cluster_id=$1 ORDER BY a.published_at DESC NULLS LAST`,[id.data])).rows;
