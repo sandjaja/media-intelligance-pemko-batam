@@ -102,9 +102,9 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
     const accountId=z.coerce.number().int().positive().safeParse((request.params as any).accountId);
     if(!accountId.success)return reply.code(400).send({error:'INVALID_ACCOUNT_ID'});
     const ctx=request.socialIngestAuth!;
-    const account=(await pool.query(`SELECT id,opd_id,account_name,handle,profile_url FROM owned_social_accounts WHERE id=$1 AND platform='website' AND active=true LIMIT 1`,[accountId.data])).rows[0];
+    const account=(await pool.query(`SELECT id,opd_id,district_id,account_name,handle,profile_url FROM owned_social_accounts WHERE id=$1 AND platform='website' AND active=true LIMIT 1`,[accountId.data])).rows[0];
     if(!account)return reply.code(404).send({error:'WEBSITE_ACCOUNT_NOT_FOUND'});
-    if(!canReadAll(ctx)&&!ctx.roles.includes('humas')&&String(account.opd_id??'')!==String(ctx.opdId??''))return reply.code(403).send({error:'FORBIDDEN'});
+    if(!canReadAll(ctx)&&!ctx.roles.includes('humas')){const allowed=ctx.roles.includes('district')?String(account.district_id??'')===String(ctx.districtId??''):String(account.opd_id??'')===String(ctx.opdId??'');if(!allowed)return reply.code(403).send({error:'FORBIDDEN'});}
     try{
       const stats=(await pool.query(`SELECT
         COUNT(*) FILTER(WHERE COALESCE(published_at,captured_at)>=now()-interval '7 days')::int articles_7d,
