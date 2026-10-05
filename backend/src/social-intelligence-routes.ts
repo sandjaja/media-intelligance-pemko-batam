@@ -46,7 +46,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
 
   const requireRead = async (request: FastifyRequest, reply: any) => {
     const ctx = request.socialAuth!;
-    if (!(ctx.legacyRole === 'admin' || ctx.roles.some(role => role === 'super_admin' || role === 'humas' || role === 'executive' || role === 'opd'))) {
+    if (!(ctx.legacyRole === 'admin' || ctx.roles.some(role => role === 'super_admin' || role === 'humas' || role === 'executive' || role === 'opd' || role === 'district'))) {
       return reply.code(403).send({ error: 'SOCIAL_MEDIA_READ_FORBIDDEN' });
     }
   };
@@ -314,9 +314,23 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     if(parsed.data.sourceKind==='external'&&parsed.data.classification!=='SCOPE_REVIEW')where.push(`COALESCE(sm.metadata->'organizationScope'->>'status','RELEVANT')='RELEVANT'`);
     if(parsed.data.sourceKind==='external'&&parsed.data.classification==='SCOPE_REVIEW')where.push(`sm.metadata->'organizationScope'->>'status'='REVIEW'`);
     const bind = (value: unknown) => { params.push(value); return '$' + params.length; };
-    const opdId = scopedOpd(request.socialAuth!, parsed.data.opdId);
+    const ctx=request.socialAuth!;
+    const globalReader=ctx.legacyRole==='admin'||ctx.roles.some(role=>role==='super_admin'||role==='humas'||role==='executive');
+    const opdId = scopedOpd(ctx, parsed.data.opdId);
 
-    if (opdId) where.push(`sm.opd_id=${bind(opdId)}`);
+    if (globalReader) {
+      if (opdId) where.push(`sm.opd_id=${bind(opdId)}`);
+    } else {
+      where.push(`COALESCE(sm.metadata->'socialVerification'->>'status','')='LOCKED'`);
+      where.push(`COALESCE(sm.metadata->'v16Routing'->>'newsClassification','')='UTAMA'`);
+      where.push(`COALESCE(sm.metadata->'v16Routing'->>'routingStatus','')='ROUTED'`);
+      if (ctx.roles.includes('opd') && ctx.opdId) {
+        const scopeOpd=bind(ctx.opdId);
+        where.push(`(sm.opd_id=${scopeOpd} OR sm.metadata->'v16Routing'->>'primaryOpdId'=${scopeOpd})`);
+      } else if (ctx.roles.includes('district') && ctx.districtId) {
+        where.push(`sm.district_id=${bind(ctx.districtId)}`);
+      } else where.push('1=0');
+    }
     if (parsed.data.platform) where.push(`sm.platform=${bind(parsed.data.platform)}`);
     if (parsed.data.sentiment) where.push(`sm.sentiment=${bind(parsed.data.sentiment)}`);
     if (parsed.data.riskLevel) where.push(`sm.risk_level=${bind(parsed.data.riskLevel)}`);
@@ -576,9 +590,19 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   app.get('/api/social/summary', { preHandler: [auth, requireRead] }, async (request, reply) => {
     const parsed=z.object({opdId:z.string().regex(/^\d+$/).optional(),platform:platformSchema.optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional(),from:z.string().optional(),to:z.string().optional(),days:z.coerce.number().int().refine(v=>[1,7,14,30].includes(v)).default(7)}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
-    const params:unknown[]=[],where:string[]=[`source_kind='external'`,`COALESCE(metadata->'organizationScope'->>'status','RELEVANT')='RELEVANT'`];const opdId=scopedOpd(request.socialAuth!,parsed.data.opdId);
+    const params:unknown[]=[],where:string[]=[`source_kind='external'`,`COALESCE(metadata->'organizationScope'->>'status','RELEVANT')='RELEVANT'`];
+    const ctx=request.socialAuth!,globalReader=ctx.legacyRole==='admin'||ctx.roles.some(role=>role==='super_admin'||role==='humas'||role==='executive'),opdId=scopedOpd(ctx,parsed.data.opdId);
     const bind=(value:unknown)=>{params.push(value);return '$'+params.length;};
-    if(opdId)where.push(`opd_id=${bind(opdId)}`);
+    if(globalReader){
+      if(opdId)where.push(`opd_id=${bind(opdId)}`);
+    }else{
+      where.push(`COALESCE(metadata->'socialVerification'->>'status','')='LOCKED'`);
+      where.push(`COALESCE(metadata->'v16Routing'->>'newsClassification','')='UTAMA'`);
+      where.push(`COALESCE(metadata->'v16Routing'->>'routingStatus','')='ROUTED'`);
+      if(ctx.roles.includes('opd')&&ctx.opdId){const scopeOpd=bind(ctx.opdId);where.push(`(opd_id=${scopeOpd} OR metadata->'v16Routing'->>'primaryOpdId'=${scopeOpd})`);}
+      else if(ctx.roles.includes('district')&&ctx.districtId)where.push(`district_id=${bind(ctx.districtId)}`);
+      else where.push('1=0');
+    }
     if(parsed.data.platform)where.push(`platform=${bind(parsed.data.platform)}`);
     if(parsed.data.sentiment)where.push(`sentiment=${bind(parsed.data.sentiment)}`);
     if(parsed.data.riskLevel)where.push(`risk_level=${bind(parsed.data.riskLevel)}`);
