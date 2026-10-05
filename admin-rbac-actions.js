@@ -30,6 +30,9 @@
       const del=document.createElement('button');del.type='button';del.dataset.userDelete=edit.dataset.userEdit;del.className='px-2 py-1 rounded bg-rose-500/10 text-rose-300 ml-1';del.textContent='Hapus';edit.insertAdjacentElement('afterend',del);
     });
   }
+  function resetQueueCard(){let card=$('#passwordResetQueue');if(card)return card;const panel=$('#usersPanel');if(!panel)return null;card=document.createElement('section');card.id='passwordResetQueue';card.className='mt-5 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4';card.innerHTML='<div class="flex items-center justify-between gap-3 mb-3"><div><h3 class="font-black text-sm text-amber-200">Permintaan Reset Password <span id="passwordResetCount" class="ml-1 px-2 py-0.5 rounded-full bg-amber-400/15 text-amber-300">0</span></h3><p class="text-xs text-slate-400 mt-1">Permintaan dari halaman login. Password baru diberikan langsung oleh Administrator kepada pemilik akun.</p></div><button type="button" id="passwordResetReload" class="px-3 py-2 rounded-lg bg-slate-800 text-xs font-bold">Refresh</button></div><div id="passwordResetRows" class="space-y-2"><div class="text-xs text-slate-500">Memuat permintaan...</div></div>';panel.prepend(card);card.querySelector('#passwordResetReload').onclick=loadResetQueue;return card;}
+  async function loadResetQueue(){const card=resetQueueCard();if(!card)return;const rows=card.querySelector('#passwordResetRows'),count=card.querySelector('#passwordResetCount');try{const data=await request('/admin/password-reset-requests');const pending=(data.data||[]).filter(x=>x.status==='PENDING');count.textContent=String(pending.length);rows.innerHTML=pending.length?pending.map(x=>`<div class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-700 bg-slate-900/60 p-3"><div><div class="text-sm font-bold text-slate-100">${String(x.email||'')}</div><div class="text-[11px] text-slate-400">Diminta ${new Date(x.requested_at).toLocaleString('id-ID')}</div></div><button type="button" data-password-reset="${Number(x.id)}" data-reset-email="${String(x.email||'').replace(/"/g,'&quot;')}" class="px-3 py-2 rounded-lg bg-amber-400/15 text-amber-200 text-xs font-black">Reset Password</button></div>`).join(''):'<div class="text-xs text-slate-500 py-2">Tidak ada permintaan reset password yang menunggu.</div>';}catch(err){rows.innerHTML=`<div class="text-xs text-rose-300">Gagal memuat permintaan: ${err.message}</div>`;}}
+  async function handlePasswordReset(button){const id=button.dataset.passwordReset,email=button.dataset.resetEmail||'akun';const password=prompt(`Masukkan password sementara baru untuk ${email}:\nMinimal 8 karakter.`);if(!password)return;if(password.length<8){toast('Password minimal 8 karakter.',false);return}const confirmPassword=prompt('Ulangi password sementara baru:');if(confirmPassword!==password){toast('Konfirmasi password tidak sama.',false);return}const old=button.textContent;button.disabled=true;button.textContent='Mereset...';try{await request(`/admin/password-reset-requests/${id}/reset`,{method:'POST',body:JSON.stringify({password})});toast(`Password ${email} berhasil direset. Sampaikan password sementara kepada pemilik akun melalui kanal internal yang aman.`);await loadResetQueue();}catch(err){toast(err.code==='RESET_REQUEST_NOT_PENDING'?'Permintaan ini sudah ditangani.':err.message||'Reset password gagal.',false);button.disabled=false;button.textContent=old;}}
   async function deleteUser(id){
     try{return await request(`/admin/rbac/users/${id}`,{method:'DELETE',body:'{}'})}
     catch(err){
@@ -69,6 +72,7 @@
     saveUserFromForm(e.target);
   },true);
   document.addEventListener('click',async e=>{
+    const reset=e.target.closest('button[data-password-reset]');if(reset){e.preventDefault();e.stopPropagation();await handlePasswordReset(reset);return}
     const b=e.target.closest('button[data-user-delete]');if(!b)return;
     e.preventDefault();e.stopPropagation();
     const row=b.closest('tr'),email=row?.querySelector('td')?.textContent?.trim()||'akun ini';
@@ -85,6 +89,6 @@
       toast(messages[err.code]||err.message||'Akun gagal dihapus.',false);b.disabled=false;b.textContent=original;
     }
   },true);
-  const start=()=>{patchCopy();patchOpdScope();patchDeleteButtons();const rows=$('#userRows');if(rows)new MutationObserver(patchDeleteButtons).observe(rows,{childList:true,subtree:true});};
+  const start=()=>{patchCopy();patchOpdScope();patchDeleteButtons();resetQueueCard();loadResetQueue();const rows=$('#userRows');if(rows)new MutationObserver(patchDeleteButtons).observe(rows,{childList:true,subtree:true});};
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(start,300));else setTimeout(start,300);
 })();
