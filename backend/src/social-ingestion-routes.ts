@@ -66,7 +66,7 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
 
   app.get('/api/social/website/opd-comparison',{preHandler:auth},async(request,reply)=>{
     const ctx=request.socialIngestAuth!;
-    const canCompare=canReadAll(ctx)||ctx.roles.includes('humas');
+    const canCompare=canReadAll(ctx)||ctx.roles.includes('humas')||ctx.roles.includes('executive');
     if(!canCompare)return reply.code(403).send({error:'FORBIDDEN'});
     const parsed=z.object({days:z.coerce.number().int().refine(v=>v===1||v===7||v===14||v===30).default(7)}).safeParse(request.query||{});
     if(!parsed.success)return reply.code(400).send({error:'INVALID_PERIOD'});
