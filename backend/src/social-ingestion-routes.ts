@@ -165,6 +165,8 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
   app.post('/api/social/ingestion/websites/refresh',{preHandler:[auth,requireWrite]},async(request,reply)=>{
     const ctx=request.socialIngestAuth!;
     const startedAt=Date.now();
+    const force=(request.query as any)?.force==='true';
+    if(!force){const recent=(await pool.query(`SELECT created_at FROM audit_logs WHERE action='OWNED_WEBSITES_REFRESH' AND created_at>=now()-interval '24 hours' ORDER BY created_at DESC LIMIT 1`)).rows[0];if(recent)return reply.send({data:{skipped:true,reason:'FRESH_WITHIN_24H',lastRefresh:recent.created_at,durationMs:Date.now()-startedAt}})}
     const params:unknown[]=[];
     let scope='';
     if(!canReadAll(ctx)){
