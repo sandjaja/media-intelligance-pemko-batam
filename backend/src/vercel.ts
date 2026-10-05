@@ -22,6 +22,15 @@ async function ensureBackend() {
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   try {
+    if ((req.url || '').startsWith('/api/ui-diagnostic') && req.method === 'POST') {
+      let body = '';
+      for await (const chunk of req) body += String(chunk);
+      console.error('UI_DIAGNOSTIC', body.slice(0, 4000));
+      res.statusCode = 204;
+      res.setHeader('cache-control', 'no-store');
+      res.end();
+      return;
+    }
     if ((req.url || '').startsWith('/health/database')) {
       res.statusCode = 404;
       res.setHeader('content-type', 'application/json; charset=utf-8');
