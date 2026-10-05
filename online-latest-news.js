@@ -2,6 +2,7 @@
   const root=()=>document.getElementById('online');
   const apiBase=()=>window.MEDIA_INTELLIGENCE_API||'/api';
   let running=false,reanalyzing=false,clustering=false;
+  const canManage=()=>{const r=new Set(window.MEDIA_CURRENT_USER?.roles||[]);return r.has('super_admin')||r.has('humas')||String(window.MEDIA_CURRENT_USER?.legacyRole||'').toLowerCase()==='admin'};
 
   async function api(path,opt={}){
     const headers={'content-type':'application/json',...(opt.headers||{})};
@@ -21,7 +22,7 @@
   }
 
   function ensureButton(){
-    const host=buttonHost();if(!host)return;
+    const host=buttonHost();if(!host)return;if(!canManage()){['onlineFetchLatest','onlineReanalyze7d','onlineRebuildClusters'].forEach(id=>document.getElementById(id)?.remove());return;}
     host.classList.add('flex','flex-wrap','gap-2');
     if(!document.getElementById('onlineFetchLatest')){
       const btn=document.createElement('button');btn.id='onlineFetchLatest';
