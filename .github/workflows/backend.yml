@@ -24,9 +24,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Check Phase 3 frontend syntax
+      - name: Check critical frontend syntax
         working-directory: .
-        run: node --check phase3-outcome-ui.js
+        run: |
+          node --check phase3-outcome-ui.js
+          node --check issue-management-v2.js
       - run: npm install
       - run: npm run check
       - run: npm test
