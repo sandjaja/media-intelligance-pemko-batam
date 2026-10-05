@@ -321,7 +321,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     if (globalReader) {
       if (opdId) where.push(`sm.opd_id=${bind(opdId)}`);
     } else {
-      where.push(`COALESCE(sm.metadata->'socialVerification'->>'status','')='LOCKED'`);
+      where.push(`(COALESCE(sm.metadata->'socialVerification'->>'status','')='LOCKED' OR COALESCE(sm.metadata->'manualClassification'->>'locked','false')='true')`);
       where.push(`COALESCE(sm.metadata->'v16Routing'->>'newsClassification','')='UTAMA'`);
       where.push(`COALESCE(sm.metadata->'v16Routing'->>'routingStatus','')='ROUTED'`);
       if (ctx.roles.includes('opd') && ctx.opdId) {
@@ -596,7 +596,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     if(globalReader){
       if(opdId)where.push(`opd_id=${bind(opdId)}`);
     }else{
-      where.push(`COALESCE(metadata->'socialVerification'->>'status','')='LOCKED'`);
+      where.push(`(COALESCE(metadata->'socialVerification'->>'status','')='LOCKED' OR COALESCE(metadata->'manualClassification'->>'locked','false')='true')`);
       where.push(`COALESCE(metadata->'v16Routing'->>'newsClassification','')='UTAMA'`);
       where.push(`COALESCE(metadata->'v16Routing'->>'routingStatus','')='ROUTED'`);
       if(ctx.roles.includes('opd')&&ctx.opdId){const scopeOpd=bind(ctx.opdId);where.push(`(opd_id=${scopeOpd} OR metadata->'v16Routing'->>'primaryOpdId'=${scopeOpd})`);}
