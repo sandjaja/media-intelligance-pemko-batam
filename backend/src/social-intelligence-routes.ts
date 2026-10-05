@@ -321,9 +321,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     if (globalReader) {
       if (opdId) where.push(`sm.opd_id=${bind(opdId)}`);
     } else {
-      where.push(`(COALESCE(sm.metadata->'socialVerification'->>'status','')='LOCKED' OR COALESCE(sm.metadata->'manualClassification'->>'locked','false')='true')`);
-      where.push(`COALESCE(sm.metadata->'v16Routing'->>'newsClassification','')='UTAMA'`);
-      where.push(`COALESCE(sm.metadata->'v16Routing'->>'routingStatus','')='ROUTED'`);
+      where.push(`((COALESCE(sm.metadata->'socialVerification'->>'status','')='LOCKED' AND COALESCE(sm.metadata->'v16Routing'->>'newsClassification','')='UTAMA' AND COALESCE(sm.metadata->'v16Routing'->>'routingStatus','')='ROUTED') OR COALESCE(sm.metadata->'manualClassification'->>'locked','false')='true')`);
       if (ctx.roles.includes('opd') && ctx.opdId) {
         const scopeOpd=bind(ctx.opdId);
         where.push(`(sm.opd_id=${scopeOpd} OR sm.metadata->'v16Routing'->>'primaryOpdId'=(${scopeOpd})::text)`);
@@ -596,9 +594,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     if(globalReader){
       if(opdId)where.push(`opd_id=${bind(opdId)}`);
     }else{
-      where.push(`(COALESCE(metadata->'socialVerification'->>'status','')='LOCKED' OR COALESCE(metadata->'manualClassification'->>'locked','false')='true')`);
-      where.push(`COALESCE(metadata->'v16Routing'->>'newsClassification','')='UTAMA'`);
-      where.push(`COALESCE(metadata->'v16Routing'->>'routingStatus','')='ROUTED'`);
+      where.push(`((COALESCE(metadata->'socialVerification'->>'status','')='LOCKED' AND COALESCE(metadata->'v16Routing'->>'newsClassification','')='UTAMA' AND COALESCE(metadata->'v16Routing'->>'routingStatus','')='ROUTED') OR COALESCE(metadata->'manualClassification'->>'locked','false')='true')`);
       if(ctx.roles.includes('opd')&&ctx.opdId){const scopeOpd=bind(ctx.opdId);where.push(`(opd_id=${scopeOpd} OR metadata->'v16Routing'->>'primaryOpdId'=(${scopeOpd})::text)`);}
       else if(ctx.roles.includes('district')&&ctx.districtId)where.push(`district_id=${bind(ctx.districtId)}`);
       else where.push('1=0');
