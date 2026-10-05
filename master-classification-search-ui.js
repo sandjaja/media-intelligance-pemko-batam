@@ -11,4 +11,5 @@ const original=window.openTaxonomyManagement;if(typeof original==='function')win
 window.addEventListener('master-classification-refreshed',reinstallAfterRefresh);
 const root=document.getElementById('sources');if(root&&!root.dataset.masterSearchRefreshBound){root.dataset.masterSearchRefreshBound='1';root.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;if(b.matches('[data-route-save],[data-keyword-save],[data-sector-save],[data-tax-save],[data-master-save-sector],[data-master-save-taxonomy],[data-master-save-keyword],[data-keyword-toggle],[data-sector-toggle],[data-tax-toggle]')){capture();reinstallAfterRefresh()}},true)}
 install();
+const masterRoot=document.getElementById('sources');if(masterRoot&&!masterRoot.dataset.masterSearchObserver){masterRoot.dataset.masterSearchObserver='1';let scheduled=false;new MutationObserver(()=>{if(scheduled)return;scheduled=true;queueMicrotask(()=>{scheduled=false;if(!masterRoot.querySelector('[data-master-search]'))install()})}).observe(masterRoot,{childList:true,subtree:true})}
 })();
