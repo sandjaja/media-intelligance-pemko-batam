@@ -1,7 +1,7 @@
 (()=>{'use strict';
 const API=(window.MEDIA_INTELLIGENCE_API||'/api').replace(/\/$/,'');
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const api=async(path,opt={})=>{const r=await fetch(API+path,{credentials:'include',cache:'no-store',headers:{'Content-Type':'application/json',...(opt.headers||{})},...opt});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||('HTTP '+r.status));return j};
+const api=async(path,opt={})=>{const r=await fetch(API+path,{credentials:'include',cache:'no-store',headers:{'Content-Type':'application/json',...(opt.headers||{})},...opt});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.detail?(String(j.error||('HTTP '+r.status))+': '+String(j.detail)):String(j.error||('HTTP '+r.status)));return j};
 const badge=s=>s==='ACTIVE'?'bg-emerald-500/10 text-emerald-300':s==='READY'?'bg-amber-500/10 text-amber-300':'bg-slate-800 text-slate-400';
 function mount(){
  const ws=document.getElementById('workspace');if(!ws||document.getElementById('notificationsPanel'))return;
