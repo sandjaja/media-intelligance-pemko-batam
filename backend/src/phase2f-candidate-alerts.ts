@@ -9,7 +9,8 @@ declare module 'fastify' { interface FastifyRequest { phase2fCandidateAuth?: Aut
 
 type Severity='WATCH'|'ELEVATED'|'HIGH'|'CRITICAL';
 type Candidate={
- engine:string;candidateKey:string;issueId:number;issueTitle:string;
+ engine:string;candidateKey:string;issueId:number;issueTitle:string;issueStatus:string;
+ openCycle:boolean;workflowId:number|null;workflowStatus:string|null;cycleNumber:number|null;
  riskScore:number;riskLevel:string;severity:Severity;candidateAlert:boolean;
  validEvidence:number;negativeCount:number;negativePercent:number;
  velocityScore:number;recent24:number;previous24:number;
@@ -57,7 +58,9 @@ function evaluate(row:any):Candidate{
  if(!candidateAlert)reasons.push('Belum memenuhi kombinasi kondisi Unified Early Warning.');
  return{
   engine:ENGINE,candidateKey:`issue:${Number(row.issue_id)}:metric:${Number(row.metric_id)}`,
-  issueId:Number(row.issue_id),issueTitle:String(row.issue_title),riskScore,riskLevel,
+  issueId:Number(row.issue_id),issueTitle:String(row.issue_title),issueStatus:String(row.issue_status||'').toLowerCase(),
+  openCycle:Boolean(row.workflow_id&&String(row.workflow_status||'').toUpperCase()!=='CLOSED'),workflowId:row.workflow_id?Number(row.workflow_id):null,
+  workflowStatus:row.workflow_status?String(row.workflow_status):null,cycleNumber:row.cycle_number==null?null:Number(row.cycle_number),riskScore,riskLevel,
   severity:severity(riskScore),candidateAlert,validEvidence,negativeCount,negativePercent,
   velocityScore,recent24,previous24,sources:normalizedSources,sourceTypeCount,reasons,
   note:candidateAlert?'Pola Issue Risk memenuhi kandidat Early Warning. Belum menjadi alert aktif; perlu validasi Humas/Super Admin.':'Belum memenuhi kondisi kandidat Early Warning.',
@@ -67,7 +70,8 @@ function evaluate(row:any):Candidate{
 
 async function aggregate(db:Pool|PoolClient,organizationId:number,limit:number):Promise<Candidate[]>{
  const rows=(await db.query(`
-  SELECT i.id issue_id,i.title issue_title,i.risk_level,
+  SELECT i.id issue_id,i.title issue_title,i.status issue_status,i.risk_level,
+         w.id workflow_id,w.workflow_status,w.cycle_number,
          im.id metric_id,im.risk_score,im.velocity_score,im.negative_count,im.metadata,im.measured_at
   FROM issues i
   JOIN LATERAL (
@@ -75,6 +79,10 @@ async function aggregate(db:Pool|PoolClient,organizationId:number,limit:number):
     WHERE m.issue_id=i.id
     ORDER BY m.measured_at DESC,m.id DESC LIMIT 1
   ) im ON true
+  LEFT JOIN LATERAL (
+    SELECT wx.id,wx.workflow_status,wx.cycle_number FROM issue_workflows wx
+    WHERE wx.issue_id=i.id ORDER BY wx.cycle_number DESC,wx.id DESC LIMIT 1
+  ) w ON true
   WHERE i.organization_id=$1
     AND lower(i.status) IN ('active','watch')
     AND COALESCE((im.metadata->>'assessed')::boolean,false)=true
