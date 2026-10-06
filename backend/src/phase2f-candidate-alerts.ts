@@ -152,7 +152,7 @@ export async function registerPhase2fCandidateAlertRoutes(app:FastifyInstance,po
       WHERE wx.issue_id=i.id ORDER BY wx.cycle_number DESC,wx.id DESC LIMIT 1
     ) w ON true
     WHERE i.organization_id=$1 AND ${activeStatus?"a.status IN ('open','acknowledged')":'a.status=$2'} AND a.alert_type='media_issue_early_warning'${scope}
-    ORDER BY ${activeStatus?"a.issue_id,":""}CASE a.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,a.created_at DESC LIMIT ${params.length}`,params)).rows;
+    ORDER BY ${activeStatus?"a.issue_id,":""}CASE a.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,a.created_at DESC LIMIT $${params.length}`,params)).rows;
   return{data:{engine:ENGINE,status:q.data.status,total:rows.length,alerts:rows}};
  });
 
