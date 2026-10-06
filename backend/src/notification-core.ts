@@ -132,7 +132,7 @@ export async function enqueueNotificationForWorkflowEvent(db:Db,eventId:string|n
     for(const channel of channels){
       if(channel==='TELEGRAM'){
         const linked=(await db.query(
-          `SELECT 1 FROM user_notification_channels WHERE user_id=$1 AND channel='TELEGRAM' AND enabled=true AND verified_at IS NOT NULL LIMIT 1`,
+          `SELECT 1 FROM user_notification_channels WHERE user_id=$1 AND channel='TELEGRAM' AND enabled=true AND verified_at IS NOT NULL AND chat_id IS NOT NULL LIMIT 1`,
           [recipient.id],
         )).rows[0];
         if(!linked)continue;
