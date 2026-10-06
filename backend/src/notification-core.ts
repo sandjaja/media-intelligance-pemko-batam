@@ -156,3 +156,74 @@ export async function safeEnqueueNotificationForWorkflowEvent(db:Db,eventId:stri
   try{return await enqueueNotificationForWorkflowEvent(db,eventId);}
   catch(error){logger?.error({error,eventId},'notification enqueue failed');return {queued:0,reason:'ENQUEUE_FAILED'};}
 }
+
+
+export async function enqueueNotificationForEarlyWarningAlert(db:Db,alertId:string|number,actorUserId:string|number|null){
+  const alert=(await db.query(
+    `SELECT a.id,a.issue_id,a.status,a.alert_type,i.title issue_title,i.status issue_status,i.risk_level,
+            (SELECT im.risk_score FROM issue_metrics im WHERE im.issue_id=i.id ORDER BY im.measured_at DESC,im.id DESC LIMIT 1) risk_score,
+            (SELECT im.velocity_score FROM issue_metrics im WHERE im.issue_id=i.id ORDER BY im.measured_at DESC,im.id DESC LIMIT 1) velocity_score,
+            (SELECT io.opd_id FROM issue_opd io WHERE io.issue_id=i.id AND lower(COALESCE(io.responsibility,''))='leading' ORDER BY io.opd_id LIMIT 1) lead_opd_id,
+            (SELECT w.cycle_number FROM issue_workflows w WHERE w.issue_id=i.id AND w.workflow_status<>'CLOSED' ORDER BY w.cycle_number DESC,w.id DESC LIMIT 1) cycle_number,
+            (SELECT w.workflow_status FROM issue_workflows w WHERE w.issue_id=i.id AND w.workflow_status<>'CLOSED' ORDER BY w.cycle_number DESC,w.id DESC LIMIT 1) workflow_status
+       FROM alerts a JOIN issues i ON i.id=a.issue_id
+      WHERE a.id=$1 AND a.alert_type='media_issue_early_warning' AND a.status IN ('open','acknowledged') LIMIT 1`,
+    [alertId],
+  )).rows[0];
+  if(!alert)return {queued:0,reason:'ALERT_NOT_NOTIFIABLE'};
+  const template=(await db.query(
+    `SELECT title_template,body_template FROM notification_templates WHERE event_type='EARLY_WARNING_ACTIVATED' AND enabled=true LIMIT 1`,
+  )).rows[0] as Template|undefined;
+  if(!template)return {queued:0,reason:'TEMPLATE_DISABLED_OR_MISSING'};
+  const actor=actorUserId==null?null:String(actorUserId);
+  const recipients=[
+    ...(await usersByRole(db,'humas',actor)),
+    ...(await usersByRole(db,'executive',actor)),
+    ...(await usersByOpd(db,alert.lead_opd_id,actor)),
+  ];
+  const unique=[...new Map(recipients.map(x=>[String(x.id),x])).values()];
+  if(!unique.length)return {queued:0,reason:'NO_RECIPIENT'};
+  const cycleContext=alert.cycle_number
+    ? `Siklus #${Number(alert.cycle_number)} sedang terbuka (${String(alert.workflow_status||'-')}).`
+    : 'Belum ada siklus komunikasi terbuka.';
+  const vars={
+    issue_title:String(alert.issue_title||''),
+    risk_score:String(Math.round(Number(alert.risk_score||0))),
+    risk_level:String(alert.risk_level||'-'),
+    velocity_score:String(Math.round(Number(alert.velocity_score||0))),
+    issue_status:String(alert.issue_status||'-').toUpperCase(),
+    cycle_context:cycleContext,
+  };
+  const title=render(template.title_template,vars),message=render(template.body_template,vars);
+  const channels=(await db.query(
+    `SELECT code FROM notification_channels WHERE status='ACTIVE' AND code IN ('EMAIL','TELEGRAM') ORDER BY code`,
+  )).rows.map((x:any)=>String(x.code));
+  let queued=0;
+  for(const recipient of unique){
+    for(const channel of channels){
+      if(channel==='TELEGRAM'){
+        const linked=(await db.query(
+          `SELECT 1 FROM user_notification_channels WHERE user_id=$1 AND channel='TELEGRAM' AND enabled=true AND verified_at IS NOT NULL AND chat_id IS NOT NULL LIMIT 1`,
+          [recipient.id],
+        )).rows[0];
+        if(!linked)continue;
+      }
+      const destinationHint=channel==='EMAIL'
+        ? recipient.email.replace(/^(.{1,2}).*(@.*)$/,'$1••••$2')
+        : 'Telegram terhubung';
+      const result=await db.query(
+        `INSERT INTO notification_deliveries(alert_id,event_type,user_id,channel,status,title_snapshot,message_snapshot,destination_hint)
+         VALUES($1,'EARLY_WARNING_ACTIVATED',$2,$3,'PENDING',$4,$5,$6)
+         ON CONFLICT(alert_id,user_id,channel) WHERE alert_id IS NOT NULL DO NOTHING RETURNING id`,
+        [alert.id,recipient.id,channel,title,message,destinationHint],
+      );
+      queued+=result.rowCount||0;
+    }
+  }
+  return {queued};
+}
+
+export async function safeEnqueueNotificationForEarlyWarningAlert(db:Db,alertId:string|number,actorUserId:string|number|null,logger?:{error:(value:unknown,msg?:string)=>void}){
+  try{return await enqueueNotificationForEarlyWarningAlert(db,alertId,actorUserId);}
+  catch(error){logger?.error({error,alertId},'early warning notification enqueue failed');return {queued:0,reason:'ENQUEUE_FAILED'};}
+}
