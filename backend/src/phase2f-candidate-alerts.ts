@@ -137,8 +137,8 @@ export async function registerPhase2fCandidateAlertRoutes(app:FastifyInstance,po
   if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
   const activeStatus=q.data.status==='active';
   const params:any[]=activeStatus?[organizationId]:[organizationId,q.data.status];let scope='';
-  if(!canManage(ctx)&&ctx.opdId){params.push(ctx.opdId);scope=` AND EXISTS(SELECT 1 FROM issue_opd io WHERE io.issue_id=a.issue_id AND io.opd_id=${params.length})`;}
-  else if(!canManage(ctx)&&ctx.districtId){params.push(ctx.districtId);scope=` AND (i.geographic_scope='CITYWIDE' OR EXISTS(SELECT 1 FROM issue_districts d WHERE d.issue_id=i.id AND d.district_id=${params.length}))`;}
+  if(!canManage(ctx)&&ctx.opdId){params.push(ctx.opdId);scope=` AND EXISTS(SELECT 1 FROM issue_opd io WHERE io.issue_id=a.issue_id AND io.opd_id=$${params.length})`;}
+  else if(!canManage(ctx)&&ctx.districtId){params.push(ctx.districtId);scope=` AND (i.geographic_scope='CITYWIDE' OR EXISTS(SELECT 1 FROM issue_districts d WHERE d.issue_id=i.id AND d.district_id=$${params.length}))`;}
   else if(!canManage(ctx)&&!ctx.roles.includes('executive')&&!hasPermission(ctx,'intelligence.read.all'))return reply.code(403).send({error:'FORBIDDEN'});
   params.push(q.data.limit);
   const rows=(await pool.query(`SELECT a.id,a.issue_id,a.opd_id,a.alert_type,a.severity,a.title,a.reason,a.status,a.created_at,a.acknowledged_at,a.resolved_at,
@@ -152,7 +152,7 @@ export async function registerPhase2fCandidateAlertRoutes(app:FastifyInstance,po
       WHERE wx.issue_id=i.id ORDER BY wx.cycle_number DESC,wx.id DESC LIMIT 1
     ) w ON true
     WHERE i.organization_id=$1 AND ${activeStatus?"a.status IN ('open','acknowledged')":'a.status=$2'} AND a.alert_type='media_issue_early_warning'${scope}
-    ORDER BY CASE a.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,a.created_at DESC LIMIT ${params.length}`,params)).rows;
+    ORDER BY CASE a.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,a.created_at DESC LIMIT $${params.length}`,params)).rows;
   return{data:{engine:ENGINE,status:q.data.status,total:rows.length,alerts:rows}};
  });
 
