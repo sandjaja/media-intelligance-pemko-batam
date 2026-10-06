@@ -347,7 +347,19 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
     const externalSocial=social.filter((x:any)=>x.source_kind==='external'),owned=social.filter((x:any)=>x.source_kind==='owned'),external=[...online.map((x:any)=>({...x,source:'online'})),...print.map((x:any)=>({...x,source:'print'})),...externalSocial.map((x:any)=>({...x,source:'social'}))];
     const angleResult=await extractDynamicIssueClaims(external),coverageResult=await matchDynamicOfficialResponseCoverage(angleResult.angles,owned);
     let publicationAnalysis:any=null,focusAssessment:any=null;
-    try{
+    if(external.length+owned.length===0){
+      focusAssessment={
+        focusResults:[],
+        evidenceSufficiency:'INSUFFICIENT',
+        cycleConclusion:'Belum ada evidence baru selama periode monitoring. Efektivitas komunikasi belum dapat dinilai dari data yang tersedia.',
+        issueOutlook:{status:'BELUM_CUKUP_DATA',assessment:'Tidak ada evidence monitoring baru yang cukup untuk menyimpulkan arah isu.',indicators:[]},
+        strengths:[],weaknesses:['Belum tersedia evidence baru pasca-publikasi untuk menilai hasil komunikasi.'],
+        emergingRisks:[],opdAnticipation:[],districtAnticipation:[],
+        nextCommunication:{action:'NEXT_CYCLE_REVIEW',priority:'LOW',recommendation:'Catat keterbatasan evidence pada siklus ini dan evaluasi kembali bila muncul evidence baru.',reason:'Periode monitoring tidak menghasilkan evidence baru.'},
+        watchNext:[],remainingGap:['Efektivitas komunikasi belum dapat diverifikasi karena tidak ada evidence baru.'],newSignals:[]
+      };
+    }
+    if(!focusAssessment)try{
       const publicationEvidence=(await pool.query(`SELECT e.* FROM issue_publication_evidence e WHERE e.workflow_id=$1 ORDER BY e.is_primary DESC,e.created_at,e.id`,[w.id])).rows;
       if(publicationEvidence.length){
         const materials:any[]=[],mediaParts:any[]=[];
