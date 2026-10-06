@@ -19,7 +19,7 @@ const publishInput=z.object({
 }).superRefine((v,ctx)=>{
   if(v.channel==='website'&&!v.url)ctx.addIssue({code:z.ZodIssueCode.custom,path:['url'],message:'URL website wajib diisi'});
 });
-const closeInput=z.object({note:z.string().trim().min(3).max(4000)});
+const closeInput=z.object({note:z.string().trim().min(3).max(4000),confirmLimitedEvidence:z.boolean().optional().default(false)});
 const publicationAnalysisInput=z.object({});
 const publicationEvidenceQuery=z.object({channel:z.enum(['instagram','facebook','tiktok','youtube','x','threads','press_release','media_statement','other']).optional(),caption:z.string().max(4000).optional(),primary:z.enum(['true','false']).optional(),evidenceId:z.coerce.number().int().positive().optional(),fileOrder:z.coerce.number().int().min(1).max(3).optional()});
 const safePublicationName=(name:string)=>String(name||'publication').normalize('NFKD').replace(/[^a-zA-Z0-9._-]+/g,'-').replace(/^-+|-+$/g,'').slice(-140)||'publication';
@@ -456,7 +456,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
     const ctx=request.phase3OutcomeAuth!;if(!isManager(ctx))return reply.code(403).send({error:'FORBIDDEN'});
     const w=await workflow(p.data.id);if(!w)return reply.code(404).send({error:'ISSUE_WORKFLOW_NOT_FOUND'});
     const role=actorRole(ctx);if(!canTransitionPhase3(w.workflow_status as Phase3WorkflowStatus,'CLOSED',role))return reply.code(409).send({error:'INVALID_WORKFLOW_TRANSITION',from:w.workflow_status,to:'CLOSED'});
-    const monitoringSnapshot=(await pool.query(`SELECT id,analyzed_at,period_ended_at FROM issue_monitoring_analysis_snapshots WHERE workflow_id=$1 AND result->'analysis'->'focusAssessment' IS NOT NULL ORDER BY period_number DESC LIMIT 1`,[w.id])).rows[0];if(!monitoringSnapshot)return reply.code(409).send({error:'MONITORING_ANALYSIS_REQUIRED_BEFORE_CLOSE',message:'Analisa Monitoring wajib berhasil sebelum isu ditutup.'});
+    const monitoringSnapshot=(await pool.query(`SELECT id,analyzed_at,period_ended_at,result->'analysis'->'focusAssessment' AS assessment FROM issue_monitoring_analysis_snapshots WHERE workflow_id=$1 AND result->'analysis'->'focusAssessment' IS NOT NULL ORDER BY period_number DESC LIMIT 1`,[w.id])).rows[0];if(!monitoringSnapshot)return reply.code(409).send({error:'MONITORING_ANALYSIS_REQUIRED_BEFORE_CLOSE',message:'Analisa Monitoring wajib berhasil sebelum isu ditutup.'});const assessment=monitoringSnapshot.assessment||{},sufficiency=String(assessment.evidenceSufficiency||'INSUFFICIENT'),outlook=String(assessment.issueOutlook?.status||'BELUM_CUKUP_DATA');if(sufficiency!=='SUFFICIENT'&&!b.data.confirmLimitedEvidence)return reply.code(409).send({error:'CLOSE_CONFIRMATION_REQUIRED',message:'Bukti monitoring belum memadai untuk penilaian efektivitas final.',evidenceSufficiency:sufficiency,issueOutlook:outlook});
     await pool.query(`UPDATE issue_workflows SET workflow_status='CLOSED',closed_at=NOW(),updated_by=$1,updated_at=NOW() WHERE id=$2`,[ctx.id,w.id]);
     await event(w.id,p.data.id,ctx,'ISSUE_CLOSED',w.workflow_status,'CLOSED',b.data.note);
     return{data:await workflow(p.data.id)};
