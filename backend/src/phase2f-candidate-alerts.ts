@@ -100,11 +100,14 @@ export async function registerPhase2fCandidateAlertRoutes(app:FastifyInstance,po
   if(!q.success)return reply.code(400).send({error:'INVALID_QUERY'});
   const ctx=request.phase2fCandidateAuth!,organizationId=await resolveOrganizationId(pool,ctx);
   if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
-  const canRead=canManage(ctx)||hasPermission(ctx,'platform.admin')||hasPermission(ctx,'intelligence.read.all')||Boolean(ctx.opdId);
+  const canRead=canManage(ctx)||ctx.roles.includes('executive')||hasPermission(ctx,'platform.admin')||hasPermission(ctx,'intelligence.read.all')||Boolean(ctx.opdId)||Boolean(ctx.districtId);
   if(!canRead)return reply.code(403).send({error:'FORBIDDEN'});
   let candidates=await aggregate(pool,organizationId,q.data.limit);
   if(!canManage(ctx)&&ctx.opdId){
    const visible=(await pool.query(`SELECT DISTINCT issue_id FROM issue_opd WHERE opd_id=$1`,[ctx.opdId])).rows;
+   const ids=new Set(visible.map((x:any)=>Number(x.issue_id)));candidates=candidates.filter(c=>ids.has(c.issueId));
+  }else if(!canManage(ctx)&&ctx.districtId){
+   const visible=(await pool.query(`SELECT i.id issue_id FROM issues i WHERE i.organization_id=$1 AND (i.geographic_scope='CITYWIDE' OR EXISTS(SELECT 1 FROM issue_districts d WHERE d.issue_id=i.id AND d.district_id=$2))`,[organizationId,ctx.districtId])).rows;
    const ids=new Set(visible.map((x:any)=>Number(x.issue_id)));candidates=candidates.filter(c=>ids.has(c.issueId));
   }
   const decisions=(await pool.query(`SELECT action,metadata FROM audit_logs
@@ -122,6 +125,7 @@ export async function registerPhase2fCandidateAlertRoutes(app:FastifyInstance,po
   if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
   const params:any[]=[organizationId,q.data.status];let scope='';
   if(!canManage(ctx)&&ctx.opdId){params.push(ctx.opdId);scope=` AND EXISTS(SELECT 1 FROM issue_opd io WHERE io.issue_id=a.issue_id AND io.opd_id=${params.length})`;}
+  else if(!canManage(ctx)&&ctx.districtId){params.push(ctx.districtId);scope=` AND (i.geographic_scope='CITYWIDE' OR EXISTS(SELECT 1 FROM issue_districts d WHERE d.issue_id=i.id AND d.district_id=${params.length}))`;}
   else if(!canManage(ctx)&&!ctx.roles.includes('executive')&&!hasPermission(ctx,'intelligence.read.all'))return reply.code(403).send({error:'FORBIDDEN'});
   params.push(q.data.limit);
   const rows=(await pool.query(`SELECT a.id,a.issue_id,a.opd_id,a.alert_type,a.severity,a.title,a.reason,a.status,a.created_at,a.acknowledged_at,a.resolved_at,
