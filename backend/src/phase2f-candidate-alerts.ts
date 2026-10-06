@@ -3,6 +3,8 @@ import { Pool, PoolClient } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { hasPermission, loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
+import { safeEnqueueNotificationForEarlyWarningAlert } from './notification-core.js';
+import { dispatchPendingNotifications } from './notification-dispatcher.js';
 
 const ENGINE='unified-candidate-alert-v1.0-issue-risk';
 declare module 'fastify' { interface FastifyRequest { phase2fCandidateAuth?: AuthorizationContext } }
@@ -192,7 +194,11 @@ export async function registerPhase2fCandidateAlertRoutes(app:FastifyInstance,po
    await client.query(`INSERT INTO alert_events(alert_id,event_type,payload,user_id) VALUES($1,'activated',$2,$3)`,[alertId,{...auditMeta,reasons:candidate.reasons},ctx.id]);
    await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'PHASE2F_CANDIDATE_ALERT_ACTIVATED',$2)`,[ctx.id,{...auditMeta,alertId}]);
    await client.query('COMMIT');
-   return{ok:true,decision:'activate',alertId,candidateKey:candidate.candidateKey};
+   const notification=await safeEnqueueNotificationForEarlyWarningAlert(pool,alertId,ctx.id,app.log);
+   if(notification.queued>0){
+    try{await dispatchPendingNotifications(pool);}catch(error){app.log.error({error,alertId},'early warning notification dispatch failed');}
+   }
+   return{ok:true,decision:'activate',alertId,candidateKey:candidate.candidateKey,notification};
   }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
  });
 }
