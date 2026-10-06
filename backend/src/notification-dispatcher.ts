@@ -3,6 +3,7 @@ import { decryptIntegrationCredential } from './integration-credentials.js';
 import nodemailer from 'nodemailer';
 
 export async function dispatchPendingTelegramNotifications(pool:Pool,limit=20){
+ await recoverStaleProcessing(pool,'TELEGRAM');
  const channel=(await pool.query(`SELECT credential_ciphertext FROM notification_channels WHERE code='TELEGRAM' AND status='ACTIVE' LIMIT 1`)).rows[0];
  if(!channel?.credential_ciphertext)return{processed:0,sent:0,failed:0};
  let botToken='';try{botToken=String(JSON.parse(decryptIntegrationCredential(channel.credential_ciphertext)).botToken||'');}catch{return{processed:0,sent:0,failed:0};}
@@ -15,9 +16,13 @@ export async function dispatchPendingTelegramNotifications(pool:Pool,limit=20){
  }
  return{processed:rows.length,sent,failed};
 }
+async function recoverStaleProcessing(pool:Pool,channel:'EMAIL'|'TELEGRAM'){
+ await pool.query(`UPDATE notification_deliveries SET status='FAILED',last_error=COALESCE(last_error,'Pengiriman terputus sebelum selesai.'),next_attempt_at=NOW(),updated_at=NOW() WHERE channel=$1 AND status='PROCESSING' AND last_attempt_at<NOW()-INTERVAL '5 minutes'`,[channel]);
+}
 function escapeHtml(value:string){return value.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
 export async function dispatchPendingEmailNotifications(pool:Pool,limit=20){
+ await recoverStaleProcessing(pool,'EMAIL');
  const channel=(await pool.query(`SELECT credential_ciphertext,settings FROM notification_channels WHERE code='EMAIL' AND status='ACTIVE' LIMIT 1`)).rows[0];
  if(!channel?.credential_ciphertext)return{processed:0,sent:0,failed:0};
  let password='';try{password=String(JSON.parse(decryptIntegrationCredential(channel.credential_ciphertext)).password||'');}catch{return{processed:0,sent:0,failed:0};}
