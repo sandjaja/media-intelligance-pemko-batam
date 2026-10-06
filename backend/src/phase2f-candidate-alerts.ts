@@ -122,7 +122,8 @@ export async function registerPhase2fCandidateAlertRoutes(app:FastifyInstance,po
     WHERE action IN ('PHASE2F_CANDIDATE_ALERT_REJECTED','PHASE2F_CANDIDATE_ALERT_ACTIVATED')
       AND (metadata->>'organizationId')::bigint=$1 ORDER BY id DESC`,[organizationId])).rows;
   const decided=new Set(decisions.map((r:any)=>String(r.metadata?.candidateKey||'')));
-  candidates=candidates.filter(c=>!decided.has(c.candidateKey));
+  const activeAlertIssues=new Set((await pool.query(`SELECT DISTINCT a.issue_id FROM alerts a JOIN issues i ON i.id=a.issue_id WHERE i.organization_id=$1 AND a.alert_type='media_issue_early_warning' AND a.status IN ('open','acknowledged')`,[organizationId])).rows.map((x:any)=>Number(x.issue_id)));
+  candidates=candidates.filter(c=>!decided.has(c.candidateKey)&&!activeAlertIssues.has(c.issueId));
   return{data:{engine:ENGINE,total:candidates.length,candidateAlertCount:candidates.filter(x=>x.candidateAlert).length,candidates}};
  });
 
@@ -174,6 +175,11 @@ export async function registerPhase2fCandidateAlertRoutes(app:FastifyInstance,po
    if(!candidate){await client.query('ROLLBACK');return reply.code(409).send({error:'CANDIDATE_ALERT_NO_LONGER_VALID'});}
    const prior=await client.query(`SELECT 1 FROM audit_logs WHERE action IN ('PHASE2F_CANDIDATE_ALERT_REJECTED','PHASE2F_CANDIDATE_ALERT_ACTIVATED') AND metadata->>'candidateKey'=$1 LIMIT 1`,[candidate.candidateKey]);
    if(prior.rows[0]){await client.query('ROLLBACK');return reply.code(409).send({error:'CANDIDATE_ALERT_ALREADY_DECIDED'});}
+   if(p.data.decision==='activate'){
+    await client.query('SELECT pg_advisory_xact_lock($1)',[candidate.issueId]);
+    const existing=(await client.query(`SELECT id,status FROM alerts WHERE issue_id=$1 AND alert_type='media_issue_early_warning' AND status IN ('open','acknowledged') ORDER BY id DESC LIMIT 1`,[candidate.issueId])).rows[0];
+    if(existing){await client.query('ROLLBACK');return reply.code(409).send({error:'EARLY_WARNING_ALREADY_ACTIVE',alertId:Number(existing.id),status:existing.status});}
+   }
    const auditMeta={organizationId,candidateKey:candidate.candidateKey,issueId:candidate.issueId,riskScore:candidate.riskScore,riskLevel:candidate.riskLevel,velocityScore:candidate.velocityScore,negativePercent:candidate.negativePercent,sources:candidate.sources,humanReason:p.data.reason,engine:ENGINE};
    if(p.data.decision==='rejected'){
     await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'PHASE2F_CANDIDATE_ALERT_REJECTED',$2)`,[ctx.id,auditMeta]);
