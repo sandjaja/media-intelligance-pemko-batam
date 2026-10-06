@@ -115,6 +115,39 @@ export async function registerPhase2fCandidateAlertRoutes(app:FastifyInstance,po
   return{data:{engine:ENGINE,total:candidates.length,candidateAlertCount:candidates.filter(x=>x.candidateAlert).length,candidates}};
  });
 
+ app.get('/api/intelligence/alerts',{preHandler:auth},async(request,reply)=>{
+  const q=z.object({status:z.enum(['open','acknowledged','resolved']).default('open'),limit:z.coerce.number().int().min(1).max(100).default(50)}).safeParse(request.query);
+  if(!q.success)return reply.code(400).send({error:'INVALID_QUERY'});
+  const ctx=request.phase2fCandidateAuth!,organizationId=await resolveOrganizationId(pool,ctx);
+  if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
+  const params:any[]=[organizationId,q.data.status];let scope='';
+  if(!canManage(ctx)&&ctx.opdId){params.push(ctx.opdId);scope=` AND EXISTS(SELECT 1 FROM issue_opd io WHERE io.issue_id=a.issue_id AND io.opd_id=${params.length})`;}
+  else if(!canManage(ctx)&&!ctx.roles.includes('executive')&&!hasPermission(ctx,'intelligence.read.all'))return reply.code(403).send({error:'FORBIDDEN'});
+  params.push(q.data.limit);
+  const rows=(await pool.query(`SELECT a.id,a.issue_id,a.opd_id,a.alert_type,a.severity,a.title,a.reason,a.status,a.created_at,a.acknowledged_at,a.resolved_at,
+    i.title issue_title,i.risk_level,i.momentum,o.name opd_name,
+    (SELECT im.risk_score FROM issue_metrics im WHERE im.issue_id=i.id ORDER BY im.measured_at DESC,im.id DESC LIMIT 1) risk_score,
+    (SELECT im.velocity_score FROM issue_metrics im WHERE im.issue_id=i.id ORDER BY im.measured_at DESC,im.id DESC LIMIT 1) velocity_score
+    FROM alerts a JOIN issues i ON i.id=a.issue_id LEFT JOIN opd o ON o.id=a.opd_id
+    WHERE i.organization_id=$1 AND a.status=$2 AND a.alert_type='media_issue_early_warning'${scope}
+    ORDER BY CASE a.severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,a.created_at DESC LIMIT ${params.length}`,params)).rows;
+  return{data:{engine:ENGINE,status:q.data.status,total:rows.length,alerts:rows}};
+ });
+
+ app.patch('/api/intelligence/alerts/:id',{preHandler:auth},async(request,reply)=>{
+  const ctx=request.phase2fCandidateAuth!;if(!canManage(ctx))return reply.code(403).send({error:'ALERT_UPDATE_REQUIRES_HUMAS_OR_SUPER_ADMIN'});
+  const id=z.coerce.number().int().positive().safeParse((request.params as any).id);
+  const body=z.object({status:z.enum(['acknowledged','resolved']),reason:z.string().trim().min(3).max(500)}).safeParse(request.body);
+  if(!id.success||!body.success)return reply.code(400).send({error:'INVALID_REQUEST'});
+  const organizationId=await resolveOrganizationId(pool,ctx);
+  const row=(await pool.query(`SELECT a.id,a.status FROM alerts a JOIN issues i ON i.id=a.issue_id WHERE a.id=$1 AND i.organization_id=$2 AND a.alert_type='media_issue_early_warning' LIMIT 1`,[id.data,organizationId])).rows[0];
+  if(!row)return reply.code(404).send({error:'ALERT_NOT_FOUND'});
+  if(row.status==='resolved')return reply.code(409).send({error:'ALERT_ALREADY_RESOLVED'});
+  await pool.query(`UPDATE alerts SET status=$2,acknowledged_at=CASE WHEN $2='acknowledged' THEN COALESCE(acknowledged_at,NOW()) ELSE acknowledged_at END,resolved_at=CASE WHEN $2='resolved' THEN NOW() ELSE resolved_at END WHERE id=$1`,[id.data,body.data.status]);
+  await pool.query(`INSERT INTO alert_events(alert_id,event_type,user_id,payload) VALUES($1,$2,$3,$4)`,[id.data,body.data.status,ctx.id,{reason:body.data.reason,previousStatus:row.status,engine:ENGINE}]);
+  return{ok:true,id:id.data,status:body.data.status};
+ });
+
  app.post('/api/intelligence/candidate-alerts/decision',{preHandler:auth},async(request,reply)=>{
   const ctx=request.phase2fCandidateAuth!;
   if(!canManage(ctx))return reply.code(403).send({error:'CANDIDATE_ALERT_DECISION_REQUIRES_HUMAS_OR_SUPER_ADMIN'});
