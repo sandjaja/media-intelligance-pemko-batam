@@ -166,7 +166,7 @@ export async function registerPhase2fCandidateAlertRoutes(app:FastifyInstance,po
   if(!row)return reply.code(404).send({error:'ALERT_NOT_FOUND'});
   if(row.status==='resolved')return reply.code(409).send({error:'ALERT_ALREADY_RESOLVED'});
   await pool.query(`UPDATE alerts SET status=$2,acknowledged_at=CASE WHEN $2='acknowledged' THEN COALESCE(acknowledged_at,NOW()) ELSE acknowledged_at END,resolved_at=CASE WHEN $2='resolved' THEN NOW() ELSE resolved_at END WHERE id=$1`,[id.data,body.data.status]);
-  await pool.query(`INSERT INTO alert_events(alert_id,event_type,user_id,payload) VALUES($1,$2,$3,$4)`,[id.data,body.data.status,ctx.id,{reason:body.data.reason,previousStatus:row.status,engine:ENGINE}]);
+  await pool.query(`INSERT INTO alert_events(alert_id,event_type,payload) VALUES($1,$2,$3)`,[id.data,body.data.status,{reason:body.data.reason,previousStatus:row.status,engine:ENGINE,actorUserId:ctx.id}]);
   return{ok:true,id:id.data,status:body.data.status};
  });
 
@@ -198,7 +198,7 @@ export async function registerPhase2fCandidateAlertRoutes(app:FastifyInstance,po
    const sev=candidate.riskScore>=80?'critical':candidate.riskScore>=60?'high':'medium';
    const alert=(await client.query(`INSERT INTO alerts(issue_id,opd_id,alert_type,severity,title,reason,status) VALUES($1,$2,'media_issue_early_warning',$3,$4,$5,'open') RETURNING id`,[candidate.issueId,opd,sev,`Early Warning: ${candidate.issueTitle}`,p.data.reason])).rows[0];
    const alertId=Number(alert.id);
-   await client.query(`INSERT INTO alert_events(alert_id,event_type,payload,user_id) VALUES($1,'activated',$2,$3)`,[alertId,{...auditMeta,reasons:candidate.reasons},ctx.id]);
+   await client.query(`INSERT INTO alert_events(alert_id,event_type,payload) VALUES($1,'activated',$2)`,[alertId,{...auditMeta,reasons:candidate.reasons,actorUserId:ctx.id}]);
    await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'PHASE2F_CANDIDATE_ALERT_ACTIVATED',$2)`,[ctx.id,{...auditMeta,alertId}]);
    await client.query('COMMIT');
    const notification=await safeEnqueueNotificationForEarlyWarningAlert(pool,alertId,ctx.id,app.log);
