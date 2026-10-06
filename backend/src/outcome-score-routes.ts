@@ -1,0 +1,34 @@
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { Pool } from 'pg';
+import jwt from 'jsonwebtoken';
+import { z } from 'zod';
+import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
+
+declare module 'fastify' { interface FastifyRequest { outcomeScoreAuth?: AuthorizationContext } }
+
+const publicationPoints=(s:string)=>({ALIGNED:100,PARTIAL:65,MISALIGNED:20,INSUFFICIENT_EVIDENCE:null} as Record<string,number|null>)[s]??null;
+const focusPoints=(s:string)=>({PROVEN:100,PARTIAL:60,NOT_PROVEN:20,INSUFFICIENT_DATA:null} as Record<string,number|null>)[s]??null;
+const outlookPoints=(s:string)=>({MEREDA:100,BERLANJUT:55,BERPOTENSI_BERKEMBANG:20,BELUM_CUKUP_DATA:null} as Record<string,number|null>)[s]??null;
+const evidencePoints=(s:string)=>({SUFFICIENT:100,LIMITED:55,INSUFFICIENT:0} as Record<string,number>)[s]??0;
+const weighted=(v:number|null,w:number)=>v==null?0:Math.round(v*w)/100;
+const avg=(xs:(number|null)[])=>{const v=xs.filter((x):x is number=>x!=null);return v.length?v.reduce((a,b)=>a+b,0)/v.length:null};
+
+export async function registerOutcomeScoreRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
+ const auth=async(request:FastifyRequest,reply:any)=>{const token=request.cookies.access_token;if(!token)return reply.code(401).send({error:'UNAUTHENTICATED'});try{const d=jwt.verify(token,jwtSecret) as jwt.JwtPayload;if(typeof d.sub!=='string')throw new Error('invalid');const ctx=await loadAuthorizationContext(pool,d.sub);if(!ctx?.active)return reply.code(403).send({error:'ACCOUNT_INACTIVE'});request.outcomeScoreAuth=ctx;}catch{return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'});}};
+ app.get('/api/intelligence/workflows/:id/outcome-score',{preHandler:auth},async(request,reply)=>{
+  const p=z.object({id:z.coerce.number().int().positive()}).safeParse(request.params);if(!p.success)return reply.code(400).send({error:'INVALID_ID'});
+  const w=(await pool.query(`SELECT w.id,w.issue_id,w.cycle_number,w.workflow_status,i.title,i.geographic_scope FROM issue_workflows w JOIN issues i ON i.id=w.issue_id WHERE w.id=$1 LIMIT 1`,[p.data.id])).rows[0];if(!w)return reply.code(404).send({error:'WORKFLOW_NOT_FOUND'});
+  const ctx=request.outcomeScoreAuth!,broad=ctx.legacyRole==='admin'||ctx.roles.some(r=>['super_admin','humas','executive'].includes(r));
+  if(!broad){if(ctx.opdId){if(!(await pool.query('SELECT 1 FROM issue_opd WHERE issue_id=$1 AND opd_id=$2 LIMIT 1',[w.issue_id,ctx.opdId])).rows[0])return reply.code(403).send({error:'OUTCOME_SCORE_FORBIDDEN'});}else if(ctx.districtId){const ok=w.geographic_scope==='CITYWIDE'||Boolean((await pool.query('SELECT 1 FROM issue_districts WHERE issue_id=$1 AND district_id=$2 LIMIT 1',[w.issue_id,ctx.districtId])).rows[0]);if(!ok)return reply.code(403).send({error:'OUTCOME_SCORE_FORBIDDEN'});}else return reply.code(403).send({error:'OUTCOME_SCORE_FORBIDDEN'});}
+  if(String(w.workflow_status)!=='CLOSED')return{data:{workflowId:Number(w.id),issueId:Number(w.issue_id),cycleNumber:Number(w.cycle_number),status:'PENDING',reason:'Outcome belum final sampai siklus CLOSED',score:null,verdict:null}};
+  const pub=(await pool.query('SELECT result,analyzed_at FROM issue_publication_analysis_snapshots WHERE workflow_id=$1',[w.id])).rows[0]||null;
+  const mon=(await pool.query('SELECT result,evidence_summary,analyzed_at FROM issue_monitoring_analysis_snapshots WHERE workflow_id=$1 ORDER BY analyzed_at DESC LIMIT 1',[w.id])).rows[0]||null;
+  if(!pub||!mon)return{data:{workflowId:Number(w.id),issueId:Number(w.issue_id),cycleNumber:Number(w.cycle_number),status:'INSUFFICIENT_DATA',reason:'Snapshot publikasi atau monitoring belum lengkap',score:null,verdict:'Belum Cukup Data'}};
+  const pr=pub.result||{},mr=mon.result||{},execution=publicationPoints(String(pr.executionAssessment?.status||'')),focus=avg((Array.isArray(mr.focusResults)?mr.focusResults:[]).map((x:any)=>focusPoints(String(x.status||'')))),outlook=outlookPoints(String(mr.issueOutlook?.status||'')),suff=String(mr.evidenceSufficiency||'INSUFFICIENT'),evidence=evidencePoints(suff);
+  const components={strategyExecution:{raw:execution,weight:25,points:weighted(execution,25)},monitoringAchievement:{raw:focus,weight:40,points:weighted(focus,40)},issueOutcome:{raw:outlook,weight:20,points:weighted(outlook,20)},evidenceConfidence:{raw:evidence,weight:15,points:weighted(evidence,15)}};
+  const computable=execution!=null&&focus!=null&&outlook!=null,total=Math.round((components.strategyExecution.points+components.monitoringAchievement.points+components.issueOutcome.points+components.evidenceConfidence.points)*10)/10;
+  if(suff==='INSUFFICIENT'||!computable)return{data:{workflowId:Number(w.id),issueId:Number(w.issue_id),cycleNumber:Number(w.cycle_number),status:'INSUFFICIENT_DATA',score:computable?total:null,verdict:'Belum Cukup Data',confidence:'Rendah',components,source:{publicationAnalyzedAt:pub.analyzed_at,monitoringAnalyzedAt:mon.analyzed_at}}};
+  let verdict=total>=80?'Efektif':total>=60?'Cukup Efektif':total>=40?'Perlu Penguatan':'Belum Efektif';if(suff==='LIMITED'&&verdict==='Efektif')verdict='Cukup Efektif';
+  return{data:{workflowId:Number(w.id),issueId:Number(w.issue_id),cycleNumber:Number(w.cycle_number),status:'FINAL',score:total,verdict,confidence:suff==='SUFFICIENT'?'Tinggi':'Terbatas',components,signals:{executionStatus:pr.executionAssessment?.status||null,evidenceSufficiency:suff,issueOutlook:mr.issueOutlook?.status||null,remainingGapCount:Array.isArray(mr.remainingGap)?mr.remainingGap.length:0,emergingRiskCount:Array.isArray(mr.emergingRisks)?mr.emergingRisks.length:0},source:{publicationAnalyzedAt:pub.analyzed_at,monitoringAnalyzedAt:mon.analyzed_at}}};
+ });
+}
