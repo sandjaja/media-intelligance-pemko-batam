@@ -185,7 +185,7 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
     const where:string[]=["lower(i.status) IN ('watch','active')"];
     if(opdId){const p=bind(opdId);where.push('(EXISTS(SELECT 1 FROM issue_opd io WHERE io.issue_id=i.id AND io.opd_id='+p+') OR w.lead_opd_id='+p+')')}
     if(districtId){const p=bind(districtId);where.push("(i.geographic_scope='CITYWIDE' OR EXISTS(SELECT 1 FROM issue_districts ids WHERE ids.issue_id=i.id AND ids.district_id="+p+"))")}
-    const sql="SELECT i.id issue_id,i.title issue_title,i.status issue_status,w.id workflow_id,w.cycle_number,w.workflow_status,w.lead_opd_id,"+
+    const sql="SELECT i.id issue_id,i.title issue_title,i.status issue_status,w.id workflow_id,w.cycle_number,w.workflow_status,w.lead_opd_id,w.due_at,w.updated_at,"+
       "EXISTS(SELECT 1 FROM issue_communication_gap_snapshots g WHERE g.workflow_id=w.id) gap_done,"+
       "EXISTS(SELECT 1 FROM issue_response_submissions r WHERE r.workflow_id=w.id) clarification_started,"+
       "EXISTS(SELECT 1 FROM communication_strategies s WHERE s.workflow_id=w.id) strategy_started,"+
@@ -196,8 +196,9 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
     const rows=(await pool.query(sql,params)).rows;
     const stage=(x:any)=>{const ws=String(x.workflow_status||'').toUpperCase();if(ws==='CLOSED')return'CLOSED';if(x.publication_done||ws==='PUBLISHED'||ws==='MONITORING')return'MONITORING';if(x.strategy_approved)return'PUBLICATION';if(x.strategy_started||ws==='STRATEGY')return'STRATEGY';if(x.gap_done&&(x.clarification_started||ws==='APPROVED'))return'CLARIFICATION';return'GAP'};
     const active=rows.map((x:any)=>({...x,stage:stage(x)})).filter((x:any)=>x.stage!=='CLOSED');
-    const stages=['GAP','CLARIFICATION','STRATEGY','PUBLICATION','MONITORING'].map(key=>({key,count:active.filter((x:any)=>x.stage===key).length,items:active.filter((x:any)=>x.stage===key).map((x:any)=>({issueId:x.issue_id,title:x.issue_title,status:x.issue_status,workflowId:x.workflow_id,cycleNumber:x.cycle_number}))}));
-    return{scope:{opdId,districtId},total:active.length,closed:rows.filter((x:any)=>stage(x)==='CLOSED').length,stages};
+    const stages=['GAP','CLARIFICATION','STRATEGY','PUBLICATION','MONITORING'].map(key=>({key,count:active.filter((x:any)=>x.stage===key).length,items:active.filter((x:any)=>x.stage===key).map((x:any)=>({issueId:x.issue_id,title:x.issue_title,status:x.issue_status,workflowId:x.workflow_id,cycleNumber:x.cycle_number,dueAt:x.due_at,updatedAt:x.updated_at,overdue:Boolean(x.due_at&&new Date(x.due_at).getTime()<Date.now())}))}));
+    const overdue=active.filter((x:any)=>x.due_at&&new Date(x.due_at).getTime()<Date.now()).map((x:any)=>({issueId:x.issue_id,title:x.issue_title,status:x.issue_status,workflowId:x.workflow_id,cycleNumber:x.cycle_number,stage:x.stage,dueAt:x.due_at}));
+    return{scope:{opdId,districtId},total:active.length,closed:rows.filter((x:any)=>stage(x)==='CLOSED').length,overdueCount:overdue.length,overdue,stages};
   });
 
   app.get('/api/command-center/scope', { preHandler: auth }, async (request, reply) => {
