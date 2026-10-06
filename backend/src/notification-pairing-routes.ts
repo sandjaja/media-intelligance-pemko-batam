@@ -17,7 +17,7 @@ async function telegramCredential(pool:Pool){
  try{const parsed=JSON.parse(decryptIntegrationCredential(row.credential_ciphertext));return{...row,botToken:String(parsed.botToken||''),webhookSecret:String(parsed.webhookSecret||'')};}catch{return null;}
 }
 async function sendTelegram(token:string,chatId:string,text:string){
- const r=await fetch('https://api.telegram.org/bot'+encodeURIComponent(token)+'/sendMessage',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({chat_id:chatId,text})});
+ const r=await fetch('https://api.telegram.org/bot'+token+'/sendMessage',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({chat_id:chatId,text})});
  return r.ok;
 }
 export async function registerNotificationPairingRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
