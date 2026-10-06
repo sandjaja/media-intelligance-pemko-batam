@@ -104,6 +104,7 @@ export async function registerPhase2fCandidateAlertRoutes(app:FastifyInstance,po
   }catch{return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'});}
  };
  const canManage=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
+ const canDecideCandidate=(ctx:AuthorizationContext)=>canManage(ctx)||ctx.roles.includes('executive');
 
  app.get('/api/intelligence/candidate-alerts',{preHandler:auth},async(request,reply)=>{
   const q=z.object({limit:z.coerce.number().int().min(1).max(100).default(30)}).safeParse(request.query);
@@ -165,7 +166,7 @@ export async function registerPhase2fCandidateAlertRoutes(app:FastifyInstance,po
 
  app.post('/api/intelligence/candidate-alerts/decision',{preHandler:auth},async(request,reply)=>{
   const ctx=request.phase2fCandidateAuth!;
-  if(!canManage(ctx))return reply.code(403).send({error:'CANDIDATE_ALERT_DECISION_REQUIRES_HUMAS_OR_SUPER_ADMIN'});
+  if(!canDecideCandidate(ctx))return reply.code(403).send({error:'CANDIDATE_ALERT_DECISION_REQUIRES_HUMAS_EXECUTIVE_OR_SUPER_ADMIN'});
   const p=z.object({candidateKey:z.string().min(5).max(300),decision:z.enum(['activate','rejected']),reason:z.string().trim().min(3).max(500)}).safeParse(request.body);
   if(!p.success)return reply.code(400).send({error:'INVALID_REQUEST'});
   const client=await pool.connect();
