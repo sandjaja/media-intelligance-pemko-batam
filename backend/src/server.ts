@@ -13,6 +13,7 @@ import { ingestEnabledSources } from './ingestion.js';
 import { registerAskIntelligence } from './ask-intelligence.js';
 import { registerCollectionSchedulerRoutes } from './collection-scheduler-routes.js';
 import { registerAdminRoutes } from './admin-routes.js';
+import { registerAiAdminRoutes } from './ai-admin-routes.js';
 import { registerDistrictRoutes } from './district-routes.js';
 import { registerPhase5StrategyRoutes } from './phase5-strategy-routes.js';
 import { runYouTubeShortsCollection } from './youtube-shorts-runner.js';
