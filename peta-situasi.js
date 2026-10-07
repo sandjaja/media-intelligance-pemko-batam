@@ -16,8 +16,10 @@ function ensureNav(){
   const b=document.createElement('button');b.type='button';b.dataset.petaSituasi='1';b.className='px-3 py-2 rounded-lg border border-transparent text-xs text-slate-400 hover:text-white';b.innerHTML='<i class="fa-solid fa-map-location-dot mr-2"></i>Peta Situasi';b.onclick=openPage;const anchor=tabs.querySelector('[data-tab="highlights"]');anchor?tabs.insertBefore(b,anchor):tabs.appendChild(b);
 }
 function activateNav(){
-  $('tabs')?.querySelectorAll('[data-peta-situasi]').forEach(b=>{
-    const on=window.__petaSituasiOpen===true;
+  const tabs=$('tabs');if(!tabs)return;
+  const on=window.__petaSituasiOpen===true;
+  if(on)tabs.querySelectorAll('.tab').forEach(b=>b.classList.remove('active'));
+  tabs.querySelectorAll('[data-peta-situasi]').forEach(b=>{
     b.classList.toggle('bg-cyan-500',on);
     b.classList.toggle('text-slate-950',on);
     b.classList.toggle('font-black',on);
