@@ -1,7 +1,7 @@
 (()=>{'use strict';
 function init(){
  if(window.__aiAdminInit)return true;
-const API=(window.MEDIA_INTELLIGENCE_API||'/api').replace(/\/$/,'');const $=s=>document.querySelector(s);
+const API=(window.MEDIA_INTELLIGENCE_API||'/api').replace(/\/$/,'');const $=s=>document.querySelector(s);window.__miAiShowSub=(which)=>{const p=document.getElementById('aiProvidersView'),t=document.getElementById('aiTasksView'),u=document.getElementById('aiUsageView');if(!p||!t||!u)return false;document.querySelectorAll('#aiPanel .ai-sub').forEach(b=>b.className=b.dataset.aiSub===which?'ai-sub px-3 py-2 rounded-lg bg-cyan-500 text-slate-950 font-black text-xs cursor-pointer relative z-20':'ai-sub px-3 py-2 rounded-lg bg-slate-900 border border-slate-800 text-slate-300 font-bold text-xs cursor-pointer relative z-20');p.classList.toggle('hidden',which!=='providers');t.classList.toggle('hidden',which!=='tasks');u.classList.toggle('hidden',which!=='usage');return true};
 const esc=v=>String(v??'').replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',"'":'&#39;'}[c]));
 const toast=(m,ok=true)=>{const t=$('#toast');if(!t)return;t.textContent=m;t.className='fixed bottom-5 right-5 glass rounded-xl px-4 py-3 text-xs shadow-2xl '+(ok?'text-emerald-300':'text-rose-300');clearTimeout(window.__aiToast);window.__aiToast=setTimeout(()=>t.classList.add('hidden'),3200)};
 async function api(path,opt={}){const r=await fetch(API+path,{credentials:'include',cache:'no-store',headers:{'Content-Type':'application/json',...(opt.headers||{})},...opt});const d=await r.json().catch(()=>({}));if(!r.ok)throw Error(d.detail||d.error||('HTTP '+r.status));return d}
