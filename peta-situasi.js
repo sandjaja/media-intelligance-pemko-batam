@@ -13,7 +13,7 @@ function ensureSection(){
 }
 function ensureNav(){
   const tabs=$('tabs');if(!tabs||tabs.querySelector('[data-peta-situasi]'))return;
-  const b=document.createElement('button');b.type='button';b.dataset.petaSituasi='1';b.className='px-3 py-2 rounded-lg border border-transparent text-xs text-slate-400 hover:text-white';b.innerHTML='<i class="fa-solid fa-map-location-dot mr-2"></i>Peta Situasi';b.onclick=openPage;tabs.appendChild(b);
+  const b=document.createElement('button');b.type='button';b.dataset.petaSituasi='1';b.className='px-3 py-2 rounded-lg border border-transparent text-xs text-slate-400 hover:text-white';b.innerHTML='<i class="fa-solid fa-map-location-dot mr-2"></i>Peta Situasi';b.onclick=openPage;const anchor=tabs.querySelector('[data-tab="highlights"]');anchor?tabs.insertBefore(b,anchor):tabs.appendChild(b);
 }
 function activateNav(){
   $('tabs')?.querySelectorAll('[data-peta-situasi]').forEach(b=>b.classList.toggle('active',(window.__petaSituasiOpen===true)));
