@@ -138,13 +138,13 @@ function startIdleLogout(){
   const activity=()=>resetIdleActivity(true);
   ['pointerdown','keydown','touchstart','click','input','scroll'].forEach(type=>document.addEventListener(type,activity,{passive:true,capture:true}));
   window.addEventListener('storage',event=>{
+    if(event.key===LOGOUT_KEY&&event.newValue==='1'){goLogin('LOGGED_OUT');return}
     if(event.key!==ACTIVITY_KEY||!event.newValue)return;
     const value=Number(event.newValue);
     if(Number.isFinite(value)&&value>lastActivityAt){
       lastActivityAt=value;
       closeIdleWarning();
     }
-    if(event.key===LOGOUT_KEY&&event.newValue==='1')goLogin('LOGGED_OUT');
   });
   idleCheckTimer=setInterval(()=>{
     if(!authenticated()||autoLogoutRunning)return;
