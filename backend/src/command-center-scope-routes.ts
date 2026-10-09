@@ -1,0 +1,313 @@
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { Pool } from 'pg';
+import jwt from 'jsonwebtoken';
+import { loadAuthorizationContext, hasPermission, type AuthorizationContext } from './rbac.js';
+import { z } from 'zod';
+
+type ScopeUser = AuthorizationContext;
+declare module 'fastify' { interface FastifyRequest { scopeUser?: ScopeUser } }
+
+export async function registerCommandCenterScopeRoutes(app: FastifyInstance, pool: Pool, jwtSecret: string) {
+  const auth = async (request: FastifyRequest, reply: any) => {
+    const token = request.cookies.access_token;
+    if (!token) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+    try {
+      const d = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
+      if (typeof d.sub !== 'string') throw new Error('invalid');
+      const ctx = await loadAuthorizationContext(pool, d.sub);
+      if (!ctx?.active) return reply.code(403).send({ error: 'ACCOUNT_INACTIVE' });
+      request.scopeUser = ctx;
+    } catch {
+      return reply.code(401).send({ error: 'INVALID_ACCESS_TOKEN' });
+    }
+  };
+
+  app.get('/api/districts', { preHandler: auth }, async () => {
+    const { rows } = await pool.query(`SELECT id,code,name FROM districts WHERE active=true ORDER BY name ASC`);
+    return { data: rows };
+  });
+
+  app.get('/api/command-center/map', { preHandler: auth }, async (request, reply) => {
+    const parsed=z.object({opdId:z.string().regex(/^\\d+$/).optional(),districtId:z.string().regex(/^\\d+$/).optional()}).safeParse(request.query); if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
+    const user=request.scopeUser,canReadAll=Boolean(user&&(user.legacyRole==='admin'||user.roles.includes('super_admin')||user.roles.includes('humas')||user.roles.includes('executive')||hasPermission(user,'platform.admin')));
+    const opdId=canReadAll?(parsed.data.opdId??null):(user?.opdId??null),districtId=canReadAll?(parsed.data.districtId??null):(user?.districtId??null);
+    const orgs=(await pool.query("SELECT id FROM organizations WHERE active=true ORDER BY id")).rows;if(orgs.length!==1)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+    const b=(await pool.query("SELECT id,name,source_name,source_year,optimized_storage_key,feature_count,activated_at FROM organization_map_boundaries WHERE organization_id=$1 AND status='ACTIVE' ORDER BY activated_at DESC NULLS LAST,id DESC LIMIT 1",[orgs[0].id])).rows[0];if(!b)return{data:null,scope:{opdId,districtId}};
+    const params:any[]=[b.id];let sql="SELECT f.feature_key,f.feature_name,f.official_code,f.district_id,d.name district_name,COUNT(DISTINCT i.id) FILTER(WHERE lower(i.status) IN ('watch','active'))::int active_issue_count,COUNT(DISTINCT i.id) FILTER(WHERE lower(i.status) IN ('watch','active') AND COALESCE((SELECT CASE WHEN COALESCE((im.metadata->>'assessed')::boolean,false) THEN im.risk_score ELSE NULL END FROM issue_metrics im WHERE im.issue_id=i.id ORDER BY im.measured_at DESC,im.id DESC LIMIT 1),0)>=60)::int high_risk_count FROM organization_map_boundary_features f JOIN districts d ON d.id=f.district_id LEFT JOIN issue_districts idr ON idr.district_id=d.id LEFT JOIN issues i ON i.id=idr.issue_id";
+    if(opdId){params.push(opdId);sql+=" AND (i.opd_id=$"+params.length+" OR i.opd_id IS NULL)"} sql+=" WHERE f.boundary_id=$1";if(districtId){params.push(districtId);sql+=" AND d.id=$"+params.length}sql+=" GROUP BY f.id,d.name ORDER BY d.name";
+    const rows=(await pool.query(sql,params)).rows;
+    const detailParams:any[]=[];let detailWhere="lower(i.status) IN ('watch','active') AND i.geographic_scope='DISTRICTS'";if(opdId){detailParams.push(opdId);detailWhere+=" AND (i.opd_id=$"+detailParams.length+" OR i.opd_id IS NULL)"}if(districtId){detailParams.push(districtId);detailWhere+=" AND idr.district_id=$"+detailParams.length}
+    const detailRows=(await pool.query("SELECT i.id,i.title,i.status,idr.district_id,(SELECT CASE WHEN COALESCE((im.metadata->>'assessed')::boolean,false) THEN im.risk_score ELSE NULL END FROM issue_metrics im WHERE im.issue_id=i.id ORDER BY im.measured_at DESC,im.id DESC LIMIT 1) risk_score FROM issues i JOIN issue_districts idr ON idr.issue_id=i.id WHERE "+detailWhere+" ORDER BY COALESCE((SELECT CASE WHEN COALESCE((im.metadata->>'assessed')::boolean,false) THEN im.risk_score ELSE NULL END FROM issue_metrics im WHERE im.issue_id=i.id ORDER BY im.measured_at DESC,im.id DESC LIMIT 1),-1) DESC,CASE lower(i.status) WHEN 'active' THEN 0 ELSE 1 END,i.updated_at DESC",detailParams)).rows;
+    const regionIssues=new Map<number,any[]>();for(const i of detailRows){const k=Number(i.district_id),a=regionIssues.get(k)||[];if(a.length<3)a.push(i);regionIssues.set(k,a)}
+    const cityParams:any[]=[];let cityWhere="lower(i.status) IN ('watch','active') AND i.geographic_scope='CITYWIDE'";if(opdId){cityParams.push(opdId);cityWhere+=" AND (i.opd_id=$"+cityParams.length+" OR i.opd_id IS NULL)"}
+    const citywide=(await pool.query("SELECT i.id,i.title,i.status,(SELECT CASE WHEN COALESCE((im.metadata->>'assessed')::boolean,false) THEN im.risk_score ELSE NULL END FROM issue_metrics im WHERE im.issue_id=i.id ORDER BY im.measured_at DESC,im.id DESC LIMIT 1) risk_score FROM issues i WHERE "+cityWhere+" ORDER BY COALESCE((SELECT CASE WHEN COALESCE((im.metadata->>'assessed')::boolean,false) THEN im.risk_score ELSE NULL END FROM issue_metrics im WHERE im.issue_id=i.id ORDER BY im.measured_at DESC,im.id DESC LIMIT 1),-1) DESC,CASE lower(i.status) WHEN 'active' THEN 0 ELSE 1 END,i.updated_at DESC LIMIT 3",cityParams)).rows;
+    rows.forEach((r:any)=>r.issues=regionIssues.get(Number(r.district_id))||[]);
+    try{const {get}=await import('@vercel/blob');const x=await get(b.optimized_storage_key,{access:'private'});if(!x?.stream)return reply.code(404).send({error:'BOUNDARY_FILE_NOT_FOUND'});const geo=JSON.parse(await new Response(x.stream).text()),byKey=new Map(rows.map((x:any)=>[String(x.feature_key),x]));geo.features=(geo.features||[]).filter((f:any)=>byKey.has(String(f.properties?.featureKey))).map((f:any)=>{const m:any=byKey.get(String(f.properties?.featureKey));return{...f,properties:{...f.properties,districtId:m.district_id,districtName:m.district_name,activeIssueCount:m.active_issue_count,highRiskCount:m.high_risk_count}}});return{data:{boundary:{id:b.id,name:b.name,sourceName:b.source_name,sourceYear:b.source_year,featureCount:b.feature_count,activatedAt:b.activated_at},geojson:geo,regions:rows,citywideIssues:citywide},scope:{opdId,districtId},readOnly:true}}catch(e:any){request.log.error({errName:e?.name,errMessage:e?.message},'command center map load failed');return reply.code(503).send({error:'COMMAND_CENTER_MAP_UNAVAILABLE'})}
+  });
+
+  app.get('/api/command-center/trusted-evidence', { preHandler: auth }, async (request, reply) => {
+    const parsed = z.object({
+      opdId: z.string().regex(/^\d+$/).optional(),
+      districtId: z.string().regex(/^\d+$/).optional(),
+      limit: z.coerce.number().int().min(1).max(100).default(50),
+    }).safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ error: 'INVALID_QUERY' });
+
+    const user = request.scopeUser;
+    const canReadAll = Boolean(user && (user.legacyRole === 'admin' || user.roles.includes('super_admin') || user.roles.includes('humas') || user.roles.includes('executive') || hasPermission(user,'platform.admin')));
+    const opdId = canReadAll ? (parsed.data.opdId ?? null) : (user?.opdId ?? null);
+    const districtId = canReadAll ? (parsed.data.districtId ?? null) : (user?.districtId ?? null);
+    const params: unknown[] = [];
+    const bind = (value: unknown) => { params.push(value); return '$' + params.length; };
+    const op = opdId ? bind(opdId) : null;
+    const dist = districtId ? bind(districtId) : null;
+    const onlineScope = [op ? 'a.opd_id=' + op : '', dist ? 'a.district_id=' + dist : ''].filter(Boolean).join(' AND ');
+    const printScope = [op ? 'pa.opd_id=' + op : '', dist ? 'pa.district_id=' + dist : ''].filter(Boolean).join(' AND ');
+    const socialScope = [op ? 'sm.opd_id=' + op : '', dist ? 'sm.district_id=' + dist : ''].filter(Boolean).join(' AND ');
+    const limit = bind(parsed.data.limit);
+
+    const onlineSql =
+      "SELECT 'online'::text source_type,a.id,a.title,a.summary::text summary,a.url::text url,a.published_at,a.sentiment,a.risk_score::float,a.risk_level::text,a.importance_score::float,a.impact_score::float,ms.name::text source_name,a.opd_id,a.district_id " +
+      "FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id " +
+      "WHERE a.news_classification='UTAMA' AND a.sentiment IS NOT NULL AND COALESCE(a.risk_score,0)>0 " +
+      "AND (SELECT al.action FROM audit_logs al WHERE al.action IN ('ARTICLE_CLASSIFICATION_VERIFIED','ARTICLE_CLASSIFICATION_REOPENED') AND al.metadata->>'articleId'=a.id::text ORDER BY al.created_at DESC,al.id DESC LIMIT 1)='ARTICLE_CLASSIFICATION_VERIFIED'" +
+      (onlineScope ? ' AND ' + onlineScope : '');
+
+    const printSql =
+      "SELECT 'print'::text source_type,pa.id,pa.title,pa.summary::text summary,NULL::text url,pe.edition_date::timestamptz published_at,pa.sentiment,pa.risk_score::float," +
+      "COALESCE(NULLIF(pa.ai_metadata->'intelligence'->>'riskLevel',''),CASE WHEN pa.risk_score>=80 THEN 'critical' WHEN pa.risk_score>=60 THEN 'high' WHEN pa.risk_score>=35 THEN 'medium' ELSE 'low' END)::text risk_level," +
+      "pa.importance_score::float,NULLIF(pa.ai_metadata->'intelligence'->>'impactScore','')::float impact_score,ms.name::text source_name,pa.opd_id,pa.district_id " +
+      "FROM print_articles pa JOIN print_editions pe ON pe.id=pa.edition_id JOIN media_sources ms ON ms.id=pe.source_id " +
+      "WHERE lower(pa.status)='analyzed' AND pa.opd_id IS NOT NULL AND pa.ai_metadata->'v16Routing'->>'routingStatus'='ROUTED' " +
+      "AND COALESCE(pa.ai_metadata->'v16Routing'->>'keywordId','')<>'' AND pa.ai_metadata->'v16Routing'->>'keywordVerification'='ACCEPTED' " +
+      "AND pa.ai_metadata->'intelligence'->>'riskStatus'='FINAL' AND pa.sentiment IS NOT NULL AND COALESCE(pa.risk_score,0)>0" +
+      (printScope ? ' AND ' + printScope : '');
+
+    const socialSql =
+      "SELECT CASE WHEN sm.source_kind='owned' THEN 'owned' ELSE 'social' END::text source_type,sm.id,COALESCE(sm.title,left(sm.content,240)) title,left(sm.content,1200) summary,sm.canonical_url::text url," +
+      "COALESCE(sm.published_at,sm.captured_at) published_at,sm.sentiment,sm.risk_score::float,sm.risk_level::text,sm.importance_score::float,sm.influence_score::float impact_score," +
+      "COALESCE(osa.account_name,sm.author_name,sm.platform)::text source_name,sm.opd_id,sm.district_id " +
+      "FROM social_mentions sm LEFT JOIN owned_social_accounts osa ON osa.id=sm.owned_account_id " +
+      "WHERE sm.sentiment IS NOT NULL AND COALESCE(sm.risk_score,0)>0 AND (" +
+      "(sm.source_kind='external' AND sm.metadata->'v16Routing'->>'newsClassification'='UTAMA' AND sm.metadata->'v16Routing'->>'routingStatus'='ROUTED' AND sm.opd_id IS NOT NULL " +
+      "AND (sm.metadata->'socialVerification'->>'status'='LOCKED' OR sm.metadata->'manualClassification'->>'locked'='true') AND sm.metadata->'intelligence'->>'riskStatus'='FINAL') OR " +
+      "(sm.source_kind='owned' AND sm.curation_status='approved' AND sm.metadata->'v16Routing'->>'verificationStatus'='LOCKED' AND sm.metadata->'v16Routing'->>'routingStatus'='ROUTED' " +
+      "AND sm.metadata->'intelligence'->>'riskStatus'='FINAL'))" +
+      (socialScope ? ' AND ' + socialScope : '');
+
+    const sql = 'WITH trusted AS (' + onlineSql + ' UNION ALL ' + printSql + ' UNION ALL ' + socialSql + ') ' +
+      "SELECT *,COUNT(*) FILTER(WHERE source_type<>'owned') OVER()::int trusted_total," +
+      "COUNT(*) FILTER(WHERE source_type<>'owned' AND sentiment='negative') OVER()::int trusted_negative," +
+      "COUNT(*) FILTER(WHERE source_type<>'owned' AND risk_level IN ('high','critical')) OVER()::int trusted_high FROM trusted " +
+      "WHERE source_type<>'owned' ORDER BY (COALESCE(risk_score,0)*.6+COALESCE(impact_score,0)*.4) DESC,published_at DESC NULLS LAST LIMIT " + limit;
+    const { rows } = await pool.query(sql, params);
+    const ownedParams: unknown[] = [];
+    const ownedBind = (value: unknown) => { ownedParams.push(value); return '$' + ownedParams.length; };
+    const ownedOp = opdId ? ownedBind(opdId) : null;
+    const ownedDist = districtId ? ownedBind(districtId) : null;
+    const ownedSince = ownedBind(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString());
+    const ownedScope = [
+      ownedOp ? 'sm.opd_id=' + ownedOp : '',
+      ownedDist ? 'sm.district_id=' + ownedDist : '',
+    ].filter(Boolean).join(' AND ');
+    const ownedSql =
+      "SELECT sm.id,COALESCE(sm.title,left(sm.content,240)) title,left(sm.content,1200) summary,sm.canonical_url::text url," +
+      "COALESCE(sm.published_at,sm.captured_at) published_at,sm.sentiment,sm.risk_score::float,sm.risk_level::text,sm.importance_score::float,sm.influence_score::float impact_score," +
+      "COALESCE(osa.account_name,sm.author_name,sm.platform)::text source_name,sm.opd_id,sm.district_id " +
+      "FROM social_mentions sm LEFT JOIN owned_social_accounts osa ON osa.id=sm.owned_account_id " +
+      "WHERE sm.source_kind='owned' AND sm.curation_status='approved' AND sm.metadata->'v16Routing'->>'verificationStatus'='LOCKED' " +
+      "AND sm.metadata->'v16Routing'->>'routingStatus'='ROUTED' AND sm.metadata->'intelligence'->>'riskStatus'='FINAL' " +
+      "AND sm.sentiment IS NOT NULL AND COALESCE(sm.risk_score,0)>0 AND COALESCE(sm.published_at,sm.captured_at)>=" + ownedSince +
+      (ownedScope ? ' AND ' + ownedScope : '') +
+      " ORDER BY sm.risk_score DESC,COALESCE(sm.published_at,sm.captured_at) DESC";
+    const ownedResult = await pool.query(ownedSql, ownedParams);
+    const ownedRows = ownedResult.rows;
+    const sentiment = ownedRows.reduce((a:any,x:any)=>{const k=String(x.sentiment||'neutral').toLowerCase();a[k]=(a[k]||0)+1;return a;},{});
+    const channelCounts = ownedRows.reduce((a:any,x:any)=>{const k=String(x.source_name||'Tidak diketahui');a[k]=(a[k]||0)+1;return a;},{});
+    const topChannel = Object.entries(channelCounts).sort((a:any,b:any)=>b[1]-a[1])[0] || null;
+    const totals = rows[0] ? {
+      total: Number(rows[0].trusted_total || 0),
+      negative: Number(rows[0].trusted_negative || 0),
+      high: Number(rows[0].trusted_high || 0),
+    } : { total: 0, negative: 0, high: 0 };
+    return {
+      data: rows.map(({ trusted_total, trusted_negative, trusted_high, ...x }: any) => x),
+      metrics: totals,
+      scope: { opdId, districtId },
+      policy: 'EXTERNAL_FINAL_LOCKED_ANALYZED_ONLY',
+      ownedFocus: { periodDays: 7, total: ownedRows.length, sentiment, highestRisk: ownedRows[0] || null, topChannel: topChannel ? { name: topChannel[0], count: topChannel[1] } : null, items: ownedRows.slice(0,5) },
+    };
+  });
+
+
+
+  app.get('/api/command-center/daily-news', { preHandler: auth }, async (request, reply) => {
+    const parsed = z.object({
+      opdId: z.string().regex(/^\d+$/).optional(),
+      districtId: z.string().regex(/^\d+$/).optional(),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+      perMedia: z.coerce.number().int().min(1).max(10).default(3),
+    }).safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ error: 'INVALID_QUERY' });
+
+    const user = request.scopeUser;
+    const canReadAll = Boolean(user && (user.legacyRole === 'admin' || user.roles.includes('super_admin') || user.roles.includes('humas') || user.roles.includes('executive') || hasPermission(user,'platform.admin')));
+    const opdId = canReadAll ? (parsed.data.opdId ?? null) : (user?.opdId ?? null);
+    const districtId = canReadAll ? (parsed.data.districtId ?? null) : (user?.districtId ?? null);
+    const params: unknown[] = [];
+    const bind = (value: unknown) => { params.push(value); return '$' + params.length; };
+    const op = opdId ? bind(opdId) : null;
+    const dist = districtId ? bind(districtId) : null;
+    const day = bind(parsed.data.date ?? new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()));
+    const perMedia = bind(parsed.data.perMedia);
+    const onlineScope = [op ? 'a.opd_id=' + op : '', dist ? 'a.district_id=' + dist : ''].filter(Boolean).join(' AND ');
+    const printScope = [op ? 'pa.opd_id=' + op : '', dist ? 'pa.district_id=' + dist : ''].filter(Boolean).join(' AND ');
+    const socialScope = [op ? 'sm.opd_id=' + op : '', dist ? 'sm.district_id=' + dist : ''].filter(Boolean).join(' AND ');
+
+    const onlineSql =
+      "SELECT 'online'::text source_type,a.id,a.title,a.summary::text summary,a.url::text url,a.published_at,a.sentiment,a.risk_score::float,a.risk_level::text,ms.name::text source_name," +
+      "NULL::bigint evidence_file_id,NULL::text evidence_mime_type FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE a.news_classification='UTAMA' AND a.sentiment IS NOT NULL AND COALESCE(a.risk_score,0)>0 " +
+      "AND (SELECT al.action FROM audit_logs al WHERE al.action IN ('ARTICLE_CLASSIFICATION_VERIFIED','ARTICLE_CLASSIFICATION_REOPENED') AND al.metadata->>'articleId'=a.id::text ORDER BY al.created_at DESC,al.id DESC LIMIT 1)='ARTICLE_CLASSIFICATION_VERIFIED' " +
+      "AND (a.published_at AT TIME ZONE 'Asia/Jakarta')::date=" + day + "::date" + (onlineScope ? ' AND ' + onlineScope : '');
+    const printSql =
+      "SELECT 'print'::text source_type,pa.id,pa.title,pa.summary::text summary,NULL::text url,pe.edition_date::timestamptz published_at,pa.sentiment,pa.risk_score::float," +
+      "COALESCE(NULLIF(pa.ai_metadata->'intelligence'->>'riskLevel',''),CASE WHEN pa.risk_score>=80 THEN 'critical' WHEN pa.risk_score>=60 THEN 'high' WHEN pa.risk_score>=35 THEN 'medium' ELSE 'low' END)::text risk_level,ms.name::text source_name," +
+      "(SELECT (f->>'id')::bigint FROM evidence_sources es CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(es.metadata->'files')='array' THEN es.metadata->'files' ELSE '[]'::jsonb END) f WHERE es.print_article_id=pa.id AND es.source_type='print' ORDER BY COALESCE((f->>'order')::int,999),es.id LIMIT 1) evidence_file_id," +
+      "(SELECT f->>'mimeType' FROM evidence_sources es CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(es.metadata->'files')='array' THEN es.metadata->'files' ELSE '[]'::jsonb END) f WHERE es.print_article_id=pa.id AND es.source_type='print' ORDER BY COALESCE((f->>'order')::int,999),es.id LIMIT 1) evidence_mime_type " +
+      "FROM print_articles pa JOIN print_editions pe ON pe.id=pa.edition_id JOIN media_sources ms ON ms.id=pe.source_id WHERE lower(pa.status)='analyzed' AND pa.opd_id IS NOT NULL " +
+      "AND pa.ai_metadata->'v16Routing'->>'routingStatus'='ROUTED' AND COALESCE(pa.ai_metadata->'v16Routing'->>'keywordId','')<>'' AND pa.ai_metadata->'v16Routing'->>'keywordVerification'='ACCEPTED' " +
+      "AND pa.ai_metadata->'intelligence'->>'riskStatus'='FINAL' AND pa.sentiment IS NOT NULL AND COALESCE(pa.risk_score,0)>0 AND pe.edition_date=" + day + "::date" + (printScope ? ' AND ' + printScope : '');
+    const socialSql =
+      "SELECT CASE WHEN sm.source_kind='owned' THEN 'owned' ELSE 'social' END::text source_type,sm.id,COALESCE(sm.title,left(sm.content,240)) title,left(sm.content,1200) summary,sm.canonical_url::text url," +
+      "COALESCE(sm.published_at,sm.captured_at) published_at,sm.sentiment,sm.risk_score::float,sm.risk_level::text,COALESCE(osa.account_name,sm.author_name,sm.platform)::text source_name " +
+      ",NULL::bigint evidence_file_id,NULL::text evidence_mime_type FROM social_mentions sm LEFT JOIN owned_social_accounts osa ON osa.id=sm.owned_account_id WHERE sm.sentiment IS NOT NULL AND COALESCE(sm.risk_score,0)>0 AND (" +
+      "(sm.source_kind='external' AND sm.metadata->'v16Routing'->>'newsClassification'='UTAMA' AND sm.metadata->'v16Routing'->>'routingStatus'='ROUTED' AND sm.opd_id IS NOT NULL AND (sm.metadata->'socialVerification'->>'status'='LOCKED' OR sm.metadata->'manualClassification'->>'locked'='true') AND sm.metadata->'intelligence'->>'riskStatus'='FINAL') OR " +
+      "(sm.source_kind='owned' AND sm.curation_status='approved' AND sm.metadata->'v16Routing'->>'verificationStatus'='LOCKED' AND sm.metadata->'v16Routing'->>'routingStatus'='ROUTED' AND sm.metadata->'intelligence'->>'riskStatus'='FINAL')) " +
+      "AND (COALESCE(sm.published_at,sm.captured_at) AT TIME ZONE 'Asia/Jakarta')::date=" + day + "::date" + (socialScope ? ' AND ' + socialScope : '');
+
+    const sql = "WITH daily AS (" + onlineSql + " UNION ALL " + printSql + " UNION ALL " + socialSql + "), ranked AS (SELECT *,row_number() OVER(PARTITION BY source_type ORDER BY published_at DESC NULLS LAST,id DESC) rn FROM daily) SELECT * FROM ranked WHERE rn<=" + perMedia + " ORDER BY CASE source_type WHEN 'online' THEN 1 WHEN 'print' THEN 2 WHEN 'social' THEN 3 ELSE 4 END,rn";
+    const { rows } = await pool.query(sql, params);
+    const groups: Record<string, any[]> = { online: [], print: [], social: [], owned: [] };
+    for (const row of rows) (groups[row.source_type] ||= []).push(row);
+    return { date: parsed.data.date ?? new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date()), scope:{opdId,districtId}, perMedia:parsed.data.perMedia, groups };
+  });
+
+  app.get('/api/command-center/workflow-pipeline', { preHandler: auth }, async (request, reply) => {
+    const parsed=z.object({opdId:z.coerce.number().int().positive().optional(),districtId:z.coerce.number().int().positive().optional()}).safeParse(request.query);
+    if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
+    const user=request.scopeUser;
+    const canReadAll=Boolean(user&&(user.legacyRole==='admin'||user.roles.includes('super_admin')||user.roles.includes('humas')||user.roles.includes('executive')||hasPermission(user,'platform.admin')));
+    const opdId=canReadAll?(parsed.data.opdId??null):(user?.opdId??null),districtId=canReadAll?(parsed.data.districtId??null):(user?.districtId??null);
+    const params:unknown[]=[];
+    const bind=(value:unknown)=>{params.push(value);return String.fromCharCode(36)+params.length};
+    const where:string[]=["lower(i.status) IN ('watch','active')"];
+    if(opdId){const p=bind(opdId);where.push('(EXISTS(SELECT 1 FROM issue_opd io WHERE io.issue_id=i.id AND io.opd_id='+p+') OR w.lead_opd_id='+p+')')}
+    if(districtId){const p=bind(districtId);where.push("(i.geographic_scope='CITYWIDE' OR EXISTS(SELECT 1 FROM issue_districts ids WHERE ids.issue_id=i.id AND ids.district_id="+p+"))")}
+    const sql="SELECT i.id issue_id,i.title issue_title,i.status issue_status,w.id workflow_id,w.cycle_number,w.workflow_status,w.lead_opd_id,w.due_at,w.updated_at,"+
+      "EXISTS(SELECT 1 FROM issue_communication_gap_snapshots g WHERE g.workflow_id=w.id) gap_done,"+
+      "EXISTS(SELECT 1 FROM issue_response_submissions r WHERE r.workflow_id=w.id) clarification_started,"+
+      "EXISTS(SELECT 1 FROM communication_strategies s WHERE s.workflow_id=w.id) strategy_started,"+
+      "EXISTS(SELECT 1 FROM communication_strategies s WHERE s.workflow_id=w.id AND s.status='APPROVED') strategy_approved,"+
+      "EXISTS(SELECT 1 FROM issue_publication_evidence p WHERE p.workflow_id=w.id) publication_done "+
+      "FROM issues i JOIN LATERAL(SELECT wx.* FROM issue_workflows wx WHERE wx.issue_id=i.id ORDER BY wx.cycle_number DESC,wx.id DESC LIMIT 1) w ON true "+
+      "WHERE "+where.join(' AND ')+" ORDER BY w.updated_at DESC,i.id DESC";
+    const rows=(await pool.query(sql,params)).rows;
+    const stage=(x:any)=>{const ws=String(x.workflow_status||'').toUpperCase();if(ws==='CLOSED')return'CLOSED';if(x.publication_done||ws==='PUBLISHED'||ws==='MONITORING')return'MONITORING';if(x.strategy_approved)return'PUBLICATION';if(x.strategy_started||ws==='STRATEGY')return'STRATEGY';if(x.gap_done&&(x.clarification_started||ws==='APPROVED'))return'CLARIFICATION';return'GAP'};
+    const active=rows.map((x:any)=>({...x,stage:stage(x)})).filter((x:any)=>x.stage!=='CLOSED');
+    const stages=['GAP','CLARIFICATION','STRATEGY','PUBLICATION','MONITORING'].map(key=>({key,count:active.filter((x:any)=>x.stage===key).length,items:active.filter((x:any)=>x.stage===key).map((x:any)=>({issueId:x.issue_id,title:x.issue_title,status:x.issue_status,workflowId:x.workflow_id,cycleNumber:x.cycle_number,dueAt:x.due_at,updatedAt:x.updated_at,overdue:Boolean(['GAP','CLARIFICATION'].includes(x.stage)&&x.due_at&&new Date(x.due_at).getTime()<Date.now())}))}));
+    const overdue=active.filter((x:any)=>['GAP','CLARIFICATION'].includes(x.stage)&&x.due_at&&new Date(x.due_at).getTime()<Date.now()).map((x:any)=>({issueId:x.issue_id,title:x.issue_title,status:x.issue_status,workflowId:x.workflow_id,cycleNumber:x.cycle_number,stage:x.stage,dueAt:x.due_at}));
+    return{scope:{opdId,districtId},total:active.length,closed:rows.filter((x:any)=>stage(x)==='CLOSED').length,overdueCount:overdue.length,overdue,stages};
+  });
+
+  app.get('/api/command-center/scope', { preHandler: auth }, async (request, reply) => {
+    const parsed = z.object({
+      opdId: z.string().regex(/^\d+$/).optional(),
+      districtId: z.string().regex(/^\d+$/).optional(),
+      articleLimit: z.coerce.number().int().min(1).max(100).default(25),
+      highlightLimit: z.coerce.number().int().min(1).max(50).default(10),
+      alertLimit: z.coerce.number().int().min(1).max(100).default(25),
+    }).safeParse(request.query);
+    if (!parsed.success) return reply.code(400).send({ error: 'INVALID_QUERY' });
+
+    const user = request.scopeUser;
+    const canReadAll = Boolean(user && (user.legacyRole === 'admin' || user.roles.includes('super_admin') || user.roles.includes('humas') || user.roles.includes('executive') || hasPermission(user,'platform.admin')));
+    const opdId = canReadAll ? (parsed.data.opdId ?? null) : (user?.opdId ?? null);
+    const districtId = canReadAll ? (parsed.data.districtId ?? null) : (user?.districtId ?? null);
+    const params: unknown[] = [];
+    const where: string[] = [];
+    if (opdId) { params.push(opdId); where.push(`a.opd_id=$${params.length}`); }
+    if (districtId) { params.push(districtId); where.push(`a.district_id=$${params.length}`); }
+    const filterSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+
+    const metricResult = await pool.query(
+      `SELECT COUNT(*)::int total_articles,
+              COUNT(*) FILTER(WHERE is_highlight)::int highlights,
+              COUNT(*) FILTER(WHERE sentiment='negative')::int negative,
+              COUNT(*) FILTER(WHERE risk_level IN ('high','critical'))::int critical,
+              COUNT(*) FILTER(WHERE risk_level='critical')::int critical_alerts,
+              COALESCE(ROUND(AVG(importance_score)),0)::int momentum
+         FROM articles a ${filterSql}`,
+      params,
+    );
+    const sourcesResult = await pool.query(`SELECT COUNT(*)::int count FROM media_sources WHERE active=true`);
+
+    const articleParams = [...params, parsed.data.articleLimit];
+    const articles = await pool.query(
+      `SELECT a.id,a.title,a.url,a.published_at,a.sentiment,a.importance_score,a.impact_score,a.velocity_score,
+              a.risk_score,a.risk_level,a.is_highlight,a.summary,a.opd_id,a.district_id,
+              ms.name source_name,o.name opd_name,d.name district_name
+         FROM articles a
+         LEFT JOIN media_sources ms ON ms.id=a.source_id
+         LEFT JOIN opd o ON o.id=a.opd_id
+         LEFT JOIN districts d ON d.id=a.district_id
+         ${filterSql}
+         ORDER BY a.importance_score DESC,a.published_at DESC NULLS LAST
+         LIMIT $${articleParams.length}`,
+      articleParams,
+    );
+
+    const highlightWhere = [...where, 'a.is_highlight=true'];
+    const highlightParams = [...params, parsed.data.highlightLimit];
+    const highlights = await pool.query(
+      `SELECT a.id,a.title,a.url,a.published_at,a.sentiment,a.importance_score,a.impact_score,a.velocity_score,
+              a.risk_score,a.risk_level,a.summary,a.opd_id,a.district_id,
+              ms.name source_name,o.name opd_name,d.name district_name
+         FROM articles a
+         LEFT JOIN media_sources ms ON ms.id=a.source_id
+         LEFT JOIN opd o ON o.id=a.opd_id
+         LEFT JOIN districts d ON d.id=a.district_id
+         WHERE ${highlightWhere.join(' AND ')}
+         ORDER BY a.risk_score DESC,a.importance_score DESC,a.published_at DESC NULLS LAST
+         LIMIT $${highlightParams.length}`,
+      highlightParams,
+    );
+
+    const alertParams: unknown[] = ['open'];
+    const alertWhere: string[] = ['aa.status=$1'];
+    if (opdId) { alertParams.push(opdId); alertWhere.push(`a.opd_id=$${alertParams.length}`); }
+    if (districtId) { alertParams.push(districtId); alertWhere.push(`a.district_id=$${alertParams.length}`); }
+    alertParams.push(parsed.data.alertLimit);
+    const alerts = await pool.query(
+      `SELECT aa.id,aa.article_id,aa.alert_type,aa.severity,aa.reason,aa.status,aa.created_at,
+              a.title,a.url,a.published_at,a.risk_score,a.risk_level,a.opd_id,a.district_id,
+              ms.name source_name,o.name opd_name,d.name district_name
+         FROM article_alerts aa
+         JOIN articles a ON a.id=aa.article_id
+         LEFT JOIN media_sources ms ON ms.id=a.source_id
+         LEFT JOIN opd o ON o.id=a.opd_id
+         LEFT JOIN districts d ON d.id=a.district_id
+         WHERE ${alertWhere.join(' AND ')}
+         ORDER BY aa.created_at DESC
+         LIMIT $${alertParams.length}`,
+      alertParams,
+    );
+
+    return {
+      scope: { opdId, districtId },
+      metrics: { ...metricResult.rows[0], sources: Number(sourcesResult.rows[0]?.count || 0) },
+      articles: articles.rows,
+      highlights: highlights.rows,
+      alerts: alerts.rows,
+    };
+  });
+}

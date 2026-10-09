@@ -1,0 +1,48 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main, 'fix/**']
+    paths:
+      - 'backend/**'
+      - 'phase3-outcome-ui.js'
+      - 'issue-management-v2.js'
+      - 'social-intelligence.js'
+      - 'owned-channel-intelligence.js'
+      - 'online-latest-news.js'
+      - 'communication-strategy-ui.js'
+      - 'communication-gap-ui.js'
+      - 'command-center.js'
+      - '.github/workflows/backend.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'phase3-outcome-ui.js'
+      - '.github/workflows/backend.yml'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check critical frontend syntax
+        working-directory: .
+        run: |
+          node --check phase3-outcome-ui.js
+          node --check issue-management-v2.js
+          node --check social-intelligence.js
+          node --check owned-channel-intelligence.js
+          node --check online-latest-news.js
+          node --check communication-strategy-ui.js
+          node --check communication-gap-ui.js
+          node --check command-center.js
+      - run: npm install
+      - run: npm run check
+      - run: npm test
+      - run: npm run build

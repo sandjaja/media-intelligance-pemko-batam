@@ -1,0 +1,102 @@
+import type { FastifyInstance, FastifyRequest } from 'fastify';
+import type { Pool } from 'pg';
+import jwt from 'jsonwebtoken';
+import argon2 from 'argon2';
+import { z } from 'zod';
+import { NORMALIZED_ROLES, hasPermission, legacyRoleFor, loadAuthorizationContext, roleRequiresOpd, roleRequiresDistrict, type AuthorizationContext, type NormalizedRole } from './rbac.js';
+
+declare module 'fastify' {
+  interface FastifyRequest { authz?: AuthorizationContext; }
+}
+
+const roleEnum = z.enum(NORMALIZED_ROLES);
+const ROLE_DESCRIPTIONS: Record<string,string> = {
+  super_admin: 'Akses penuh platform, konfigurasi, pengguna dan seluruh data Command Center.',
+  humas: 'Operasional komunikasi, analisis media, konten, strategi, assignment OPD, review dan approval respons.',
+  executive: 'Akses baca executive intelligence, isu strategis, strategi dan laporan.',
+  opd: 'Menerima tugas OPD, menyiapkan fakta/data, menyusun respons, dan mengirimkannya ke Humas untuk review/approval.',
+  district: 'Memantau isu di wilayah kecamatan dan memberi klarifikasi lapangan hanya ketika ditugaskan Humas.',
+  viewer: 'Akses baca terbatas untuk monitoring dan laporan.',
+};
+
+export async function registerRbacRoutes(app: FastifyInstance, pool: Pool, jwtSecret: string) {
+  const authz = async (request: FastifyRequest, reply: any) => {
+    const token = request.cookies.access_token;
+    if (!token) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+    try {
+      const decoded = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
+      if (typeof decoded.sub !== 'string') throw new Error('invalid');
+      const context = await loadAuthorizationContext(pool, decoded.sub);
+      if (!context || !context.active) return reply.code(401).send({ error: 'USER_INACTIVE_OR_MISSING' });
+      request.authz = context;
+    } catch { return reply.code(401).send({ error: 'INVALID_ACCESS_TOKEN' }); }
+  };
+  const requirePermission = (permission: string) => async (request: FastifyRequest, reply: any) => {
+    if (!request.authz || !hasPermission(request.authz, permission)) return reply.code(403).send({ error: 'FORBIDDEN', permission });
+  };
+
+  app.get('/api/rbac/me', { preHandler: authz }, async request => ({ user: { id: request.authz!.id, email: request.authz!.email, role: request.authz!.legacyRole, opdId: request.authz!.opdId, districtId: request.authz!.districtId, roles: request.authz!.roles, permissions: request.authz!.permissions } }));
+
+  app.get('/api/admin/rbac/roles', { preHandler: [authz, requirePermission('users.manage')] }, async () => {
+    const { rows } = await pool.query(`SELECT r.id,r.code,r.name,r.scope,r.active, COALESCE(array_agg(p.code ORDER BY p.code) FILTER (WHERE p.code IS NOT NULL), ARRAY[]::text[]) permissions FROM roles r LEFT JOIN role_permissions rp ON rp.role_id=r.id LEFT JOIN permissions p ON p.id=rp.permission_id WHERE r.active=true AND r.code IN ('super_admin','humas','executive','opd','district','viewer') GROUP BY r.id,r.code,r.name,r.scope,r.active ORDER BY CASE r.code WHEN 'super_admin' THEN 1 WHEN 'humas' THEN 2 WHEN 'executive' THEN 3 WHEN 'opd' THEN 4 WHEN 'district' THEN 5 ELSE 6 END`);
+    return { data: rows.map(row => ({ ...row, description: ROLE_DESCRIPTIONS[row.code] ?? '' })) };
+  });
+
+  app.get('/api/admin/password-reset-requests', { preHandler: [authz, requirePermission('users.manage')] }, async () => {const {rows}=await pool.query(`SELECT pr.id,pr.user_id,u.email,pr.requested_at,pr.status,pr.resolved_at,ru.email resolved_by_email FROM password_reset_requests pr JOIN users u ON u.id=pr.user_id LEFT JOIN users ru ON ru.id=pr.resolved_by ORDER BY CASE WHEN pr.status='PENDING' THEN 0 ELSE 1 END,pr.requested_at DESC LIMIT 100`);return{data:rows};});
+  app.post('/api/admin/password-reset-requests/:id/reset', { preHandler: [authz, requirePermission('users.manage')] }, async (request,reply) => {const id=z.coerce.number().int().positive().safeParse((request.params as any).id),body=z.object({password:z.string().min(8).max(200)}).safeParse(request.body);if(!id.success||!body.success)return reply.code(400).send({error:'INVALID_PASSWORD_RESET'});const client=await pool.connect();try{await client.query('BEGIN');const req=(await client.query(`SELECT pr.id,pr.user_id,u.email FROM password_reset_requests pr JOIN users u ON u.id=pr.user_id WHERE pr.id=$1 AND pr.status='PENDING' FOR UPDATE`,[id.data])).rows[0];if(!req){await client.query('ROLLBACK');return reply.code(404).send({error:'RESET_REQUEST_NOT_PENDING'});}const hash=await argon2.hash(body.data.password,{type:argon2.argon2id});await client.query(`UPDATE users SET password_hash=$2 WHERE id=$1`,[req.user_id,hash]);await client.query(`UPDATE refresh_tokens SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL`,[req.user_id]);await client.query(`UPDATE password_reset_requests SET status='COMPLETED',resolved_by=$2,resolved_at=now() WHERE id=$1`,[id.data,request.authz!.id]);await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'PASSWORD_RESET_BY_ADMIN',$2)`,[request.authz!.id,{targetUserId:req.user_id,requestId:id.data}]);await client.query('COMMIT');return{ok:true,data:{id:id.data,email:req.email,status:'COMPLETED'}};}catch(error){await client.query('ROLLBACK');throw error}finally{client.release();}});
+  app.get('/api/admin/rbac/users', { preHandler: [authz, requirePermission('users.manage')] }, async () => {
+    const { rows } = await pool.query(`SELECT u.id,u.email,u.role legacy_role,u.active,u.opd_id,o.name opd_name,u.district_id,d.name district_name,u.created_at, COALESCE(array_agg(DISTINCT r.code) FILTER (WHERE r.code IS NOT NULL), ARRAY[]::text[]) roles FROM users u LEFT JOIN opd o ON o.id=u.opd_id LEFT JOIN districts d ON d.id=u.district_id LEFT JOIN user_roles ur ON ur.user_id=u.id LEFT JOIN roles r ON r.id=ur.role_id GROUP BY u.id,u.email,u.role,u.active,u.opd_id,o.name,u.district_id,d.name,u.created_at ORDER BY u.email`);
+    return { data: rows };
+  });
+
+  const createInput = z.object({ email: z.string().email().max(200), password: z.string().min(8).max(200), role: roleEnum, opdId: z.coerce.number().int().positive().nullable().optional(), districtId: z.coerce.number().int().positive().nullable().optional(), active: z.boolean().default(true) });
+  app.post('/api/admin/rbac/users', { preHandler: [authz, requirePermission('users.manage')] }, async (request, reply) => {
+    const parsed = createInput.safeParse(request.body); if (!parsed.success) return reply.code(400).send({ error: 'INVALID_USER', details: parsed.error.flatten() });
+    const role = parsed.data.role as NormalizedRole, opdId = parsed.data.opdId ?? null, districtId = parsed.data.districtId ?? null;
+    if (roleRequiresOpd(role) && !opdId) return reply.code(400).send({ error: 'OPD_REQUIRED_FOR_ROLE' });
+    if (!roleRequiresOpd(role) && opdId) return reply.code(400).send({ error: 'ROLE_CANNOT_HAVE_OPD_SCOPE' });
+    if (roleRequiresDistrict(role) && !districtId) return reply.code(400).send({ error: 'DISTRICT_REQUIRED_FOR_ROLE' });
+    if (!roleRequiresDistrict(role) && districtId) return reply.code(400).send({ error: 'ROLE_CANNOT_HAVE_DISTRICT_SCOPE' });
+    if (opdId && !(await pool.query(`SELECT id FROM opd WHERE id=$1 AND active=true`, [opdId])).rows[0]) return reply.code(404).send({ error: 'OPD_NOT_FOUND' });
+    if (districtId && !(await pool.query(`SELECT id FROM districts WHERE id=$1 AND active=true`, [districtId])).rows[0]) return reply.code(404).send({ error: 'DISTRICT_NOT_FOUND' });
+    const passwordHash = await argon2.hash(parsed.data.password, { type: argon2.argon2id }); const client = await pool.connect();
+    try { await client.query('BEGIN'); const { rows } = await client.query(`INSERT INTO users(email,password_hash,role,active,opd_id,district_id) VALUES($1,$2,$3,$4,$5,$6) RETURNING id,email,role,active,opd_id,district_id,created_at`, [parsed.data.email.toLowerCase(), passwordHash, legacyRoleFor(role), parsed.data.active, opdId, districtId]); await client.query(`INSERT INTO user_roles(user_id,role_id,opd_id) SELECT $1,r.id,$2 FROM roles r WHERE r.code=$3 ON CONFLICT DO NOTHING`, [rows[0].id, opdId, role]); await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'RBAC_USER_CREATED',$2)`, [request.authz!.id, { userId: rows[0].id, email: rows[0].email, normalizedRole: role, opdId, districtId }]); await client.query('COMMIT'); return reply.code(201).send({ data: { ...rows[0], roles: [role] } }); }
+    catch (error: any) { await client.query('ROLLBACK'); if (error?.code === '23505') return reply.code(409).send({ error: 'USER_ALREADY_EXISTS' }); throw error; } finally { client.release(); }
+  });
+
+  const updateInput = z.object({ email: z.string().email().max(200).optional(), password: z.string().min(8).max(200).optional(), role: roleEnum.optional(), opdId: z.coerce.number().int().positive().nullable().optional(), districtId: z.coerce.number().int().positive().nullable().optional(), active: z.boolean().optional() });
+  app.patch('/api/admin/rbac/users/:id', { preHandler: [authz, requirePermission('users.manage')] }, async (request, reply) => {
+    const id=z.object({id:z.string().regex(/^\d+$/)}).safeParse(request.params), parsed=updateInput.safeParse(request.body); if(!id.success||!parsed.success)return reply.code(400).send({error:'INVALID_USER'});
+    const current=(await pool.query(`SELECT u.*,COALESCE((SELECT r.code FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=u.id ORDER BY CASE WHEN r.code='super_admin' THEN 0 ELSE 1 END LIMIT 1),'viewer') normalized_role FROM users u WHERE u.id=$1`,[id.data.id])).rows[0]; if(!current)return reply.code(404).send({error:'USER_NOT_FOUND'});
+    const role=(parsed.data.role??current.normalized_role) as NormalizedRole, opdId=parsed.data.opdId===undefined?(current.opd_id??null):parsed.data.opdId, districtId=parsed.data.districtId===undefined?(current.district_id??null):parsed.data.districtId;
+    if(roleRequiresOpd(role)&&!opdId)return reply.code(400).send({error:'OPD_REQUIRED_FOR_ROLE'}); if(!roleRequiresOpd(role)&&opdId)return reply.code(400).send({error:'ROLE_CANNOT_HAVE_OPD_SCOPE'}); if(roleRequiresDistrict(role)&&!districtId)return reply.code(400).send({error:'DISTRICT_REQUIRED_FOR_ROLE'}); if(!roleRequiresDistrict(role)&&districtId)return reply.code(400).send({error:'ROLE_CANNOT_HAVE_DISTRICT_SCOPE'});
+    if(String(id.data.id)===request.authz!.id){if(parsed.data.active===false)return reply.code(400).send({error:'CANNOT_DISABLE_SELF'});if(request.authz!.roles.includes('super_admin')&&role!=='super_admin')return reply.code(400).send({error:'CANNOT_REMOVE_OWN_SUPER_ADMIN'});}
+    if(opdId&&!(await pool.query(`SELECT id FROM opd WHERE id=$1 AND active=true`,[opdId])).rows[0])return reply.code(404).send({error:'OPD_NOT_FOUND'}); if(districtId&&!(await pool.query(`SELECT id FROM districts WHERE id=$1 AND active=true`,[districtId])).rows[0])return reply.code(404).send({error:'DISTRICT_NOT_FOUND'});
+    const client=await pool.connect(); try{await client.query('BEGIN');const passwordHash=parsed.data.password?await argon2.hash(parsed.data.password,{type:argon2.argon2id}):current.password_hash;const {rows}=await client.query(`UPDATE users SET email=$1,password_hash=$2,role=$3,active=$4,opd_id=$5,district_id=$6 WHERE id=$7 RETURNING id,email,role,active,opd_id,district_id,created_at`,[parsed.data.email?.toLowerCase()??current.email,passwordHash,legacyRoleFor(role),parsed.data.active??current.active,opdId,districtId,id.data.id]);await client.query(`DELETE FROM user_roles WHERE user_id=$1`,[id.data.id]);await client.query(`INSERT INTO user_roles(user_id,role_id,opd_id) SELECT $1,r.id,$2 FROM roles r WHERE r.code=$3`,[id.data.id,opdId,role]);await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'RBAC_USER_UPDATED',$2)`,[request.authz!.id,{userId:id.data.id,normalizedRole:role,opdId,districtId,active:parsed.data.active??current.active}]);await client.query('COMMIT');return{data:{...rows[0],roles:[role]}}}catch(error:any){await client.query('ROLLBACK');if(error?.code==='23505')return reply.code(409).send({error:'USER_ALREADY_EXISTS'});throw error}finally{client.release()}
+  });
+
+  const deleteUser = async (request: FastifyRequest, reply: any) => {
+    const id=z.object({id:z.string().regex(/^\d+$/)}).safeParse(request.params); if(!id.success)return reply.code(400).send({error:'INVALID_USER'});
+    if(id.data.id===request.authz!.id)return reply.code(400).send({error:'CANNOT_DELETE_SELF',message:'Akun yang sedang digunakan tidak dapat dihapus.'});
+    const target=(await pool.query(`SELECT u.id,u.email,EXISTS(SELECT 1 FROM user_roles ur JOIN roles r ON r.id=ur.role_id WHERE ur.user_id=u.id AND r.code='super_admin') is_super_admin FROM users u WHERE u.id=$1`,[id.data.id])).rows[0]; if(!target)return reply.code(404).send({error:'USER_NOT_FOUND',message:'Akun tidak ditemukan atau sudah dihapus.'});
+    if(target.is_super_admin){const count=Number((await pool.query(`SELECT COUNT(DISTINCT ur.user_id) count FROM user_roles ur JOIN roles r ON r.id=ur.role_id JOIN users u ON u.id=ur.user_id WHERE r.code='super_admin' AND u.active=true`)).rows[0]?.count||0);if(count<=1)return reply.code(400).send({error:'CANNOT_DELETE_LAST_SUPER_ADMIN',message:'Super Admin terakhir tidak dapat dihapus.'});}
+    const client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      await client.query(`DELETE FROM refresh_tokens WHERE user_id=$1`,[id.data.id]);
+      await client.query(`DELETE FROM user_roles WHERE user_id=$1`,[id.data.id]);
+      await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'RBAC_USER_DELETED',$2)`,[request.authz!.id,{userId:target.id,email:target.email}]);
+      const result=await client.query(`DELETE FROM users WHERE id=$1 RETURNING id,email`,[id.data.id]);
+      if(!result.rows[0]){await client.query('ROLLBACK');return reply.code(404).send({error:'USER_NOT_FOUND',message:'Akun tidak ditemukan atau sudah dihapus.'});}
+      await client.query('COMMIT');
+      return reply.send({data:{id:String(result.rows[0].id),email:result.rows[0].email,deleted:true}});
+    }catch(error:any){
+      await client.query('ROLLBACK');
+      request.log.error({err:error,userId:id.data.id},'RBAC user deletion failed');
+      return reply.code(500).send({error:'USER_DELETE_FAILED',message:'Akun gagal dihapus. Silakan coba lagi setelah deployment terbaru aktif.'});
+    }finally{client.release()}
+  };
+
+  app.delete('/api/admin/rbac/users/:id', { preHandler: [authz, requirePermission('users.manage')] }, deleteUser);
+  app.post('/api/admin/rbac/users/:id/delete', { preHandler: [authz, requirePermission('users.manage')] }, deleteUser);
+}

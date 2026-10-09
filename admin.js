@@ -1,0 +1,1 @@
+(()=>{const s=document.createElement('script');s.src='./admin-core.js?v=20260914-opdgroup2';document.body.appendChild(s)})();
