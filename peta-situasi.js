@@ -3,6 +3,8 @@ const API=(window.MEDIA_INTELLIGENCE_API||'/api').replace(/\/$/,'');
 const $=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const n=v=>Number(v||0);
+const normName=v=>String(v??'').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().replace(/\\b(kecamatan|kec\\.)\\b/g,'').replace(/[^a-z0-9]+/g,' ').trim();
+const findRegion=(id,name)=>{const rows=data?.data?.regions||[];return rows.find(x=>String(x.district_id??'')===String(id??''))||rows.find(x=>normName(x.district_name)===normName(name));};
 const api=async p=>{const r=await fetch(API+p,{credentials:'include',cache:'no-store'});const j=await r.json().catch(()=>({}));if(!r.ok)throw Error(j.error||j.message||('HTTP '+r.status));return j};
 const scoped=()=>{const r=new Set(window.MEDIA_CURRENT_USER?.roles||[]);return r.has('opd')||r.has('district')};
 const scopeQuery=()=>{const q=new URLSearchParams();if(scoped())return q;const op=$('opdSelect')?.value;if(op&&op!=='all')q.set('opdId',op);const d=$('districtSelect')?.value;if(d&&d!=='all')q.set('districtId',d);return q};
@@ -51,7 +53,7 @@ function buildSvg(g,large=false){
   return '<svg id="petaSvg" viewBox="0 0 '+W+' '+H+'" class="w-full h-full select-none touch-none" preserveAspectRatio="xMidYMid meet"><g id="petaLayer" transform="translate('+panX+' '+panY+') scale('+zoom+')">'+shapes+labels+'</g></svg>';
 }
 function regionInfo(id){
-  const r=data?.data?.regions?.find(x=>String(x.district_id)===String(id));if(!r)return '<div class="text-xs text-slate-500">Wilayah tidak tersedia.</div>';
+  const feature=(data?.data?.geojson?.features||[]).find(f=>String(f.properties?.districtId??'')===String(id??''));const r=findRegion(id,feature?.properties?.districtName||feature?.properties?.name);if(!r)return '<div class="text-xs text-amber-300">Data kecamatan belum cocok dengan data wilayah dari server. Coba Refresh Peta Situasi.</div>';
   const ids=new Set((r.issues||[]).map(i=>Number(i.id)));
   const alerts=(data.alerts||[]).filter(a=>ids.has(Number(a.issue_id)));
   const stages={GAP:0,CLARIFICATION:0};
