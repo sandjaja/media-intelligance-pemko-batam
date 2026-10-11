@@ -3,7 +3,7 @@ const API=(window.MEDIA_INTELLIGENCE_API||'/api').replace(/\/$/,'');
 const $=id=>document.getElementById(id);
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const n=v=>Number(v||0);
-const normName=v=>String(v??'').normalize('NFD').replace(/[\\u0300-\\u036f]/g,'').toLowerCase().replace(/\\b(kecamatan|kec\\.)\\b/g,'').replace(/[^a-z0-9]+/g,' ').trim();
+const normName=v=>String(v??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/\b(kecamatan|kec\.)\b/g,'').replace(/[^a-z0-9]+/g,' ').trim();
 const findRegion=(id,name)=>{const rows=data?.data?.regions||[];return rows.find(x=>String(x.district_id??'')===String(id??''))||rows.find(x=>normName(x.district_name)===normName(name));};
 const api=async p=>{const r=await fetch(API+p,{credentials:'include',cache:'no-store'});const j=await r.json().catch(()=>({}));if(!r.ok)throw Error(j.error||j.message||('HTTP '+r.status));return j};
 const scoped=()=>{const r=new Set(window.MEDIA_CURRENT_USER?.roles||[]);return r.has('opd')||r.has('district')};
