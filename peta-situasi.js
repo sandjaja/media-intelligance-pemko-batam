@@ -78,7 +78,7 @@ function bindInteractions(){
   root.querySelectorAll('[data-region]').forEach(b=>b.onclick=()=>{selected=b.dataset.region;renderPage()});
   root.querySelectorAll('[data-map-issue]').forEach(b=>b.onclick=()=>{const id=Number(b.dataset.mapIssue);if(id)window.openManagementIssuePage?.(id)});
   root.querySelectorAll('[data-zoom]').forEach(b=>b.onclick=()=>{const a=b.dataset.zoom;if(a==='reset'){zoom=1;panX=panY=0}else zoom=Math.max(1,Math.min(7,zoom*(a==='in'?1.35:1/1.35)));renderPage()});
-  stage.addEventListener('pointerdown',e=>{drag=true;lastX=e.clientX;lastY=e.clientY;stage.setPointerCapture?.(e.pointerId)});
+  stage.addEventListener('pointerdown',e=>{drag=true;lastX=e.clientX;lastY=e.clientY});
   stage.addEventListener('pointermove',e=>{if(!drag)return;panX+=e.clientX-lastX;panY+=e.clientY-lastY;lastX=e.clientX;lastY=e.clientY;const layer=$('petaLayer');if(layer)layer.setAttribute('transform','translate('+panX+' '+panY+') scale('+zoom+')')});
   stage.addEventListener('pointerup',()=>drag=false);stage.addEventListener('pointercancel',()=>drag=false);
   stage.addEventListener('wheel',e=>{e.preventDefault();zoom=Math.max(1,Math.min(7,zoom*(e.deltaY<0?1.15:1/1.15)));const layer=$('petaLayer');if(layer)layer.setAttribute('transform','translate('+panX+' '+panY+') scale('+zoom+')')},{passive:false});
