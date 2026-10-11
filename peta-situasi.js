@@ -9,6 +9,32 @@ const api=async p=>{const r=await fetch(API+p,{credentials:'include',cache:'no-s
 const scoped=()=>{const r=new Set(window.MEDIA_CURRENT_USER?.roles||[]);return r.has('opd')||r.has('district')};
 const scopeQuery=()=>{const q=new URLSearchParams();if(scoped())return q;const op=$('opdSelect')?.value;if(op&&op!=='all')q.set('opdId',op);const d=$('districtSelect')?.value;if(d&&d!=='all')q.set('districtId',d);return q};
 let data=null,zoom=1,panX=0,panY=0,drag=false,lastX=0,lastY=0,selected=null;
+let leafletMap=null,leafletLayer=null,leafletLoadPromise=null;
+function loadLeaflet(){
+  if(window.L)return Promise.resolve(window.L);
+  if(leafletLoadPromise)return leafletLoadPromise;
+  leafletLoadPromise=new Promise((resolve,reject)=>{
+    if(!document.querySelector('link[data-leaflet-css]')){const l=document.createElement('link');l.rel='stylesheet';l.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';l.dataset.leafletCss='1';document.head.appendChild(l)}
+    const s=document.createElement('script');s.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';s.dataset.leafletJs='1';s.onload=()=>window.L?resolve(window.L):reject(Error('Leaflet gagal dimuat'));s.onerror=()=>reject(Error('Tidak dapat memuat pustaka Leaflet'));document.head.appendChild(s);
+  });
+  return leafletLoadPromise;
+}
+function initLeaflet(){
+  const stage=$('petaStage');if(!stage||!data?.data?.geojson)return;
+  stage.innerHTML='<div id="leafletMap" style="height:clamp(520px,72vh,820px);width:100%;z-index:1"></div>';
+  loadLeaflet().then(L=>{
+    const node=$('leafletMap');if(!node||!window.__petaSituasiOpen)return;
+    if(leafletMap){leafletMap.remove();leafletMap=null}
+    leafletMap=L.map(node,{zoomControl:true,scrollWheelZoom:true,preferCanvas:true});
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'}).addTo(leafletMap);
+    const style=f=>{const p=f.properties||{},id=String(p.districtId??''),r=findRegion(id,p.districtName||p.name),high=n(r?.high_risk_count),active=n(r?.active_issue_count),isSelected=selected!=null&&String(selected)===id;return {color:isSelected?'#075985':'#0891b2',weight:isSelected?3:1.5,opacity:.95,fillColor:high?'#f43f5e':active?'#f59e0b':'#34d399',fillOpacity:isSelected?.78:.48}};
+    leafletLayer=L.geoJSON(data.data.geojson,{style,onEachFeature:(f,layer)=>{const p=f.properties||{},id=String(p.districtId??''),r=findRegion(id,p.districtName||p.name),name=r?.district_name||p.districtName||p.name||'Kecamatan';layer.bindTooltip(esc(name),{sticky:true,direction:'auto'});layer.on('click',()=>{selected=id;const info=$('petaInfo');if(info)info.innerHTML=regionInfo(id);bindIssueButtons();leafletLayer.setStyle(style);layer.bringToFront()})}}).addTo(leafletMap);
+    try{const bounds=leafletLayer.getBounds();if(bounds.isValid())leafletMap.fitBounds(bounds,{padding:[18,18]});else leafletMap.setView([1.08,104.03],10)}catch{leafletMap.setView([1.08,104.03],10)}
+    setTimeout(()=>leafletMap?.invalidateSize(),100);
+  }).catch(err=>{const node=$('leafletMap');if(node)node.innerHTML='<div class="p-5 text-sm text-amber-700">Peta Leaflet tidak dapat dimuat. Periksa koneksi internet lalu tekan Refresh. ('+esc(err.message)+')</div>'});
+}
+function bindIssueButtons(){const root=$('petaSituasi');root?.querySelectorAll('[data-map-issue]').forEach(b=>b.onclick=()=>{const id=Number(b.dataset.mapIssue);if(id)window.openManagementIssuePage?.(id)});}
+
 
 function ensureSection(){
   if(!$('petaSituasi')){const s=document.createElement('section');s.id='petaSituasi';s.className='hidden space-y-5';$('dashboard')?.parentElement?.appendChild(s);}
@@ -68,13 +94,14 @@ function renderPage(){
   ensureSection();const root=$('petaSituasi');if(!root)return;
   if(!data){root.innerHTML='<div class="glass rounded-2xl p-5 text-sm text-cyan-300"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Memuat Peta Situasi...</div>';return}
   root.innerHTML='<div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-[10px] text-cyan-400 font-black tracking-[.22em]">COMMAND CENTER · PETA SITUASI</div><h2 class="text-2xl font-black mt-1">Peta Situasi Wilayah</h2><p class="text-xs text-slate-500 mt-2">Eksplorasi wilayah tanpa mengunci halaman. Warna memakai sinyal Issue yang sudah ada.</p></div><button id="petaRefresh" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-xs font-bold"><i class="fa-solid fa-rotate mr-1"></i>Refresh</button></div>'+
-  '<div class="grid lg:grid-cols-[minmax(0,1fr)_360px] gap-4"><section class="glass rounded-2xl p-3"><div id="petaStage" class="relative min-h-[520px] md:min-h-[680px] rounded-xl overflow-hidden border border-slate-800 bg-slate-950 flex items-center justify-center">'+buildSvg(data.data.geojson,true)+'</div><div class="flex flex-wrap gap-2 mt-3"><button data-zoom="in" class="px-4 py-2 rounded-lg border border-slate-700 bg-slate-900 font-black">+</button><button data-zoom="out" class="px-4 py-2 rounded-lg border border-slate-700 bg-slate-900 font-black">−</button><button data-zoom="reset" class="px-4 py-2 rounded-lg border border-slate-700 bg-slate-900 text-xs font-bold">Reset</button><span class="text-[10px] text-slate-500 self-center">Pinch/scroll untuk zoom · geser untuk pan</span></div><div class="flex flex-wrap gap-3 mt-3 text-[10px]"><span class="text-emerald-300">● Normal</span><span class="text-amber-300">● Perhatian</span><span class="text-rose-300">● Tinggi</span></div></section><aside id="petaInfo" class="glass rounded-2xl p-5 min-w-0 overflow-hidden break-words">'+(selected?regionInfo(selected):'<div class="text-xs text-slate-500">Pilih kecamatan pada peta untuk melihat situasi wilayah.</div>')+'</aside></div>'+
+  '<div class="grid lg:grid-cols-[minmax(0,1fr)_360px] gap-4"><section class="glass rounded-2xl p-3"><div id="petaStage" class="relative min-h-[520px] md:min-h-[680px] rounded-xl overflow-hidden border border-slate-800 bg-slate-100"></div><div class="flex flex-wrap gap-2 mt-3"><button data-zoom="in" class="px-4 py-2 rounded-lg border border-slate-700 bg-slate-900 font-black">+</button><button data-zoom="out" class="px-4 py-2 rounded-lg border border-slate-700 bg-slate-900 font-black">−</button><button data-zoom="reset" class="px-4 py-2 rounded-lg border border-slate-700 bg-slate-900 text-xs font-bold">Reset</button><span class="text-[10px] text-slate-500 self-center">Pinch/scroll untuk zoom · geser untuk pan</span></div><div class="flex flex-wrap gap-3 mt-3 text-[10px]"><span class="text-emerald-300">● Normal</span><span class="text-amber-300">● Perhatian</span><span class="text-rose-300">● Tinggi</span></div></section><aside id="petaInfo" class="glass rounded-2xl p-5 min-w-0 overflow-hidden break-words">'+(selected?regionInfo(selected):'<div class="text-xs text-slate-500">Pilih kecamatan pada peta untuk melihat situasi wilayah.</div>')+'</aside></div>'+
   '<div id="petaTopIssues" class="glass rounded-2xl p-5"><div class="text-[10px] font-black tracking-wider text-cyan-300">ISU WILAYAH TERATAS</div><div class="grid md:grid-cols-3 gap-2 mt-3">'+topIssues().map(i=>'<button type="button" data-map-issue="'+i.id+'" class="rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-left"><b class="text-sm">'+esc(i.title)+'</b><div class="text-[10px] text-slate-500 mt-1">'+esc(i.district_name||'Wilayah')+' · '+esc(String(i.status||'').toUpperCase())+(i.risk_score==null?'':' · Risk '+Math.round(Number(i.risk_score))+'/100')+'</div></button>').join('')||'<div class="text-xs text-slate-500">Belum ada Issue spesifik kecamatan.</div>'+'</div></div>'+citywide();
   bindInteractions();
 }
 function topIssues(){const seen=new Set(),a=[];(data?.data?.regions||[]).forEach(r=>(r.issues||[]).forEach(i=>{if(!seen.has(Number(i.id))){seen.add(Number(i.id));a.push({...i,district_name:r.district_name})}}));return a.sort((a,b)=>(n(b.risk_score)-n(a.risk_score))||((String(a.status).toLowerCase()==='active'?0:1)-(String(b.status).toLowerCase()==='active'?0:1))).slice(0,3)}
 function bindInteractions(){
   const root=$('petaSituasi'),stage=$('petaStage');if(!root||!stage)return;
+  initLeaflet();bindIssueButtons();
   root.querySelectorAll('[data-region]').forEach(b=>b.onclick=()=>{selected=b.dataset.region;renderPage()});
   root.querySelectorAll('[data-map-issue]').forEach(b=>b.onclick=()=>{const id=Number(b.dataset.mapIssue);if(id)window.openManagementIssuePage?.(id)});
   root.querySelectorAll('[data-zoom]').forEach(b=>b.onclick=()=>{const a=b.dataset.zoom;if(a==='reset'){zoom=1;panX=panY=0}else zoom=Math.max(1,Math.min(7,zoom*(a==='in'?1.35:1/1.35)));renderPage()});
