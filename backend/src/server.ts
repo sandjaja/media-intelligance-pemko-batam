@@ -137,7 +137,7 @@ app.post('/api/admin/integrations/:code/test',{preHandler:[requireAuth,requireRo
  if(orgs.length!==1)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
  const row=(await pool.query(`SELECT c.id,c.credential_ciphertext,p.code FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id WHERE c.organization_id=$1 AND p.code=$2 LIMIT 1`,[orgs[0].id,code.data])).rows[0];
  if(!row)return reply.code(404).send({error:'INTEGRATION_CREDENTIAL_NOT_FOUND'});
- if(!['youtube','threads','tiktok'].includes(row.code))return reply.code(501).send({error:'INTEGRATION_TEST_NOT_IMPLEMENTED',provider:row.code});
+ if(!['youtube','threads','tiktok','apify'].includes(row.code))return reply.code(501).send({error:'INTEGRATION_TEST_NOT_IMPLEMENTED',provider:row.code});
  let status:'healthy'|'error'='error'; let lastError:string|null=null;
  const safeApiError=async(response:Response,prefix:string)=>{
   const payload:any=await response.json().catch(()=>null);
@@ -150,7 +150,17 @@ app.post('/api/admin/integrations/:code/test',{preHandler:[requireAuth,requireRo
  };
  try{
   const credential=decryptIntegrationCredential(row.credential_ciphertext);
-  if(row.code==='threads'){
+  if(row.code==='apify'){
+   const controller=new AbortController();
+   const timeout=setTimeout(()=>controller.abort(),10000);
+   try{
+    const response=await fetch('https://api.apify.com/v2/users/me',{headers:{authorization:'Bearer '+credential,accept:'application/json'},signal:controller.signal});
+    if(!response.ok)throw new Error('APIFY_HTTP_'+response.status);
+    const payload:any=await response.json();
+    if(!payload?.data?.id)throw new Error('APIFY_INVALID_RESPONSE');
+    status='healthy';
+   }finally{clearTimeout(timeout)}
+  }else if(row.code==='threads'){
    const url=new URL('https://graph.threads.net/v1.0/me');
    url.searchParams.set('fields','id,username');
    url.searchParams.set('access_token',credential);
