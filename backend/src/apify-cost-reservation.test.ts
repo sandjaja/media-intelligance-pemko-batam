@@ -40,3 +40,10 @@ test('rejects repeated reservation keys without charging again',async()=>{
  assert.equal(result.reason,'APIFY_DUPLICATE_RESERVATION');
  assert.equal(statements.includes('ROLLBACK'),true);
 });
+
+test('invalid platform fails closed before connecting to ledger',async()=>{
+ const {pool,statements}=mockPool({committed:0});
+ const result=await reserveApifyCost(pool,{...request,platform:'youtube' as 'tiktok'});
+ assert.equal(result.reason,'APIFY_INVALID_RESERVATION_INPUT');
+ assert.equal(statements.length,0);
+});
