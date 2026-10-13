@@ -95,6 +95,24 @@ app.put('/api/admin/integrations/:code/settings',{preHandler:[requireAuth,requir
  await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'INTEGRATION_SETTINGS_UPDATED',$2::jsonb)`,[request.user?.id,JSON.stringify({provider:provider.code,organizationId:orgs[0].id,settings})]);
  return{data:rows[0]};
 });
+app.put('/api/admin/integrations/apify/settings',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
+ const actor=z.string().trim().max(160).refine(v=>!v||/^[a-zA-Z0-9_-]+[\\/~][a-zA-Z0-9_.-]+$/.test(v));
+ const body=z.object({
+  tiktokActor:actor,instagramActor:actor,tiktokCommentsActor:actor,instagramCommentsActor:actor,
+  monthlyBudgetUsd:z.number().min(0.5).max(5).default(4),
+  maxTiktokPerRun:z.number().int().min(0).max(100).default(20),
+  maxInstagramPerRun:z.number().int().min(0).max(100).default(10),
+  maxCommentsPerPost:z.number().int().min(0).max(50).default(10),
+  monthlyCommentsLimit:z.number().int().min(0).max(10000).default(1000)
+ }).strict().safeParse(request.body);
+ if(!body.success)return reply.code(400).send({error:'INVALID_APIFY_SETTINGS'});
+ const orgs=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 2`)).rows;
+ if(orgs.length!==1)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ const provider=(await pool.query(`SELECT id FROM integration_providers WHERE code='apify' AND active=true LIMIT 1`)).rows[0];
+ if(!provider)return reply.code(404).send({error:'APIFY_PROVIDER_NOT_REGISTERED'});
+ const {rows}=await pool.query(`INSERT INTO integration_settings(organization_id,provider_id,settings,updated_by) VALUES($1,$2,$3::jsonb,$4) ON CONFLICT(organization_id,provider_id) DO UPDATE SET settings=EXCLUDED.settings,updated_by=EXCLUDED.updated_by,updated_at=NOW() RETURNING settings,updated_at`,[orgs[0].id,provider.id,JSON.stringify(body.data),request.user?.id]);
+ return{data:rows[0]};
+});
 app.put('/api/admin/integrations/:code/credential',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
  const code=z.string().regex(/^[a-z0-9_-]+$/).safeParse((request.params as any).code);
  const body=z.object({credential:z.string().trim().min(8).max(8000),enabled:z.boolean().default(false),expiresAt:z.string().datetime().nullable().optional()}).safeParse(request.body);
