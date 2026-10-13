@@ -100,6 +100,7 @@ app.put('/api/admin/integrations/apify/settings',{preHandler:[requireAuth,requir
  const body=z.object({
   tiktokActor:actor,instagramActor:actor,tiktokCommentsActor:actor,instagramCommentsActor:actor,
   tiktokHashtagActor:actor.optional(),instagramHashtagActor:actor.optional(),
+  tiktokHashtagEnabled:z.boolean().default(false),instagramHashtagEnabled:z.boolean().default(false),
   monthlyBudgetUsd:z.number().min(0.5).max(5).default(4),
   actorMaxCostUsd:z.partialRecord(z.enum(['tiktok_posts','instagram_posts','tiktok_comments','instagram_comments','tiktok_hashtag','instagram_hashtag']),z.number().min(0.01).max(5)).refine(v=>v.tiktok_posts===undefined||v.tiktok_posts>=0.5,{message:'TikTok Posts requires at least $0.50 per run'}).optional(),
   maxTiktokPerRun:z.number().int().min(0).max(100).default(20),
