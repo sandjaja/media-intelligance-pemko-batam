@@ -29,3 +29,26 @@ export function normalizeApifyPosts(platform:ApifyPlatform,items:unknown[]):Soci
  const key=candidate.externalId||candidate.canonicalUrl||'';if(seen.has(key))continue;seen.add(key);out.push(candidate)}
  return out;
 }
+
+/** Comments require a stable parent post URL and comment identifier to prevent
+ * orphan records and accidental duplication across repeated Actor runs. */
+export function normalizeApifyComment(platform:ApifyPlatform,input:unknown,parentUrl?:string):SocialCandidate|null{
+ const row=record(input),author=record(row.author),user=record(row.user);
+ const externalId=first(row.id,row.commentId,row.cid,row.pk);
+ const content=first(row.text,row.comment,row.content);
+ const parent=first(row.postUrl,row.videoUrl,row.parentUrl,row.inputUrl,parentUrl);
+ if(!externalId||!parent||!content)return null;
+ const handle=first(row.username,row.ownerUsername,author.uniqueId,author.username,user.username);
+ const publishedAt=date(row.createTimeISO)||date(row.createTime)||date(row.createdAt)||date(row.timestamp);
+ return{platform,externalId:'comment:'+externalId,contentType:'comment',sourceKind:'external',
+  authorName:first(row.authorName,author.nickname,user.fullName)||null,authorHandle:handle||null,
+  canonicalUrl:first(row.url,row.commentUrl)||parent,title:content.slice(0,220),content,
+  publishedAt,collector:'apify',rawPayload:row,
+  metadata:{provider:'apify',actorPlatform:platform,parentUrl:parent,externalCommentId:externalId}};
+}
+export function normalizeApifyComments(platform:ApifyPlatform,items:unknown[],parentUrl?:string):SocialCandidate[]{
+ const seen=new Set<string>(),out:SocialCandidate[]=[];
+ for(const item of items){const candidate=normalizeApifyComment(platform,item,parentUrl);if(!candidate)continue;
+ const key=candidate.externalId||'';if(seen.has(key))continue;seen.add(key);out.push(candidate)}
+ return out;
+}
