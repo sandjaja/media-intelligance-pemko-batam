@@ -10,7 +10,7 @@ export async function reserveApifyCost(pool:Pool,input:{
  now?:Date;
 }):Promise<{reserved:boolean;reason:string;remainingUsd:number|null}>{
  const {reservationKey,actorId,platform,estimatedUsd,monthlyBudgetUsd,providerBalanceUsd}=input;
- if(!reservationKey||!actorId||![estimatedUsd,monthlyBudgetUsd,providerBalanceUsd].every(n=>Number.isFinite(n)&&n>=0))
+ if(!reservationKey||!actorId||!['instagram','tiktok'].includes(platform)||![estimatedUsd,monthlyBudgetUsd,providerBalanceUsd].every(n=>Number.isFinite(n)&&n>=0))
   return{reserved:false,reason:'APIFY_INVALID_RESERVATION_INPUT',remainingUsd:null};
  if(estimatedUsd===0)return{reserved:false,reason:'APIFY_ESTIMATE_REQUIRED',remainingUsd:null};
  const now=input.now??new Date();
