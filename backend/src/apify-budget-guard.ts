@@ -17,7 +17,7 @@ const finiteNonNegative=(v:number|null|undefined):v is number=>typeof v==='numbe
 export function evaluateApifyBudget(input:ApifyBudgetInput):ApifyBudgetDecision{
   if(!input.credentialsVerified)return{allowed:false,reason:'APIFY_CREDENTIAL_UNVERIFIED',remainingUsd:null};
   if(!input.actorConfigured)return{allowed:false,reason:'APIFY_ACTOR_NOT_CONFIGURED',remainingUsd:null};
-  if(!finiteNonNegative(input.monthlyBudgetUsd)||input.monthlyBudgetUsd>4)return{allowed:false,reason:'APIFY_BUDGET_INVALID',remainingUsd:null};
+  if(!finiteNonNegative(input.monthlyBudgetUsd))return{allowed:false,reason:'APIFY_BUDGET_INVALID',remainingUsd:null};
   if(!finiteNonNegative(input.spentUsd)||!finiteNonNegative(input.pendingReservedUsd)||!finiteNonNegative(input.estimatedNextRunUsd)||!finiteNonNegative(input.providerBalanceUsd))
     return{allowed:false,reason:'APIFY_COST_OR_BALANCE_UNAVAILABLE',remainingUsd:null};
   const remaining=Math.max(0,Math.min(input.monthlyBudgetUsd-input.spentUsd-input.pendingReservedUsd,input.providerBalanceUsd));
