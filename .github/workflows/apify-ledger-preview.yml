@@ -27,7 +27,8 @@ jobs:
             echo "::error::Missing APIFY_LEDGER_TEST_DATABASE_URL in apify-ledger-preview environment"
             exit 1
           fi
-      - run: npm ci
+      # This repository has no committed package-lock.json; npm ci cannot run.
+      - run: npm install --no-audit --no-fund
       - name: Run concurrent reservation test (Preview only)
         env:
           APIFY_LEDGER_TEST_DATABASE_URL: ${{ secrets.APIFY_LEDGER_TEST_DATABASE_URL }}
