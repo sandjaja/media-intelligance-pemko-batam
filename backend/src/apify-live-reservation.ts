@@ -27,7 +27,7 @@ export async function reserveApifyWithLiveLimits(pool:Pool,input:{
  };
  const kind=kinds[input.actorId];
  const ceiling=kind&&limits&&typeof limits==='object'&&!Array.isArray(limits)?(limits as Record<string,unknown>)[kind]:null;
- if(typeof ceiling!=='number'||!Number.isFinite(ceiling)||ceiling<0.5||ceiling>5)
+ if(typeof ceiling!=='number'||!Number.isFinite(ceiling)||ceiling<0.01||ceiling>5)
   return{reserved:false,reason:'APIFY_ACTOR_LIMIT_UNAVAILABLE',remainingUsd:null};
  if(input.estimatedUsd>ceiling)return{reserved:false,reason:'APIFY_ACTOR_LIMIT_EXCEEDED',remainingUsd:null};
  const headroom=await loadApifyAccountHeadroom(pool,fetcher);
