@@ -14,7 +14,9 @@ test('four primary collectors remain blocked until atomic reservation exists',()
  assert.equal(result.ready,false);assert.equal(result.scheduled.length,4);
  assert.equal(result.reason,'APIFY_ATOMIC_RESERVATION_NOT_IMPLEMENTED');
 });
-test('standby hashtag cannot be silently scheduled',()=>{
+test('explicitly enabled hashtag joins guarded plan without executing',()=>{
  const result=planApifyCollection({budget,settings:[{kind:'instagram_hashtag',actorId:'apify/instagram-hashtag-scraper',enabled:true}]});
- assert.equal(result.reason,'APIFY_STANDBY_REQUIRES_EXPLICIT_ACTIVATION');
+ assert.deepEqual(result.scheduled,['instagram_hashtag']);
+ assert.equal(result.ready,false);
+ assert.equal(result.reason,'APIFY_ATOMIC_RESERVATION_NOT_IMPLEMENTED');
 });
