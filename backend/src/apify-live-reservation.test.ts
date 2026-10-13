@@ -30,3 +30,11 @@ test('disabled hashtag is rejected before provider access or cost reservation',a
  assert.equal(result.reason,'APIFY_ACTOR_DISABLED_OR_NOT_CONFIGURED');
  assert.equal(queries,1);
 });
+
+test('duplicate Actor IDs cannot bypass checkbox through another collector',async()=>{
+ let queries=0;
+ const pool={query:async()=>{queries++;return{rows:[{settings:{tiktokActor:'clockworks/tiktok-scraper',tiktokHashtagActor:'clockworks/tiktok-scraper',tiktokHashtagEnabled:false}}]}},connect:()=>{throw Error('unexpected reservation')}} as unknown as Pool;
+ const result=await reserveApifyWithLiveLimits(pool,input,async()=>{throw Error('unexpected provider access')});
+ assert.equal(result.reason,'APIFY_ACTOR_ID_AMBIGUOUS');
+ assert.equal(queries,1);
+});
