@@ -17,7 +17,7 @@ function activate(id,{persist=true}={}){
  if(persist)remember(id);
  return true;
 }
-function restore(){const id=remembered();return id?activate(id,{persist:false}):false}
+function restore(){const id=remembered();return id&&activate(id,{persist:false})?true:activate('opd',{persist:false})}
 document.addEventListener('click',e=>{
  const b=e.target.closest?.('#workspace [data-tab]'); if(!b)return;
  const id=b.dataset.tab;remember(id);setTimeout(()=>activate(id),0);
