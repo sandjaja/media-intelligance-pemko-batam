@@ -13,6 +13,12 @@ test('unavailable account limits prevent ledger reservation',async()=>{
  let queries=0;
  const pool={query:async()=>{queries++;return{rows:[{budget:'4'}]}},connect:()=>{throw Error('unexpected reservation')}} as unknown as Pool;
  const result=await reserveApifyWithLiveLimits(pool,input,async()=>{throw Error('network unavailable')});
- assert.equal(result.reason,'APIFY_ACCOUNT_LIMITS_UNAVAILABLE');
+ assert.equal(result.reason,'APIFY_ACTOR_LIMIT_UNAVAILABLE');
  assert.equal(queries,2);
+});
+
+test('per-actor ceiling blocks excessive estimate before provider access',async()=>{
+ const pool={query:async(sql:string)=>sql.includes('actorMaxCostUsd')?{rows:[{limits:{tiktok_posts:0.5}}]}:{rows:[{budget:'4'}]}} as unknown as Pool;
+ const result=await reserveApifyWithLiveLimits(pool,{...input,estimatedUsd:0.6},async()=>{throw Error('unexpected provider access')});
+ assert.equal(result.reason,'APIFY_ACTOR_LIMIT_EXCEEDED');
 });
