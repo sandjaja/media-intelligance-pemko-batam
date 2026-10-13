@@ -29,6 +29,7 @@ export async function reserveApifyWithLiveLimits(pool:Pool,input:{
  const ceiling=kind&&limits&&typeof limits==='object'&&!Array.isArray(limits)?(limits as Record<string,unknown>)[kind]:null;
  if(typeof ceiling!=='number'||!Number.isFinite(ceiling)||ceiling<0.01||ceiling>5)
   return{reserved:false,reason:'APIFY_ACTOR_LIMIT_UNAVAILABLE',remainingUsd:null};
+ if(kind==='tiktok_posts'&&ceiling<0.5)return{reserved:false,reason:'APIFY_TIKTOK_POSTS_MINIMUM_COST_LIMIT',remainingUsd:null};
  if(input.estimatedUsd>ceiling)return{reserved:false,reason:'APIFY_ACTOR_LIMIT_EXCEEDED',remainingUsd:null};
  const headroom=await loadApifyAccountHeadroom(pool,fetcher);
  if(headroom===null)return{reserved:false,reason:'APIFY_ACCOUNT_LIMITS_UNAVAILABLE',remainingUsd:null};
