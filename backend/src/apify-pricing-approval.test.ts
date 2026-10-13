@@ -12,3 +12,11 @@ test('pricing without verified maximum remains blocked',()=>{
 test('accepts current exact Actor conservative maximum',()=>{
  assert.equal(conservativeApifyRunEstimate(actorId,approval),0.3);
 });
+
+test('standby hashtag actors require exact fresh verified maximum too',()=>{
+ for(const standbyId of ['clockworks/tiktok-hashtag-scraper','apify/instagram-hashtag-scraper']){
+  assert.equal(conservativeApifyRunEstimate(standbyId,null),null);
+  assert.equal(conservativeApifyRunEstimate(standbyId,{...approval,actorId:standbyId,includesAllEventsAndOverheads:false}),null);
+  assert.equal(conservativeApifyRunEstimate(standbyId,{...approval,actorId:standbyId}),0.3);
+ }
+});
