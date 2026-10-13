@@ -42,3 +42,15 @@ test('does not overwrite finalized or missing ledger entries',async()=>{
  const result=await reconcileApifyRun(pool,{...base,status:'SUCCEEDED',actualUsd:0.2});
  assert.equal(result.reason,'APIFY_RESERVATION_NOT_FOUND_OR_FINAL');
 });
+
+test('preserves known cost when a later update has no cost',async()=>{
+ const {pool,calls}=mockPool(1);
+ await reconcileApifyRun(pool,{...base,status:'UNKNOWN',actualUsd:null});
+ assert.ok(calls[0].sql.includes('COALESCE($4,actual_usd)'));
+});
+test('rejects a cost decrease in the atomic SQL update',async()=>{
+ const {pool,calls}=mockPool(0);
+ const result=await reconcileApifyRun(pool,{...base,status:'RUNNING',actualUsd:0.1});
+ assert.equal(result.updated,false);
+ assert.ok(calls[0].sql.includes('$4::numeric >= actual_usd'));
+});
