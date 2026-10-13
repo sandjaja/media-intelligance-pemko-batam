@@ -26,7 +26,7 @@ export function normalizeHashtagResults(platform:ApifyPlatform,tag:string,items:
  const hashtag=normalizeHashtag(tag);
  return normalizeApifyPosts(platform,items).map(candidate=>({
   ...candidate,
-  metadata:{...candidate.metadata,discoveryMethod:'hashtag',discoveryHashtag:hashtag}
+  metadata:{...(candidate.metadata ?? {}),discoveryMethod:'hashtag',discoveryHashtag:hashtag}
  }));
 }
 export const APIFY_HASHTAG_COLLECTOR_KINDS=['instagram_hashtag','tiktok_hashtag'] as const;
