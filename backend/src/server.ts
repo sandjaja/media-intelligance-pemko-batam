@@ -109,6 +109,18 @@ app.put('/api/admin/integrations/apify/settings',{preHandler:[requireAuth,requir
   monthlyCommentsLimit:z.number().int().min(0).max(10000).default(1000)
  }).strict().safeParse(request.body);
  if(!body.success)return reply.code(400).send({error:'INVALID_APIFY_SETTINGS'});
+ const config=body.data;
+ const standby=[
+  {enabled:config.tiktokHashtagEnabled,id:config.tiktokHashtagActor,expected:'clockworks/tiktok-hashtag-scraper',kind:'tiktok_hashtag',minimum:0.5},
+  {enabled:config.instagramHashtagEnabled,id:config.instagramHashtagActor,expected:'apify/instagram-hashtag-scraper',kind:'instagram_hashtag',minimum:0.01}
+ ] as const;
+ for(const item of standby){
+  if(!item.enabled)continue;
+  if(item.id!==item.expected)return reply.code(400).send({error:'APIFY_ENABLED_HASHTAG_ACTOR_INVALID',kind:item.kind});
+  const ceiling=config.actorMaxCostUsd?.[item.kind];
+  if(typeof ceiling!=='number'||ceiling<item.minimum)return reply.code(400).send({error:'APIFY_ENABLED_HASHTAG_COST_LIMIT_REQUIRED',kind:item.kind});
+ }
+
  const orgs=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 2`)).rows;
  if(orgs.length!==1)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
  const provider=(await pool.query(`SELECT id FROM integration_providers WHERE code='apify' AND active=true LIMIT 1`)).rows[0];
