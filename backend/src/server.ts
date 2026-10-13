@@ -60,7 +60,7 @@ app.get('/api/admin/integrations',{preHandler:[requireAuth,requireRole('admin')]
   LEFT JOIN integration_credentials c ON c.provider_id=p.id AND c.organization_id=o.id
   LEFT JOIN integration_settings s ON s.provider_id=p.id AND s.organization_id=o.id
   WHERE p.active=true ORDER BY p.name`);
- return{data:rows};
+ return{data:rows,diagnostic:{providerCount:rows.length,apifyPresent:rows.some((p:any)=>p.code==='apify'),database:await pool.query('SELECT current_database() AS name').then(r=>r.rows[0]?.name??'unknown')}};
 });
 app.put('/api/admin/integrations/:code/app-credentials',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
  const code=z.enum(['instagram','threads']).safeParse((request.params as any).code);
