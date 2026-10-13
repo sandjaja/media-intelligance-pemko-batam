@@ -111,7 +111,7 @@ app.put('/api/admin/integrations/apify/settings',{preHandler:[requireAuth,requir
  if(orgs.length!==1)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
  const provider=(await pool.query(`SELECT id FROM integration_providers WHERE code='apify' AND active=true LIMIT 1`)).rows[0];
  if(!provider)return reply.code(404).send({error:'APIFY_PROVIDER_NOT_REGISTERED'});
- const {rows}=await pool.query(`INSERT INTO integration_settings(organization_id,provider_id,settings,updated_by) VALUES($1,$2,$3::jsonb,$4) ON CONFLICT(organization_id,provider_id) DO UPDATE SET settings=EXCLUDED.settings,updated_by=EXCLUDED.updated_by,updated_at=NOW() RETURNING settings,updated_at`,[orgs[0].id,provider.id,JSON.stringify(body.data),request.user?.id]);
+ const {rows}=await pool.query(`INSERT INTO integration_settings(organization_id,provider_id,settings,updated_by) VALUES($1,$2,$3::jsonb,$4) ON CONFLICT(organization_id,provider_id) DO UPDATE SET settings=integration_settings.settings || EXCLUDED.settings,updated_by=EXCLUDED.updated_by,updated_at=NOW() RETURNING settings,updated_at`,[orgs[0].id,provider.id,JSON.stringify(body.data),request.user?.id]);
  return{data:rows[0]};
 });
 app.put('/api/admin/integrations/:code/credential',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
