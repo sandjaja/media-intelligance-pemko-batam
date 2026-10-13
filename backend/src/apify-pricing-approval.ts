@@ -7,7 +7,9 @@ export type ApifyPricingApproval={
 };
 const approvedActors=new Set([
  'clockworks/tiktok-scraper','apify/instagram-scraper',
- 'clockworks/tiktok-comments-scraper','apidojo/instagram-comments-scraper-api'
+ 'clockworks/tiktok-comments-scraper','apidojo/instagram-comments-scraper-api',
+ // Standby only: inclusion here does not permit scheduling or execution.
+ 'clockworks/tiktok-hashtag-scraper','apify/instagram-hashtag-scraper'
 ]);
 export function conservativeApifyRunEstimate(actorId:string,approval:ApifyPricingApproval|null):number|null{
  if(!approvedActors.has(actorId)||!approval||approval.actorId!==actorId||
