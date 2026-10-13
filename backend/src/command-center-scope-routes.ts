@@ -29,9 +29,13 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
 
   app.get('/api/command-center/map', { preHandler: auth }, async (request, reply) => {
     const parsed=z.object({opdId:z.string().regex(/^\\d+$/).optional(),districtId:z.string().regex(/^\\d+$/).optional()}).safeParse(request.query); if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
-    const user=request.scopeUser,canReadAll=Boolean(user&&(user.legacyRole==='admin'||user.roles.includes('super_admin')||user.roles.includes('humas')||user.roles.includes('executive')||user.roles.includes('viewer')||hasPermission(user,'platform.admin')));
-    const opdId=canReadAll?(parsed.data.opdId??null):(user?.opdId??null),districtId=canReadAll?(parsed.data.districtId??null):(user?.districtId??null);
-    if(!canReadAll&&!opdId&&!districtId)return reply.code(403).send({error:'MAP_SCOPE_UNASSIGNED'});
+    const user=request.scopeUser;
+    // Restricted operational roles always take precedence over legacy/admin permissions.
+    const isOpd=Boolean(user?.roles.includes('opd')),isDistrict=Boolean(user?.roles.includes('district'));
+    const canReadAll=Boolean(user&&!isOpd&&!isDistrict&&(user.legacyRole==='admin'||user.roles.includes('super_admin')||user.roles.includes('humas')||user.roles.includes('executive')||user.roles.includes('viewer')||hasPermission(user,'platform.admin')));
+    const opdId=isOpd?(user?.opdId??null):isDistrict?null:canReadAll?(parsed.data.opdId??null):(user?.opdId??null);
+    const districtId=isDistrict?(user?.districtId??null):isOpd?null:canReadAll?(parsed.data.districtId??null):(user?.districtId??null);
+    if((isOpd&&!opdId)||(isDistrict&&!districtId)||(!canReadAll&&!opdId&&!districtId))return reply.code(403).send({error:'MAP_SCOPE_UNASSIGNED'});
     const orgs=(await pool.query("SELECT id FROM organizations WHERE active=true ORDER BY id")).rows;if(orgs.length!==1)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
     const b=(await pool.query("SELECT id,name,source_name,source_year,optimized_storage_key,feature_count,activated_at FROM organization_map_boundaries WHERE organization_id=$1 AND status='ACTIVE' ORDER BY activated_at DESC NULLS LAST,id DESC LIMIT 1",[orgs[0].id])).rows[0];if(!b)return{data:null,scope:{opdId,districtId}};
     const params:any[]=[b.id];let sql="SELECT f.feature_key,f.feature_name,f.official_code,f.district_id,d.name district_name,COUNT(DISTINCT i.id) FILTER(WHERE lower(i.status) IN ('watch','active'))::int active_issue_count,COUNT(DISTINCT i.id) FILTER(WHERE lower(i.status) IN ('watch','active') AND COALESCE((SELECT CASE WHEN COALESCE((im.metadata->>'assessed')::boolean,false) THEN im.risk_score ELSE NULL END FROM issue_metrics im WHERE im.issue_id=i.id ORDER BY im.measured_at DESC,im.id DESC LIMIT 1),0)>=60)::int high_risk_count FROM organization_map_boundary_features f JOIN districts d ON d.id=f.district_id LEFT JOIN issue_districts idr ON idr.district_id=d.id LEFT JOIN issues i ON i.id=idr.issue_id";
