@@ -177,6 +177,10 @@ app.patch('/api/admin/integrations/:code',{preHandler:[requireAuth,requireRole('
  if(!code.success||!body.success)return reply.code(400).send({error:'INVALID_INTEGRATION_SETTING'});
  const org=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 1`)).rows[0];
  if(!org)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ if(body.data.enabled&&['apify','instagram','tiktok','facebook','threads','x'].includes(code.data)){
+  const exclusive=code.data==='apify'?['instagram','tiktok','facebook','threads','x']:['apify'];
+  await pool.query(`UPDATE integration_credentials c SET enabled=false,last_status='disabled',updated_by=$1,updated_at=NOW() FROM integration_providers p WHERE c.provider_id=p.id AND c.organization_id=$2 AND p.code=ANY($3::text[]) AND c.enabled=true`,[request.user?.id,org.id,exclusive]);
+ }
  const {rows}=await pool.query(`UPDATE integration_credentials c SET enabled=$1,last_status=CASE WHEN $1 THEN 'untested' ELSE 'disabled' END,updated_by=$2,updated_at=NOW() FROM integration_providers p WHERE c.provider_id=p.id AND c.organization_id=$3 AND p.code=$4 RETURNING c.id,c.credential_hint,c.enabled,c.last_status,c.updated_at`,[body.data.enabled,request.user?.id,org.id,code.data]);
  if(!rows[0])return reply.code(404).send({error:'INTEGRATION_CREDENTIAL_NOT_FOUND'});
  return{data:rows[0]};
