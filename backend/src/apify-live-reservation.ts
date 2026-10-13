@@ -19,6 +19,10 @@ export async function reserveApifyWithLiveLimits(pool:Pool,input:{
  const configured=await loadApifyAdminCollectorSettings(pool);
  const selected=configured.find(c=>c.actorId===input.actorId);
  if(!selected||!selected.enabled)return{reserved:false,reason:'APIFY_ACTOR_DISABLED_OR_NOT_CONFIGURED',remainingUsd:null};
+ // Fail closed on duplicate Actor IDs: an enabled primary collector must not
+ // accidentally authorize a different collector sharing the same Actor ID.
+ if(configured.filter(c=>c.actorId===input.actorId).length!==1)
+  return{reserved:false,reason:'APIFY_ACTOR_ID_AMBIGUOUS',remainingUsd:null};
  const budget=await loadApifyAdminBudget(pool);
  if(budget===null)return{reserved:false,reason:'APIFY_ADMIN_BUDGET_UNAVAILABLE',remainingUsd:null};
  const {rows:settingsRows}=await pool.query(`SELECT s.settings->'actorMaxCostUsd' AS limits FROM integration_settings s JOIN integration_providers p ON p.id=s.provider_id AND p.code='apify' AND p.active=true JOIN organizations o ON o.id=s.organization_id AND o.active=true LIMIT 2`);
