@@ -1,0 +1,37 @@
+name: Apify Ledger Preview Concurrency
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preview-concurrency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: apify-ledger-preview
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Verify Preview database secret exists
+        env:
+          PREVIEW_DB: ${{ secrets.APIFY_LEDGER_TEST_DATABASE_URL }}
+        run: |
+          if [ -z "$PREVIEW_DB" ]; then
+            echo "::error::Missing APIFY_LEDGER_TEST_DATABASE_URL in apify-ledger-preview environment"
+            exit 1
+          fi
+      - run: npm ci
+      - name: Run concurrent reservation test (Preview only)
+        env:
+          APIFY_LEDGER_TEST_DATABASE_URL: ${{ secrets.APIFY_LEDGER_TEST_DATABASE_URL }}
+          APIFY_LEDGER_TEST_PREVIEW: 'true'
+        run: npm run test:apify-ledger-preview
