@@ -1,5 +1,6 @@
 import type {Pool} from 'pg';
 import {loadApifyAdminBudget} from './apify-admin-budget.js';
+import {loadApifyAdminCollectorSettings} from './apify-admin-collector-settings.js';
 import {loadApifyAccountHeadroom} from './apify-account-headroom.js';
 import {preflightApifyReservation} from './apify-reservation-preflight.js';
 
@@ -15,6 +16,9 @@ export async function reserveApifyWithLiveLimits(pool:Pool,input:{
   return{reserved:false,reason:'APIFY_ESTIMATE_REQUIRED',remainingUsd:null};
  if(!input.credentialsVerified||!input.actorConfigured)
   return{reserved:false,reason:!input.credentialsVerified?'APIFY_CREDENTIAL_UNVERIFIED':'APIFY_ACTOR_NOT_CONFIGURED',remainingUsd:null};
+ const configured=await loadApifyAdminCollectorSettings(pool);
+ const selected=configured.find(c=>c.actorId===input.actorId);
+ if(!selected||!selected.enabled)return{reserved:false,reason:'APIFY_ACTOR_DISABLED_OR_NOT_CONFIGURED',remainingUsd:null};
  const budget=await loadApifyAdminBudget(pool);
  if(budget===null)return{reserved:false,reason:'APIFY_ADMIN_BUDGET_UNAVAILABLE',remainingUsd:null};
  const {rows:settingsRows}=await pool.query(`SELECT s.settings->'actorMaxCostUsd' AS limits FROM integration_settings s JOIN integration_providers p ON p.id=s.provider_id AND p.code='apify' AND p.active=true JOIN organizations o ON o.id=s.organization_id AND o.active=true LIMIT 2`);
