@@ -205,6 +205,7 @@ app.patch('/api/admin/integrations/:code',{preHandler:[requireAuth,requireRole('
  if(!code.success||!body.success)return reply.code(400).send({error:'INVALID_INTEGRATION_SETTING'});
  const org=(await pool.query(`SELECT id FROM organizations WHERE active=true ORDER BY id LIMIT 1`)).rows[0];
  if(!org)return reply.code(409).send({error:'ACTIVE_ORGANIZATION_UNRESOLVED'});
+ if(body.data.enabled&&code.data==='apify')return reply.code(409).send({error:'APIFY_COLLECTOR_NOT_READY',detail:'Apify belum dapat diaktifkan sebelum collector, pembatasan biaya, dan scheduler siap. Test Connection tetap tersedia.'});
  if(body.data.enabled&&['apify','instagram','tiktok','facebook','threads','x'].includes(code.data)){
   const exclusive=code.data==='apify'?['instagram','tiktok','facebook','threads','x']:['apify'];
   await pool.query(`UPDATE integration_credentials c SET enabled=false,last_status='disabled',updated_by=$1,updated_at=NOW() FROM integration_providers p WHERE c.provider_id=p.id AND c.organization_id=$2 AND p.code=ANY($3::text[]) AND c.enabled=true`,[request.user?.id,org.id,exclusive]);
