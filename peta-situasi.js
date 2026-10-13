@@ -8,34 +8,39 @@ const findRegion=(id,name)=>{const rows=data?.data?.regions||[];return rows.find
 const api=async p=>{const r=await fetch(API+p,{credentials:'include',cache:'no-store'});const j=await r.json().catch(()=>({}));if(!r.ok)throw Error(j.error||j.message||('HTTP '+r.status));return j};
 const scoped=()=>{const r=new Set(window.MEDIA_CURRENT_USER?.roles||[]);return r.has('opd')||r.has('district')};
 const scopeQuery=()=>{const q=new URLSearchParams();if(scoped())return q;const op=$('opdSelect')?.value;if(op&&op!=='all')q.set('opdId',op);const d=$('districtSelect')?.value;if(d&&d!=='all')q.set('districtId',d);return q};
-let data=null,zoom=1,panX=0,panY=0,drag=false,lastX=0,lastY=0,selected=null;
-let leafletMap=null,leafletLayer=null,leafletLoadPromise=null;
+let data=null,selected=null,panelTab='issues',leafletMap=null,leafletLayer=null,leafletLoadPromise=null,loadVersion=0;
+const icon=name=>'<i class="fa-solid fa-'+name+'" aria-hidden="true"></i>';
+const rows=()=>data?.data?.regions||[];
+const riskInfo=value=>{if(value==null||value===''||!Number.isFinite(Number(value)))return{label:'Belum dinilai',color:'#94a3b8',level:'unknown'};const score=Number(value);return score>=80?{label:'Sangat tinggi',color:'#ef4765',level:'critical'}:score>=60?{label:'Tinggi',color:'#fb9160',level:'high'}:score>=40?{label:'Sedang',color:'#f4ce61',level:'medium'}:score>=20?{label:'Rendah',color:'#86ca8b',level:'low'}:{label:'Aman',color:'#4db6ac',level:'safe'}};
+const regionRisk=r=>{const scores=(r?.issues||[]).map(i=>i.risk_score).filter(v=>v!=null&&Number.isFinite(Number(v)));return scores.length?riskInfo(Math.max(...scores.map(Number))):{label:n(r?.active_issue_count)?'Belum dinilai':'Belum ada isu',color:'#cbd5e1',level:'unknown'}};
+function destroyMap(){if(leafletMap)leafletMap.remove();leafletMap=null;leafletLayer=null;}
 function loadLeaflet(){
-  if(window.L)return Promise.resolve(window.L);
-  if(leafletLoadPromise)return leafletLoadPromise;
-  leafletLoadPromise=new Promise((resolve,reject)=>{
-    if(!document.querySelector('link[data-leaflet-css]')){const l=document.createElement('link');l.rel='stylesheet';l.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';l.dataset.leafletCss='1';document.head.appendChild(l)}
-    const s=document.createElement('script');s.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';s.dataset.leafletJs='1';const fail=message=>{s.remove();reject(Error(message))};s.onload=()=>window.L?resolve(window.L):fail('Leaflet gagal dimuat');s.onerror=()=>fail('Tidak dapat memuat pustaka Leaflet');document.head.appendChild(s);
-  }).catch(err=>{leafletLoadPromise=null;throw err});
-  return leafletLoadPromise;
+ if(window.L)return Promise.resolve(window.L);
+ if(leafletLoadPromise)return leafletLoadPromise;
+ leafletLoadPromise=new Promise((resolve,reject)=>{
+  if(!document.querySelector('link[data-leaflet-css]')){const l=document.createElement('link');l.rel='stylesheet';l.href='https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';l.dataset.leafletCss='1';document.head.appendChild(l)}
+  const s=document.createElement('script');s.src='https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';const fail=m=>{s.remove();reject(Error(m))};s.onload=()=>window.L?resolve(window.L):fail('Leaflet gagal dimuat');s.onerror=()=>fail('Periksa koneksi internet lalu coba lagi.');document.head.appendChild(s);
+ }).catch(e=>{leafletLoadPromise=null;throw e});return leafletLoadPromise;
 }
-function initLeaflet(){
-  const stage=$('petaStage');if(!stage||!data?.data?.geojson)return;
-  stage.innerHTML='<div id="leafletMap" style="height:clamp(520px,72vh,820px);width:100%;z-index:1"></div>';
-  loadLeaflet().then(L=>{
-    const node=$('leafletMap');if(!node||!window.__petaSituasiOpen)return;
-    if(leafletMap){leafletMap.remove();leafletMap=null}
-    leafletMap=L.map(node,{zoomControl:true,scrollWheelZoom:true,preferCanvas:true});
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'}).addTo(leafletMap);
-    const style=f=>{const p=f.properties||{},id=String(p.districtId??''),r=findRegion(id,p.districtName||p.name),high=n(r?.high_risk_count),active=n(r?.active_issue_count),isSelected=selected!=null&&String(selected)===id;return {color:isSelected?'#075985':'#0891b2',weight:isSelected?3:1.5,opacity:.95,fillColor:high?'#f43f5e':active?'#f59e0b':'#34d399',fillOpacity:isSelected?.78:.48}};
-    leafletLayer=L.geoJSON(data.data.geojson,{style,onEachFeature:(f,layer)=>{const p=f.properties||{},id=String(p.districtId??''),r=findRegion(id,p.districtName||p.name),name=r?.district_name||p.districtName||p.name||'Kecamatan';layer.bindTooltip(esc(name),{sticky:true,direction:'auto'});layer.on('click',()=>{selected=id;const info=$('petaInfo');if(info)info.innerHTML=regionInfo(id);bindIssueButtons();leafletLayer.setStyle(style);layer.bringToFront()})}}).addTo(leafletMap);
-    try{const bounds=leafletLayer.getBounds();if(bounds.isValid())leafletMap.fitBounds(bounds,{padding:[18,18]});else leafletMap.setView([1.08,104.03],10)}catch{leafletMap.setView([1.08,104.03],10)}
-    setTimeout(()=>leafletMap?.invalidateSize(),100);
-  }).catch(err=>{const node=$('leafletMap');if(node)node.innerHTML='<div class="p-5 text-sm text-amber-700">Peta Leaflet tidak dapat dimuat. Periksa koneksi internet lalu tekan Refresh. ('+esc(err.message)+')</div>'});
+function mapStyle(f){const p=f.properties||{},r=findRegion(p.districtId,p.districtName||p.name),on=String(selected)===String(p.districtId);return{color:on?'#1674df':'#ffffff',weight:on?3:1.2,fillColor:regionRisk(r).color,fillOpacity:on?.68:.42,opacity:.95}}
+function selectRegion(id,focus=false){
+ selected=String(id);panelTab='issues';renderInfo();
+ leafletLayer?.setStyle(mapStyle);
+ if(focus&&leafletLayer){const layers=[];leafletLayer.eachLayer(l=>{if(String(l.feature?.properties?.districtId)===selected)layers.push(l)});if(layers.length){const bounds=window.L.featureGroup(layers).getBounds();if(bounds.isValid())leafletMap.fitBounds(bounds,{padding:[35,35],maxZoom:12});layers[0].openPopup();}}
 }
-function bindIssueButtons(){const root=$('petaSituasi');root?.querySelectorAll('[data-map-issue]').forEach(b=>b.onclick=()=>{const id=Number(b.dataset.mapIssue);if(id)window.openManagementIssuePage?.(id)});}
-
-
+async function initLeaflet(){
+ const node=$('leafletMap'),version=loadVersion;if(!node)return;
+ try{const L=await loadLeaflet();if(version!==loadVersion||!node.isConnected||!window.__petaSituasiOpen)return;
+  destroyMap();node.innerHTML='';leafletMap=L.map(node,{zoomControl:false,scrollWheelZoom:false,preferCanvas:true});
+  const base=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'}).addTo(leafletMap);
+  L.control.zoom({position:'topleft'}).addTo(leafletMap);L.control.scale({imperial:false,position:'bottomleft'}).addTo(leafletMap);
+  leafletLayer=L.geoJSON(data.data.geojson,{style:mapStyle,onEachFeature:(f,layer)=>{const p=f.properties||{},r=findRegion(p.districtId,p.districtName||p.name),name=r?.district_name||p.districtName||p.name||'Kecamatan';layer.bindTooltip(esc(name),{sticky:true});layer.bindPopup('<div class="ps-popup"><b>'+esc(name)+'</b><br>'+n(r?.active_issue_count)+' isu WATCH / ACTIVE · '+esc(regionRisk(r).label)+'</div>');layer.on('click',()=>selectRegion(p.districtId));}}).addTo(leafletMap);
+  const markers=L.layerGroup(),seen=new Set();leafletLayer.eachLayer(layer=>{const p=layer.feature.properties||{},id=String(p.districtId),r=findRegion(id,p.districtName||p.name);if(seen.has(id)||!n(r?.active_issue_count))return;seen.add(id);const high=n(r.high_risk_count)>0;const marker=L.marker(layer.getBounds().getCenter(),{title:r.district_name,icon:L.divIcon({className:'ps-marker-wrap',html:'<span class="ps-marker" style="background:'+regionRisk(r).color+'">'+icon(high?'exclamation':'info')+'</span>',iconSize:[28,28],iconAnchor:[14,14]})});marker.bindTooltip(esc(r.district_name));marker.on('click',()=>selectRegion(id,true));marker.addTo(markers)});markers.addTo(leafletMap);
+  L.control.layers({'OpenStreetMap':base},{'Warna risiko':leafletLayer,'Penanda isu':markers},{position:'topleft'}).addTo(leafletMap);
+  fitAll();setTimeout(()=>{if(version===loadVersion)leafletMap?.invalidateSize()},100);
+ }catch(e){if(version!==loadVersion||!node.isConnected)return;node.innerHTML='<div class="ps-empty" role="alert">'+icon('triangle-exclamation')+'<h3>Peta belum dapat dimuat</h3><p>'+esc(e.message)+'</p><button type="button" id="petaRetryMap" class="ps-button">Coba lagi</button></div>';$('petaRetryMap')?.addEventListener('click',initLeaflet)}
+}
+function fitAll(){const b=leafletLayer?.getBounds();if(b?.isValid())leafletMap.fitBounds(b,{padding:[24,24]});else leafletMap?.setView([1.08,104.03],10)}
 function ensureSection(){
   if(!$('petaSituasi')){const s=document.createElement('section');s.id='petaSituasi';s.className='hidden space-y-5';$('dashboard')?.parentElement?.appendChild(s);}
 }
@@ -58,68 +63,122 @@ function activateNav(){
 function openPage(){
   ensureSection();window.__petaSituasiOpen=true;
   document.querySelectorAll('main > section').forEach(s=>{if(s.id!=='commandCenterFilters')s.classList.add('hidden')});
-  $('commandCenterFilters')?.classList.add('hidden');$('petaSituasi').classList.remove('hidden');ensureNav();activateNav();renderPage();loadMap();
+  $('commandCenterFilters')?.classList.add('hidden');$('petaSituasi').classList.remove('hidden');ensureNav();activateNav();loadMap();
 }
-function closePage(){window.__petaSituasiOpen=false;$('petaSituasi')?.classList.add('hidden');activateNav();}
+function closePage(){window.__petaSituasiOpen=false;loadVersion++;destroyMap();$('petaSituasi')?.classList.add('hidden');activateNav();}
 function patchDashboard(){
   const root=$('dashboard');if(!root)return;
   const old=root.querySelector('#ccMapExpand');
   if(old&&!old.dataset.patched){old.dataset.patched='1';old.textContent='Buka Peta Situasi';old.innerHTML='<i class="fa-solid fa-map-location-dot mr-2"></i>Buka Peta Situasi';old.onclick=openPage;old.removeAttribute('id');}
   const modal=root.querySelector('#ccMapModal');if(modal)modal.remove();
 }
-function mapPoints(g){const pts=[];const walk=x=>{if(Array.isArray(x)&&typeof x[0]==='number')pts.push(x);else if(Array.isArray(x))x.forEach(walk)};(g.features||[]).forEach(f=>walk(f.geometry?.coordinates));return pts}
-function geometryPath(z,tx,ty){const ring=r=>r.map((p,i)=>(i?'L':'M')+tx(p[0]).toFixed(2)+' '+ty(p[1]).toFixed(2)).join(' ')+' Z';if(z?.type==='Polygon')return z.coordinates.map(ring).join(' ');if(z?.type==='MultiPolygon')return z.coordinates.flat().map(ring).join(' ');return ''}
-function buildSvg(g,large=false){
-  const pts=mapPoints(g);if(!pts.length)return '';
-  const xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]),minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
-  const W=1000,H=700,pad=35,s=Math.min((W-pad*2)/(maxX-minX||1),(H-pad*2)/(maxY-minY||1)),tx=x=>pad+(x-minX)*s,ty=y=>H-pad-(y-minY)*s;
-  const regionMap=new Map((g.features||[]).map(f=>[String(f.properties?.districtId),f]));
-  const shapes=(g.features||[]).map(f=>{const p=f.properties||{},id=String(p.districtId||''),r=data?.data?.regions?.find(x=>String(x.district_id)===id),hi=n(r?.high_risk_count),ac=n(r?.active_issue_count),fill=hi?'rgba(244,63,94,.52)':ac?'rgba(245,158,11,.42)':'rgba(16,185,129,.22)',sel=selected&&String(selected)===id;return '<path data-region="'+esc(id)+'" d="'+geometryPath(f.geometry,tx,ty)+'" fill="'+fill+'" stroke="'+(sel?'#fff':'rgba(34,211,238,.9)')+'" stroke-width="'+(sel?'3':'1.2')+'" vector-effect="non-scaling-stroke" class="cursor-pointer"></path>'}).join('');
-  const labels=(g.features||[]).map(f=>{const p=f.properties||{},coords=[];const walk=x=>{if(Array.isArray(x)&&typeof x[0]==='number')coords.push(x);else if(Array.isArray(x))x.forEach(walk)};walk(f.geometry?.coordinates);if(!coords.length)return '';const cx=coords.reduce((a,p)=>a+tx(p[0]),0)/coords.length,cy=coords.reduce((a,p)=>a+ty(p[1]),0)/coords.length;return '<text x="'+cx.toFixed(1)+'" y="'+cy.toFixed(1)+'" text-anchor="middle" pointer-events="none" font-size="'+(large?12:9)+'" font-weight="700" fill="white" stroke="#020617" stroke-width="3" paint-order="stroke">'+esc(p.districtName||p.name||'')+'</text>'}).join('');
-  return '<svg id="petaSvg" viewBox="0 0 '+W+' '+H+'" class="w-full h-full select-none touch-none" preserveAspectRatio="xMidYMid meet"><g id="petaLayer" transform="translate('+panX+' '+panY+') scale('+zoom+')">'+shapes+labels+'</g></svg>';
+
+function clarificationCount(r){if(!data.pipeline)return null;const ids=new Set((r.issue_ids||r.issues?.map(i=>i.id)||[]).map(String));return new Set((data.pipeline.stages||[]).find(s=>s.key==='CLARIFICATION')?.items?.filter(i=>ids.has(String(i.issueId))).map(i=>String(i.issueId))||[]).size}
+function issueCard(i){const risk=riskInfo(i.risk_score),status=String(i.status||'').toUpperCase();return '<button type="button" data-map-issue="'+esc(i.id)+'" class="ps-issue"><span class="ps-issue-icon" style="background:'+risk.color+'">'+icon(Number(i.risk_score)>=60?'exclamation':'info')+'</span><span class="ps-issue-body"><span class="ps-issue-heading"><strong>'+esc(i.title)+'</strong><span class="ps-badges"><span class="ps-badge '+(status==='ACTIVE'?'ps-red':'ps-amber')+'">'+esc(status)+'</span><span class="ps-badge">'+esc(risk.label)+'</span></span></span><span class="ps-issue-meta">'+icon('gauge-high')+' Risiko '+(i.risk_score==null?'belum dinilai':Math.round(Number(i.risk_score))+'/100')+'</span><span class="ps-issue-link">Buka detail isu '+icon('arrow-right')+'</span></span></button>'}
+function regionInfo(id){const r=findRegion(id);if(!r)return '<div class="ps-empty">Pilih kecamatan pada peta untuk melihat detail isu.</div>';const count=n(r.active_issue_count),clarification=clarificationCount(r);const metrics=[['WATCH',r.watch_issue_count,'Dipantau','ps-blue'],['ACTIVE',r.active_status_count,'Aktif','ps-amber'],['HIGH RISK',r.high_risk_count,'Risiko ≥ 60','ps-red'],['KLARIFIKASI',clarification,'Dalam proses','ps-amber']];
+ return '<div class="ps-region-heading"><span class="ps-pin">'+icon('location-dot')+'</span><div><h3>Kecamatan '+esc(String(r.district_name).replace(/^kecamatan\s+/i,''))+'</h3><p>Kota Batam, Kepulauan Riau</p></div><span class="ps-badge ps-red">'+count+' isu WATCH / ACTIVE</span></div><div class="ps-metrics">'+metrics.map(([title,value,sub,color])=>'<div class="ps-metric '+color+'"><b>'+(value==null?'—':n(value))+'</b><strong>'+title+'</strong><small>'+sub+'</small></div>').join('')+'</div><div class="ps-tabs" role="tablist" aria-label="Detail kecamatan"><button id="psIssuesTab" role="tab" aria-selected="'+(panelTab==='issues')+'" aria-controls="psPanel" data-panel="issues">Daftar Isu</button><button id="psRegionTab" role="tab" aria-selected="'+(panelTab==='region')+'" aria-controls="psPanel" data-panel="region">Informasi Wilayah</button></div><div id="psPanel" role="tabpanel" aria-labelledby="'+(panelTab==='issues'?'psIssuesTab':'psRegionTab')+'">'+(panelTab==='issues'?'<div class="ps-list-label">3 isu teratas berdasarkan risiko</div><div class="ps-issue-list">'+((r.issues||[]).map(issueCard).join('')||'<div class="ps-empty">'+icon('circle-check')+'<p>Belum ada isu WATCH / ACTIVE di kecamatan ini.</p></div>')+'</div><p class="ps-footnote">Klik kartu untuk membuka Manajemen Isu.</p>':regionDetails(r))+'</div>';
 }
-function regionInfo(id){
-  const feature=(data?.data?.geojson?.features||[]).find(f=>String(f.properties?.districtId??'')===String(id??''));const r=findRegion(id,feature?.properties?.districtName||feature?.properties?.name);if(!r)return '<div class="text-xs text-amber-300">Data kecamatan belum cocok dengan data wilayah dari server. Coba Refresh Peta Situasi.</div>';
-  const ids=new Set((r.issues||[]).map(i=>Number(i.id)));
-  const alerts=(data.alerts||[]).filter(a=>ids.has(Number(a.issue_id)));
-  const stages={GAP:0,CLARIFICATION:0};
-  (data.pipeline?.stages||[]).forEach(s=>{if(stages[s.key]!=null)stages[s.key]=(s.items||[]).filter(i=>ids.has(Number(i.issueId))).length});
-  const attention=alerts.length||n(r.high_risk_count)>0?'TINGGI':n(r.active_issue_count)>0||stages.GAP||stages.CLARIFICATION?'PERHATIAN':'NORMAL';
-  return '<div class="flex items-start justify-between gap-3"><div><div class="text-[10px] font-black tracking-widest text-cyan-400">SITUASI WILAYAH</div><h3 class="text-lg leading-snug font-black mt-1 break-words">'+esc(r.district_name)+'</h3></div><span class="px-2 py-1 rounded-lg border text-[10px] font-black '+(attention==='TINGGI'?'text-rose-300 border-rose-500/30 bg-rose-500/10':attention==='PERHATIAN'?'text-amber-300 border-amber-500/30 bg-amber-500/10':'text-emerald-300 border-emerald-500/30 bg-emerald-500/10')+'">'+attention+'</span></div>'+
-  '<div class="grid grid-cols-2 xl:grid-cols-3 gap-2 mt-4">'+[['WATCH/ACTIVE',r.active_issue_count],['HIGH RISK',r.high_risk_count],['OPEN ALERT',alerts.length],['GAP',stages.GAP],['KLARIFIKASI',stages.CLARIFICATION]].map(x=>'<div class="min-w-0 rounded-lg bg-slate-950/70 border border-slate-800 p-3"><b class="text-lg">'+n(x[1])+'</b><div class="text-[9px] leading-snug text-slate-500 mt-1 break-words">'+x[0]+'</div></div>').join('')+'</div>'+
-  '<div class="mt-4"><div class="text-[10px] font-black tracking-wider text-cyan-300">3 ISU TERATAS</div><div class="space-y-2 mt-2">'+((r.issues||[]).length?(r.issues||[]).slice(0,3).map(i=>'<button type="button" data-map-issue="'+i.id+'" class="block w-full min-w-0 whitespace-normal rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-left hover:border-cyan-400/50"><div class="font-bold text-sm leading-snug break-words">'+esc(i.title)+'</div><div class="text-[10px] text-slate-500 mt-1">'+esc(String(i.status||'').toUpperCase())+(i.risk_score==null?'':' · Risk '+Math.round(Number(i.risk_score))+'/100')+'</div></button>').join(''):'<div class="text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl p-3">Tidak ada Issue spesifik kecamatan.</div>')+'</div></div>';
-}
-function citywide(){const a=data?.data?.citywideIssues||[];if(!a.length)return '';return '<div class="glass rounded-2xl p-5"><div class="text-[10px] font-black tracking-wider text-violet-300">ISU TINGKAT KOTA</div><div class="space-y-2 mt-3">'+a.slice(0,3).map(i=>'<button type="button" data-map-issue="'+i.id+'" class="block w-full rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-left"><b>'+esc(i.title)+'</b><div class="text-[10px] text-slate-500 mt-1">'+esc(String(i.status||'').toUpperCase())+(i.risk_score==null?'':' · Risk '+Math.round(Number(i.risk_score))+'/100')+'</div></button>').join('')+'</div></div>'}
+function regionDetails(r){const b=data.data.boundary||{};return '<dl class="ps-details">'+[['Kecamatan',r.district_name],['Jumlah isu WATCH / ACTIVE',r.active_issue_count],['Risiko tertinggi',regionRisk(r).label],['Sumber batas wilayah',b.sourceName||b.name||'Tidak tersedia'],['Tahun sumber',b.sourceYear||'Tidak tersedia']].map(([k,v])=>'<div><dt>'+esc(k)+'</dt><dd>'+esc(v)+'</dd></div>').join('')+'</dl><p class="ps-footnote">Warna wilayah mengikuti skor tertinggi dari isu WATCH / ACTIVE yang sudah dinilai. Abu-abu berarti belum ada skor risiko.</p>'}
+function renderInfo(){const panel=$('petaInfo');if(panel)panel.innerHTML=regionInfo(selected);panel?.querySelectorAll('[data-panel]').forEach(b=>b.onclick=()=>{panelTab=b.dataset.panel;renderInfo();$(panelTab==='issues'?'psIssuesTab':'psRegionTab')?.focus()});bindIssueButtons()}
+function bindIssueButtons(){$('petaSituasi')?.querySelectorAll('[data-map-issue]').forEach(b=>b.onclick=()=>{const id=Number(b.dataset.mapIssue);if(!id)return;if(typeof window.openManagementIssuePage==='function'){closePage();window.openManagementIssuePage(id)}})}
+function legend(){return '<details class="ps-legend" open><summary>Legenda Risiko</summary><div class="ps-legend-content">'+[[80,'Sangat tinggi (80–100)'],[60,'Tinggi (60–79)'],[40,'Sedang (40–59)'],[20,'Rendah (20–39)'],[0,'Aman (0–19)'],[null,'Belum ada skor']].map(([v,label])=>'<div><span style="background:'+riskInfo(v).color+'"></span>'+label+'</div>').join('')+'<p>Skor tertinggi per kecamatan</p><hr><b>Penanda isu</b><div>'+icon('circle-exclamation')+' Risiko tinggi</div><div>'+icon('circle-info')+' Isu WATCH / ACTIVE</div></div></details>'}
+function citywide(){const a=data?.data?.citywideIssues||[];return a.length?'<section class="ps-citywide"><h3>'+icon('city')+' Isu Tingkat Kota</h3><p>Isu yang mencakup seluruh Kota Batam.</p><div>'+a.map(issueCard).join('')+'</div></section>':''}
 function renderPage(){
-  ensureSection();const root=$('petaSituasi');if(!root)return;
-  if(!data){root.innerHTML='<div class="glass rounded-2xl p-5 text-sm text-cyan-300"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Memuat Peta Situasi...</div>';return}
-  root.innerHTML='<div class="flex flex-wrap items-start justify-between gap-3"><div><div class="text-[10px] text-cyan-400 font-black tracking-[.22em]">COMMAND CENTER · PETA SITUASI</div><h2 class="text-2xl font-black mt-1">Peta Situasi Wilayah</h2><p class="text-xs text-slate-500 mt-2">Eksplorasi wilayah tanpa mengunci halaman. Warna memakai sinyal Issue yang sudah ada.</p></div><button id="petaRefresh" class="px-3 py-2 rounded-lg bg-slate-800 border border-slate-700 text-xs font-bold"><i class="fa-solid fa-rotate mr-1"></i>Refresh</button></div>'+
-  '<div class="grid lg:grid-cols-[minmax(0,1fr)_360px] gap-4"><section class="glass rounded-2xl p-3"><div class="flex flex-wrap gap-2 mb-3"><input id="petaSearch" list="petaDistrictOptions" type="search" placeholder="Cari kecamatan..." class="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800" aria-label="Cari kecamatan"><datalist id="petaDistrictOptions">'+(data.data.geojson.features||[]).map(f=>'<option value="'+esc(f.properties?.districtName||f.properties?.name||'')+'"></option>').join('')+'</datalist><button id="petaSearchBtn" class="rounded-lg bg-cyan-600 px-4 py-2 text-sm font-bold text-white">Cari</button><span id="petaSearchStatus" class="self-center text-xs text-slate-500" aria-live="polite"></span><button id="petaResetView" class="rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold">Tampilkan Semua</button></div><div id="petaStage" class="relative min-h-[520px] md:min-h-[680px] rounded-xl overflow-hidden border border-slate-200 bg-slate-100"></div><div class="flex flex-wrap gap-3 mt-3 text-xs text-slate-600"><span><b style="color:#34d399">●</b> Normal</span><span><b style="color:#f59e0b">●</b> Perhatian</span><span><b style="color:#f43f5e">●</b> Risiko tinggi</span><span class="ml-auto">Peta © OpenStreetMap · Leaflet</span></div></section><aside id="petaInfo" class="glass rounded-2xl p-5 min-w-0 overflow-hidden break-words">'+(selected?regionInfo(selected):'<div class="text-xs text-slate-500">Pilih kecamatan pada peta untuk melihat situasi wilayah.</div>')+'</aside></div>'+
-  '<div id="petaTopIssues" class="glass rounded-2xl p-5"><div class="text-[10px] font-black tracking-wider text-cyan-300">ISU WILAYAH TERATAS</div><div class="grid md:grid-cols-3 gap-2 mt-3">'+(topIssues().map(i=>'<button type="button" data-map-issue="'+i.id+'" class="rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-left"><b class="text-sm">'+esc(i.title)+'</b><div class="text-[10px] text-slate-500 mt-1">'+esc(i.district_name||'Wilayah')+' · '+esc(String(i.status||'').toUpperCase())+(i.risk_score==null?'':' · Risk '+Math.round(Number(i.risk_score))+'/100')+'</div></button>').join('')||'<div class="text-xs text-slate-500">Belum ada Issue spesifik kecamatan.</div>')+'</div></div>'+citywide();
-  bindInteractions();
+ ensureSection();destroyMap();const root=$('petaSituasi');if(!root)return;
+ root.innerHTML='<header class="ps-header"><span class="ps-header-icon">'+icon('map-location-dot')+'</span><div><h2>PETA SITUASI WILAYAH</h2><p>Peta interaktif sebaran isu dan kondisi wilayah Kota Batam. Klik pada kecamatan untuk melihat detail isu.</p></div><button type="button" id="petaRefresh" class="ps-button">'+icon('rotate')+' Refresh</button></header>'+(data?.data?.geojson?'<div class="ps-layout"><section class="ps-map-card" aria-label="Peta situasi kecamatan"><div class="ps-search"><form id="petaSearchForm"><label for="petaSearch" class="ps-sr-only">Cari kecamatan atau isu</label>'+icon('magnifying-glass')+'<input id="petaSearch" type="search" list="petaDistrictOptions" placeholder="Cari kecamatan atau isu…"><button type="submit" aria-label="Cari">'+icon('magnifying-glass')+'</button></form><datalist id="petaDistrictOptions">'+[...new Set(rows().map(r=>r.district_name))].map(name=>'<option value="'+esc(name)+'"></option>').join('')+'</datalist><div id="petaSearchStatus" role="status"></div><div id="petaSearchResults"></div></div><div id="leafletMap"></div>'+legend()+'<button type="button" id="petaResetView" class="ps-map-reset">'+icon('expand')+' Tampilkan semua</button></section><aside id="petaInfo" class="ps-info" aria-label="Detail kecamatan"></aside></div>'+citywide():'<div class="ps-empty">'+icon('map')+'<h3>Batas wilayah belum tersedia</h3><p>Belum ada peta wilayah untuk cakupan akun atau filter yang dipilih.</p></div>');
+ $('petaRefresh').onclick=loadMap;if(!data?.data?.geojson)return;if(window.matchMedia?.('(max-width:850px)').matches)root.querySelector('.ps-legend').open=false;renderInfo();initLeaflet();$('petaSearchForm').onsubmit=e=>{e.preventDefault();searchMap()};$('petaResetView').onclick=()=>{fitAll();leafletMap?.closePopup();$('petaSearch').value='';$('petaSearchStatus').textContent='Menampilkan semua kecamatan';$('petaSearchResults').innerHTML=''};
 }
-function topIssues(){const seen=new Set(),a=[];(data?.data?.regions||[]).forEach(r=>(r.issues||[]).forEach(i=>{if(!seen.has(Number(i.id))){seen.add(Number(i.id));a.push({...i,district_name:r.district_name})}}));return a.sort((a,b)=>(n(b.risk_score)-n(a.risk_score))||((String(a.status).toLowerCase()==='active'?0:1)-(String(b.status).toLowerCase()==='active'?0:1))).slice(0,3)}
-function bindInteractions(){
-  const root=$('petaSituasi'),stage=$('petaStage');if(!root||!stage)return;
-  initLeaflet();bindIssueButtons();
-  root.querySelectorAll('[data-map-issue]').forEach(b=>b.onclick=()=>{const id=Number(b.dataset.mapIssue);if(id)window.openManagementIssuePage?.(id)});
-  const search=()=>{const q=normName(root.querySelector('#petaSearch')?.value);if(!q||!leafletLayer||!leafletMap)return;let found=null;leafletLayer.eachLayer(layer=>{const p=layer.feature?.properties||{},name=normName(p.districtName||p.name||''),r=findRegion(p.districtId,p.districtName||p.name);if(name===q||normName(r?.district_name)===q)found=layer});if(!found){const status=root.querySelector('#petaSearchStatus');if(status)status.textContent='Kecamatan tidak ditemukan. Periksa kembali nama yang dicari.';return}selected=String(found.feature?.properties?.districtId??'');leafletMap.fitBounds(found.getBounds(),{padding:[28,28],maxZoom:12});found.fire('click');const status=root.querySelector('#petaSearchStatus');if(status)status.textContent='Menampilkan '+(found.feature?.properties?.districtName||found.feature?.properties?.name||'kecamatan')};
-  root.querySelector('#petaSearchBtn')?.addEventListener('click',search);
-  root.querySelector('#petaSearch')?.addEventListener('keydown',e=>{if(e.key==='Enter')search()});
-  root.querySelector('#petaResetView')?.addEventListener('click',()=>{if(leafletMap&&leafletLayer){const b=leafletLayer.getBounds();if(b.isValid())leafletMap.fitBounds(b,{padding:[18,18]})}});
-  root.querySelector('#petaRefresh')?.addEventListener('click',()=>loadMap());
-}
+function searchMap(){const q=normName($('petaSearch').value),result=$('petaSearchResults'),status=$('petaSearchStatus');result.innerHTML='';if(!q){status.textContent='Masukkan nama kecamatan atau judul isu.';return}const seen=new Set();const matches=rows().filter(r=>{const id=String(r.district_id);if(seen.has(id))return false;seen.add(id);return normName(r.district_name).includes(q)||(r.issues||[]).some(i=>normName(i.title).includes(q))});const exact=matches.find(r=>normName(r.district_name)===q);if(exact||matches.length===1){const r=exact||matches[0];selectRegion(r.district_id,true);status.textContent='Menampilkan '+r.district_name;return}status.textContent=matches.length?matches.length+' kecamatan cocok. Pilih wilayah:':'Tidak ditemukan pada kecamatan atau 3 isu teratas.';result.innerHTML=matches.map(r=>'<button type="button" data-search-region="'+esc(r.district_id)+'">'+esc(r.district_name)+icon('arrow-right')+'</button>').join('');result.querySelectorAll('[data-search-region]').forEach(b=>b.onclick=()=>{selectRegion(b.dataset.searchRegion,true);result.innerHTML='';status.textContent='Menampilkan '+findRegion(b.dataset.searchRegion).district_name})}
 async function loadMap(){
-  if(!window.__petaSituasiOpen)return;ensureSection();const root=$('petaSituasi');root.innerHTML='<div class="glass rounded-2xl p-5 text-sm text-cyan-300"><i class="fa-solid fa-spinner fa-spin mr-2"></i>Memuat Peta Situasi...</div>';
-  try{const q=scopeQuery(),suffix=q.toString()?'?'+q.toString():'';const [map,alerts,pipeline]=await Promise.all([api('/command-center/map'+suffix),api('/intelligence/alerts?status=active&limit=100'),api('/command-center/workflow-pipeline'+suffix)]);data={data:map.data,alerts:alerts.data?.alerts||[],pipeline};zoom=1;panX=panY=0;renderPage()}catch(e){root.innerHTML='<div class="glass rounded-2xl p-5 text-sm text-rose-300">Peta Situasi gagal dimuat: '+esc(e.message)+'</div>'}
+ if(!window.__petaSituasiOpen)return;const version=++loadVersion;destroyMap();ensureSection();const root=$('petaSituasi');root.innerHTML='<div class="ps-empty" role="status">'+icon('spinner fa-spin')+'<p>Memuat Peta Situasi…</p></div>';
+ try{const q=scopeQuery(),suffix=q.toString()?'?'+q.toString():'';const [map,pipeline]=await Promise.all([api('/command-center/map'+suffix),api('/command-center/workflow-pipeline'+suffix).catch(()=>null)]);if(version!==loadVersion||!window.__petaSituasiOpen)return;data={data:map.data,pipeline};if(!rows().some(r=>String(r.district_id)===String(selected)))selected=rows().slice().sort((a,b)=>n(b.high_risk_count)-n(a.high_risk_count)||n(b.active_issue_count)-n(a.active_issue_count))[0]?.district_id??null;renderPage()}catch(e){if(version!==loadVersion||!window.__petaSituasiOpen)return;root.innerHTML='<div class="ps-empty" role="alert"><h3>Peta Situasi gagal dimuat</h3><p>'+esc(e.message)+'</p><button type="button" id="petaRetry" class="ps-button">Coba lagi</button></div>';$('petaRetry').onclick=loadMap}
 }
+const sheet=document.createElement('style');sheet.id='petaSituasiStyles';sheet.textContent=`
+#petaSituasi{--ps-bg:#fff;--ps-text:#183153;--ps-muted:#647b96;--ps-border:#e2ebf2;--ps-soft:#f7fafc;color:var(--ps-text);font-family:inherit}
+html.dark #petaSituasi{--ps-bg:#152235;--ps-text:#e3ecf7;--ps-muted:#a3b6ce;--ps-border:#304157;--ps-soft:#1c2d43}
+#petaSituasi *{box-sizing:border-box}
+#petaSituasi button,#petaSituasi input{font:inherit}
+#petaSituasi button{cursor:pointer}
+#petaSituasi button:focus-visible,#petaSituasi input:focus-visible,#petaSituasi summary:focus-visible{outline:3px solid #16a5c0;outline-offset:3px}
+#petaSituasi .ps-header{display:flex;align-items:center;gap:14px;background:var(--ps-bg);border:1px solid var(--ps-border);border-radius:12px;padding:16px 18px;margin-bottom:16px}
+#petaSituasi .ps-header-icon{display:grid;place-items:center;width:42px;height:42px;flex-shrink:0;border-radius:9px;background:#12a0b9;color:#fff;font-size:22px}
+#petaSituasi .ps-header h2{margin:0 0 5px;color:#159bb3;font-size:16px;font-weight:800;letter-spacing:.02em}
+#petaSituasi .ps-header p{margin:0;font-size:12px;line-height:1.6;color:var(--ps-muted)}
+#petaSituasi .ps-button{border:1px solid var(--ps-border);background:var(--ps-bg);color:var(--ps-text);padding:10px 14px;border-radius:8px;white-space:nowrap;font-size:12px}
+#petaSituasi .ps-header .ps-button{margin-left:auto}
+#petaSituasi .ps-layout{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(350px,1fr);gap:16px;align-items:start}
+#petaSituasi .ps-map-card{position:relative;min-width:0;isolation:isolate;border:1px solid #b5dbe5;border-radius:12px;overflow:hidden;background:#abdce7}
+#petaSituasi #leafletMap{width:100%;height:clamp(610px,76vh,850px);z-index:0;background:#abdce7}
+#petaSituasi .ps-search{position:absolute;top:14px;left:14px;z-index:500;width:min(340px,calc(100% - 230px))}
+#petaSituasi .ps-search form{display:flex;align-items:center;gap:9px;background:var(--ps-bg);color:var(--ps-muted);border-radius:8px;padding:4px 10px;box-shadow:0 2px 8px #193b5920}
+#petaSituasi .ps-search input{min-width:0;width:100%;border:0!important;background:var(--ps-bg)!important;color:var(--ps-text)!important;padding:9px 0;font-size:12px;outline-offset:0}
+#petaSituasi .ps-search button{border:0;background:transparent;color:var(--ps-muted);min-width:30px;min-height:34px}
+#petaSituasi #petaSearchStatus:not(:empty),#petaSituasi #petaSearchResults:not(:empty){background:var(--ps-bg);color:var(--ps-text);border-radius:6px;margin-top:5px;padding:8px;font-size:12px;line-height:1.5}
+#petaSituasi #petaSearchResults{max-height:240px;overflow:auto}
+#petaSituasi #petaSearchResults button{display:flex;justify-content:space-between;text-align:left;width:100%;gap:12px;padding:7px}
+#petaSituasi .ps-legend{position:absolute;right:12px;top:14px;z-index:500;background:var(--ps-bg);color:var(--ps-text);box-shadow:0 2px 9px #17364b25;border-radius:9px;padding:12px 14px;width:188px;font-size:11px}
+#petaSituasi .ps-legend summary{font-weight:800;cursor:pointer;font-size:12px}
+#petaSituasi .ps-legend-content>div{display:flex;align-items:center;gap:9px;margin-top:11px;line-height:1.5}
+#petaSituasi .ps-legend-content>div>span{width:15px;height:15px;flex-shrink:0;border-radius:50%}
+#petaSituasi .ps-legend p{font-size:10px;color:var(--ps-muted);line-height:1.5;margin:12px 0}
+#petaSituasi .ps-legend hr{border:0;border-top:1px solid var(--ps-border);margin:12px 0}
+#petaSituasi .leaflet-top.leaflet-left{top:70px;left:4px}
+#petaSituasi .ps-map-reset{position:absolute;bottom:28px;right:12px;z-index:500;border:1px solid var(--ps-border);border-radius:7px;padding:8px 10px;background:var(--ps-bg);color:var(--ps-text);font-size:11px;box-shadow:0 2px 6px #17364b20}
+#petaSituasi .ps-marker{display:grid;place-items:center;width:28px;height:28px;border:2px solid white;border-radius:50%;color:#183153;box-shadow:0 2px 5px #193b5940;font-size:13px;font-weight:900}
+#petaSituasi .ps-popup{font-size:12px;line-height:1.8;color:#183153}
+#petaSituasi .ps-info{min-width:0;background:var(--ps-bg);border:1px solid var(--ps-border);border-radius:12px;padding:20px;box-shadow:0 3px 12px #23435a05}
+#petaSituasi .ps-region-heading{display:flex;gap:10px;align-items:flex-start;flex-wrap:wrap;margin-bottom:20px}
+#petaSituasi .ps-pin{font-size:28px;color:#13a1b8}
+#petaSituasi .ps-region-heading>div{flex:1;min-width:150px}
+#petaSituasi .ps-region-heading h3{font-size:22px;font-weight:800;line-height:1.25;margin:0;overflow-wrap:anywhere}
+#petaSituasi .ps-region-heading p{font-size:12px;color:var(--ps-muted);margin:5px 0 0}
+#petaSituasi .ps-badge{display:inline-flex;align-items:center;align-self:flex-start;border-radius:7px;background:var(--ps-soft);color:var(--ps-muted);padding:5px 7px;font-size:10px;font-weight:700;line-height:1.3;white-space:nowrap}
+#petaSituasi .ps-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:18px}
+#petaSituasi .ps-metric{min-width:0;border:1px solid var(--ps-border);background:var(--ps-soft);border-radius:8px;padding:12px 8px;display:flex;flex-direction:column;gap:6px}
+#petaSituasi .ps-metric b{font-size:24px;line-height:1.1}
+#petaSituasi .ps-metric strong{font-size:10px;overflow-wrap:anywhere}
+#petaSituasi .ps-metric small{font-size:10px;color:var(--ps-muted)}
+#petaSituasi .ps-red{color:#dc4562}#petaSituasi .ps-amber{color:#c07816}#petaSituasi .ps-blue{color:#227db6}
+#petaSituasi .ps-badge.ps-red{background:#fff0f3}#petaSituasi .ps-badge.ps-amber{background:#fff4df}
+html.dark #petaSituasi .ps-red{color:#ff8aa0}html.dark #petaSituasi .ps-amber{color:#f6c266}html.dark #petaSituasi .ps-blue{color:#81c9ff}
+html.dark #petaSituasi .ps-badge.ps-red{background:#442c3b}html.dark #petaSituasi .ps-badge.ps-amber{background:#443a29}
+#petaSituasi .ps-tabs{display:flex;border-top:1px solid var(--ps-border);border-bottom:1px solid var(--ps-border);gap:20px;margin-bottom:12px}
+#petaSituasi .ps-tabs button{border:0;border-bottom:2px solid transparent;background:transparent;color:var(--ps-muted);font-size:12px;font-weight:700;padding:14px 4px}
+#petaSituasi .ps-tabs button[aria-selected=true]{color:#159bb3;border-bottom-color:#159bb3}
+#petaSituasi .ps-list-label{font-size:11px;color:var(--ps-muted);margin:0 0 10px}
+#petaSituasi .ps-issue-list{display:grid;gap:10px}
+#petaSituasi .ps-issue{display:flex;width:100%;text-align:left;gap:10px;border:1px solid var(--ps-border);border-radius:9px;background:var(--ps-bg);color:var(--ps-text);padding:14px 12px;transition:border-color .15s,background .15s}
+#petaSituasi .ps-issue:hover{border-color:#13a1b8;background:var(--ps-soft)}
+#petaSituasi .ps-issue-icon{display:grid;place-items:center;width:28px;height:28px;border-radius:50%;flex-shrink:0;font-size:13px;color:#183153}
+#petaSituasi .ps-issue-body{display:flex;flex-direction:column;gap:14px;min-width:0;flex:1}
+#petaSituasi .ps-issue-heading{display:flex;flex-wrap:wrap;gap:9px;align-items:start}
+#petaSituasi .ps-issue-heading strong{font-size:13px;line-height:1.6;flex:1 1 155px;overflow-wrap:anywhere}
+#petaSituasi .ps-badges{display:flex;flex-wrap:wrap;gap:5px}
+#petaSituasi .ps-issue-meta{font-size:11px;color:var(--ps-muted)}
+#petaSituasi .ps-issue-link{color:#168caa;font-size:11px;font-weight:700}
+#petaSituasi .ps-footnote{font-size:11px;line-height:1.7;color:var(--ps-muted);margin:14px 0 0}
+#petaSituasi .ps-details{margin:0}#petaSituasi .ps-details>div{padding:12px 0;border-bottom:1px solid var(--ps-border)}
+#petaSituasi .ps-details dt{font-size:11px;color:var(--ps-muted)}#petaSituasi .ps-details dd{font-size:13px;font-weight:600;margin:5px 0;overflow-wrap:anywhere}
+#petaSituasi .ps-empty{background:var(--ps-bg);color:var(--ps-muted);padding:45px 20px;text-align:center;border-radius:12px;font-size:13px;line-height:1.8}
+#petaSituasi .ps-empty>i{font-size:28px;color:#18a1b7}
+#petaSituasi .ps-citywide{border:1px solid var(--ps-border);background:var(--ps-bg);border-radius:12px;padding:18px;margin-top:16px}
+#petaSituasi .ps-citywide h3{font-size:15px;margin:0;font-weight:800}
+#petaSituasi .ps-citywide>p{font-size:12px;color:var(--ps-muted);margin:8px 0 14px}
+#petaSituasi .ps-citywide>div{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+#petaSituasi .ps-sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+@media(min-width:1600px){#petaSituasi .ps-layout{grid-template-columns:minmax(0,1.9fr) minmax(450px,1fr)}}
+@media(max-width:1100px){#petaSituasi .ps-layout{grid-template-columns:minmax(0,1.35fr) minmax(330px,1fr)}#petaSituasi .ps-search{width:calc(100% - 28px);right:14px}#petaSituasi .ps-legend{top:74px;width:165px}#petaSituasi .ps-info{padding:14px}#petaSituasi .ps-region-heading h3{font-size:20px}}
+@media(max-width:850px){#petaSituasi .ps-layout{grid-template-columns:1fr}#petaSituasi #leafletMap{height:560px}#petaSituasi .ps-citywide>div{grid-template-columns:1fr}#petaSituasi .ps-region-heading>.ps-badge{margin-left:auto}}
+@media(max-width:480px){#petaSituasi .ps-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}#petaSituasi .ps-header{padding:12px;gap:10px;flex-wrap:wrap}#petaSituasi .ps-header>div{flex:1}#petaSituasi .ps-header h2{font-size:13px}#petaSituasi .ps-header p{font-size:11px}#petaSituasi .ps-header .ps-button{padding:8px 10px}#petaSituasi #leafletMap{height:480px}#petaSituasi .ps-legend{width:154px;font-size:10px;padding:10px}#petaSituasi .ps-legend-content>div{margin-top:7px}#petaSituasi .ps-metric{padding:10px 6px}#petaSituasi .ps-metric strong{font-size:9px}#petaSituasi .ps-info{padding:14px}#petaSituasi .ps-tabs{gap:16px}}
+`;document.head.appendChild(sheet);
+
 let observer;
 function init(){
   ensureSection();ensureNav();patchDashboard();
   observer=new MutationObserver(()=>{ensureNav();patchDashboard()});observer.observe(document.body,{subtree:true,childList:true});
   window.addEventListener('media:authenticated',()=>{ensureSection();ensureNav();patchDashboard()});
   window.addEventListener('command-center-scope-changed',()=>{if(window.__petaSituasiOpen)loadMap()});
-  window.addEventListener('media-intelligence-tab',e=>{if(e.detail!=='dashboard'&&window.__petaSituasiOpen)closePage()});
+  window.addEventListener('media-intelligence-tab',e=>{if(window.__petaSituasiOpen)closePage()});
 }
 init();
 })();
