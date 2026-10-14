@@ -32,3 +32,17 @@ test('claimed amount above Admin ceiling is quarantined before provider request'
  assert.equal(result.reason,'APIFY_CLAIM_AMOUNT_MISMATCH');
  assert.ok(sql.some(q=>q.includes('UNKNOWN')));
 });
+
+test('claimed amount above prepared cap but below Admin ceiling is quarantined',async()=>{
+ const sql:string[]=[];
+ const pool={query:async(q:string)=>{
+  sql.push(q);
+  if(q.startsWith('SELECT'))return{rows:[{actor_id:base.actorId,platform:'tiktok',status:'RESERVED',reserved_usd:'0.500000'}]};
+  if(q.includes('UPDATE apify_usage_ledger')&&q.includes("status='RUNNING'"))return{rows:[{reserved_usd:'0.510000'}]};
+  return{rows:[],rowCount:1};
+ }} as unknown as Pool;
+ const result=await prepareAndClaimApifyRun(pool,{...base,configuredMaxUsd:0.75});
+ assert.equal(result.ready,false);
+ assert.equal(result.reason,'APIFY_CLAIM_AMOUNT_MISMATCH');
+ assert.ok(sql.some(q=>q.includes('UNKNOWN')));
+});
