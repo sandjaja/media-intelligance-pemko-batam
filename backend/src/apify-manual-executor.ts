@@ -1,7 +1,7 @@
 import type {Pool} from 'pg';
 import {prepareAndClaimApifyRun} from './apify-claim-orchestrator.js';
 import {confirmApifyProviderRun,markApifyRunUnknown} from './apify-run-lifecycle.js';
-import type {ApifyPricingApproval} from './apify-pricing-approval.js';
+import {conservativeApifyRunEstimate,type ApifyPricingApproval} from './apify-pricing-approval.js';
 
 /** Execute one explicitly approved, previously RESERVED Apify run.
  * This is an opt-in executor primitive, NOT a route or scheduler. The caller
@@ -25,6 +25,11 @@ export async function executeClaimedApifyRun(pool:Pool,input:{
     input.configuredActorId!==input.actorId)
   return{started:false,reason:'APIFY_MANUAL_COLLECTOR_NOT_ENABLED_FOR_ROLLOUT'};
  if(!input.pricingApproval||input.pricingApproval.actorId!==input.actorId||!input.pricingApproval.includesAllEventsAndOverheads)return{started:false,reason:'APIFY_PRICING_APPROVAL_REQUIRED'};
+ const approvedMaximum=conservativeApifyRunEstimate(input.actorId,input.pricingApproval);
+ if(approvedMaximum===null)return{started:false,reason:'APIFY_PRICING_APPROVAL_EXPIRED_OR_INVALID'};
+ if(input.configuredMaxUsd===null||!Number.isFinite(input.configuredMaxUsd)||input.configuredMaxUsd<=0||
+    approvedMaximum>input.configuredMaxUsd)
+  return{started:false,reason:'APIFY_APPROVED_COST_EXCEEDS_ADMIN_LIMIT'};
  if(!input.token.trim())return{started:false,reason:'APIFY_TOKEN_REQUIRED'};
  if(!input.actorInput||Array.isArray(input.actorInput)||typeof input.actorInput!=='object')
   return{started:false,reason:'APIFY_ACTOR_INPUT_INVALID'};
