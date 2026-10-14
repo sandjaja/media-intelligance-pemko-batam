@@ -23,7 +23,9 @@ export async function reserveApifyWithLiveLimits(pool:Pool,input:{
  if(input.providerChargeCapVerified!==true)
   return{reserved:false,reason:'APIFY_CHARGE_CAP_NOT_VERIFIED',remainingUsd:null};
  const approved=conservativeApifyRunEstimate(input.actorId,input.pricingApproval??null);
- if(approved===null||Math.abs(approved-input.estimatedUsd)>0.000001)
+ // A paid reservation must match the verified whole-cent maximum exactly;
+ // a browser-supplied approximation must never authorize a different amount.
+ if(approved===null||approved!==input.estimatedUsd)
   return{reserved:false,reason:'APIFY_PRICING_APPROVAL_REQUIRED',remainingUsd:null};
  const configured=await loadApifyAdminCollectorSettings(pool);
  const selected=configured.find(c=>c.actorId===input.actorId);
