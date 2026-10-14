@@ -229,7 +229,7 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
   app.post('/api/social/collection/apify/import-completed',{preHandler:[auth,requireWrite]},async(request,reply)=>{
     const ctx=request.socialIngestAuth!;
     if(!ctx.roles.includes('super_admin')&&!ctx.roles.includes('humas'))return reply.code(403).send({error:'HUMAS_OR_SUPER_ADMIN_REQUIRED'});
-    const parsed=z.object({platform:z.enum(['tiktok','instagram']),runId:z.string().regex(/^[a-zA-Z0-9_-]{5,160}$/)}).strict().safeParse(request.body);
+    const parsed=z.object({platform:z.enum(['tiktok','instagram']),runId:z.string().regex(/^[a-zA-Z0-9_-]{5,160}$/),manualVideoLimit:z.union([z.literal(10),z.literal(20),z.literal(50)]).optional()}).strict().safeParse(request.body);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_APIFY_IMPORT_REQUEST'});
     const {platform,runId}=parsed.data;
     const actorId=platform==='tiktok'?'clockworks/tiktok-scraper':'apify/instagram-scraper';
@@ -252,12 +252,12 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
       if(run?.id!==runId||run.status!=='SUCCEEDED'||typeof run.defaultDatasetId!=='string'||
         !/^[a-zA-Z0-9_-]{5,160}$/.test(run.defaultDatasetId))
         return reply.code(409).send({error:'APIFY_RUN_NOT_COMPLETED'});
-      const input={confirmedRunId:runId,datasetId:run.defaultDatasetId,token};
+      const input={confirmedRunId:runId,datasetId:run.defaultDatasetId,token,manualVideoLimit:parsed.data.manualVideoLimit};
       const result=platform==='tiktok'
         ?await (await import('./apify-tiktok-dataset.js')).ingestCompletedApifyTikTokDataset(pool,input)
         :await (await import('./apify-instagram-dataset.js')).ingestCompletedApifyInstagramDataset(pool,input);
       await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'APIFY_COMPLETED_RUN_IMPORT',$2::jsonb)`,
-        [ctx.id,JSON.stringify({platform,runId,datasetItems:result.datasetItems,received:result.received,succeeded:result.succeeded,failed:result.failed})]);
+        [ctx.id,JSON.stringify({platform,runId,manualVideoLimit:parsed.data.manualVideoLimit??null,datasetItems:result.datasetItems,received:result.received,succeeded:result.succeeded,failed:result.failed})]);
       return reply.send({data:{platform,runId,...result,billableRunStarted:false}});
     }catch(error){
       app.log.error({err:error,platform,runId},'Apify completed-run import failed');
