@@ -48,7 +48,11 @@ export async function previewManualApifyCollection(pool:Pool,input:{
      actor.inputSchemaReason=schema.reason;
      const requiredKeys=actor.actorId==='clockworks/tiktok-scraper'?['searchQueries','searchSection','resultsPerPage']:['search','searchType','resultsType','resultsLimit'];
      actor.missingInputKeys=requiredKeys.filter(key=>!schema.acceptedKeys.includes(key));
-     actor.inputSchemaVerified=schema.verified&&actor.missingInputKeys.length===0;
+     const expectedTypes=actor.actorId==='clockworks/tiktok-scraper'?{searchQueries:'array',searchSection:'string',resultsPerPage:'integer'}:{search:'string',searchType:'string',resultsType:'string',resultsLimit:'integer'};
+     // JSON schema may use number rather than integer for numeric inputs.
+     const typesMatch=Object.entries(expectedTypes).every(([key,type])=>schema.propertyTypes[key]===type||(type==='integer'&&schema.propertyTypes[key]==='number'));
+     actor.inputSchemaVerified=schema.verified&&actor.missingInputKeys.length===0&&typesMatch;
+     if(schema.verified&&!typesMatch)actor.inputSchemaReason='APIFY_INPUT_SCHEMA_TYPE_MISMATCH';
     }
     const lookup=await inspectApifyActorPricing(actor.actorId,token);
     actor.pricingLookupStatus=lookup.reason;
