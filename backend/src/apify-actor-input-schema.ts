@@ -5,13 +5,13 @@ export async function inspectApifyActorInputSchema(input:{actorId:'clockworks/ti
  try{
   const url='https://api.apify.com/v2/acts/'+input.actorId.replace('/','~')+'/builds/default/input-schema';
   const response=await fetcher(url,{headers:{Authorization:'Bearer '+input.token,Accept:'application/json'},signal:AbortSignal.timeout(15000)});
-  if(!response.ok)return{verified:false,reason:'APIFY_INPUT_SCHEMA_HTTP_'+response.status,acceptedKeys:[]};
+  if(!response.ok)return{verified:false,reason:'APIFY_INPUT_SCHEMA_HTTP_'+response.status,acceptedKeys:[],propertyTypes:{}};
   const payload:unknown=await response.json();
-  if(!payload||typeof payload!=='object'||Array.isArray(payload))return{verified:false,reason:'APIFY_INPUT_SCHEMA_INVALID',acceptedKeys:[]};
+  if(!payload||typeof payload!=='object'||Array.isArray(payload))return{verified:false,reason:'APIFY_INPUT_SCHEMA_INVALID',acceptedKeys:[],propertyTypes:{}};
   const schema=(payload as Record<string,unknown>).data??payload;
-  if(!schema||typeof schema!=='object'||Array.isArray(schema))return{verified:false,reason:'APIFY_INPUT_SCHEMA_INVALID',acceptedKeys:[]};
+  if(!schema||typeof schema!=='object'||Array.isArray(schema))return{verified:false,reason:'APIFY_INPUT_SCHEMA_INVALID',acceptedKeys:[],propertyTypes:{}};
   const props=(schema as Record<string,unknown>).properties;
-  if(!props||typeof props!=='object'||Array.isArray(props))return{verified:false,reason:'APIFY_INPUT_SCHEMA_PROPERTIES_UNAVAILABLE',acceptedKeys:[]};
+  if(!props||typeof props!=='object'||Array.isArray(props))return{verified:false,reason:'APIFY_INPUT_SCHEMA_PROPERTIES_UNAVAILABLE',acceptedKeys:[],propertyTypes:{}};
   const propertyTypes:Record<string,string>={};
   for(const [key,value] of Object.entries(props).slice(0,200)){
    if(value&&typeof value==='object'&&!Array.isArray(value)){
