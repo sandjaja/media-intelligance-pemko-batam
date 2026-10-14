@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {fetchApifyTikTokDataset} from './apify-tiktok-dataset.js';
+import {fetchApifyTikTokDataset,resolveApifyManualImportLimit} from './apify-tiktok-dataset.js';
 
 test('fetches bounded TikTok dataset items without exposing token in URL',async()=>{
  let calls=0;
@@ -27,4 +27,15 @@ test('rejects malformed dataset ID and oversized limit before network access',as
 });
 test('rejects invalid provider dataset response shape',async()=>{
  await assert.rejects(fetchApifyTikTokDataset({datasetId:'dataset_12345',token:'secret',fetcher:async()=>({ok:true,json:async()=>({data:[]})} as Response)}),/APIFY_DATASET_SHAPE_INVALID/);
+});
+
+test('new manual import limit accepts only selected 10, 20 or 50',()=>{
+ for(const limit of [10,20,50] as const)assert.equal(resolveApifyManualImportLimit(limit),limit);
+ for(const invalid of [0,1,11,51,100,null,undefined,'10',NaN])
+  assert.throws(()=>resolveApifyManualImportLimit(invalid),/APIFY_MANUAL_IMPORT_LIMIT_INVALID/);
+});
+test('provider response exceeding explicit manual import cap is rejected',async()=>{
+ await assert.rejects(fetchApifyTikTokDataset({datasetId:'dataset_12345',token:'secret',limit:10,
+  fetcher:async()=>({ok:true,json:async()=>Array.from({length:11},(_,i)=>({id:i}))} as Response)}),
+  /APIFY_DATASET_SHAPE_INVALID/);
 });
