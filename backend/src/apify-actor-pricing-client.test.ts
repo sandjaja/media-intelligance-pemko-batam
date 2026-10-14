@@ -35,3 +35,14 @@ test('pricing lookup rejects alternate separators and backslashes',async()=>{
   assert.equal(called,false);
  }
 });
+
+test('Actor metadata chooses currently effective pricing, never future pricing',()=>{
+ const current=parseApifyActorPricing({data:{pricingInfos:[
+  {pricingModel:'PAY_PER_EVENT',minimalMaxTotalChargeUsd:0.5,startedAt:'2024-01-01T00:00:00.000Z'},
+  {pricingModel:'FLAT_PRICE_PER_MONTH',startedAt:'2099-01-01T00:00:00.000Z'}
+ ]}});
+ assert.equal(current?.pricingModel,'PAY_PER_EVENT');
+ assert.equal(current?.minimalMaxTotalChargeUsd,0.5);
+ assert.equal(parseApifyActorPricing({data:{pricingInfos:[{pricingModel:'PAY_PER_EVENT',minimalMaxTotalChargeUsd:0.5,startedAt:'2099-01-01T00:00:00.000Z'}]}}),null);
+ assert.equal(parseApifyActorPricing({data:{currentPricingInfo:{pricingModel:'PRICE_PER_DATASET_ITEM'}}})?.capEligible,false);
+});
