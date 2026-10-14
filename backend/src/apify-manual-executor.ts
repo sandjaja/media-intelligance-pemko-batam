@@ -2,6 +2,8 @@ import type {Pool} from 'pg';
 import {prepareAndClaimApifyRun} from './apify-claim-orchestrator.js';
 import {confirmApifyProviderRun,markApifyRunUnknown} from './apify-run-lifecycle.js';
 import {conservativeApifyRunEstimate,type ApifyPricingApproval} from './apify-pricing-approval.js';
+import {previewGeographicActorInput} from './apify-geographic-input.js';
+import type {GeographicSearchPlan} from './apify-geographic-search.js';
 
 /** Execute one explicitly approved, previously RESERVED Apify run.
  * This is an opt-in executor primitive, NOT a route or scheduler. The caller
@@ -13,7 +15,8 @@ export async function executeClaimedApifyRun(pool:Pool,input:{
  configuredActorId:string;configuredMaxUsd:number|null;
  collectorEnabled:boolean;pricingApproval:ApifyPricingApproval|null;
  claimId:string;token:string;explicitlyConfirmed:boolean;
- actorInput:Record<string,unknown>;providerChargeCapVerified?:boolean;fetcher?:typeof fetch;
+ actorInput:Record<string,unknown>;trustedGeographicPlan?:GeographicSearchPlan;selectedVideoLimit?:10|20|50;
+ providerChargeCapVerified?:boolean;fetcher?:typeof fetch;
 }):Promise<{started:boolean;reason:string;providerRunId?:string}>{
  if(!input.explicitlyConfirmed)return{started:false,reason:'APIFY_USER_CONFIRMATION_REQUIRED'};
  // The request parameter alone is not proof that this Actor's pricing model
@@ -53,6 +56,20 @@ export async function executeClaimedApifyRun(pool:Pool,input:{
     input.actorInput.commentsPerPost!==0||
     input.actorInput.shouldDownloadVideos!==false)
   return{started:false,reason:'APIFY_TIKTOK_GEOGRAPHIC_INPUT_NOT_VERIFIED'};
+ // Server-origin geographic plan must match the exact proposed paid input.
+ // Caller must load this plan from the tenant database, never from request JSON.
+ if(!input.trustedGeographicPlan||!input.selectedVideoLimit)
+  return{started:false,reason:'APIFY_TRUSTED_GEOGRAPHIC_PLAN_REQUIRED'};
+ let proposed:Record<string,unknown>;
+ try{
+  proposed=previewGeographicActorInput({actorId:input.actorId,
+   plan:input.trustedGeographicPlan,maxQueries:5,maxVideos:input.selectedVideoLimit}).proposedInput;
+ }catch{
+  return{started:false,reason:'APIFY_TRUSTED_GEOGRAPHIC_PLAN_INVALID'};
+ }
+ const canonical=(value:unknown):string=>JSON.stringify(value);
+ if(canonical(proposed)!==canonical(input.actorInput))
+  return{started:false,reason:'APIFY_TIKTOK_INPUT_PLAN_MISMATCH'};
  const claimed=await prepareAndClaimApifyRun(pool,input);
  if(!claimed.ready||!claimed.request)return{started:false,reason:claimed.reason};
  const {request}=claimed;
