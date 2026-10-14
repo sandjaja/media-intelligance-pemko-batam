@@ -81,3 +81,14 @@ test('unpriced preview warns when Admin ceiling exceeds provider headroom',()=>{
  assert.equal(quote.readyForConfirmation,false);
  assert.ok(quote.blockers.includes('APIFY_MONTHLY_HEADROOM_INSUFFICIENT_OR_UNAVAILABLE'));
 });
+
+test('verified cheaper estimate cannot bypass full configured ceiling against Admin budget',()=>{
+ const quote=buildApifyManualChargeQuote({...base,configuredMaxUsd:0.9,adminMonthlyRemainingUsd:0.6});
+ assert.equal(quote.readyForConfirmation,false);
+ assert.ok(quote.blockers.includes('APIFY_ADMIN_MONTHLY_BUDGET_INSUFFICIENT_OR_UNAVAILABLE'));
+});
+test('verified cheaper estimate cannot bypass full configured ceiling against provider headroom',()=>{
+ const quote=buildApifyManualChargeQuote({...base,configuredMaxUsd:0.9,monthlyHeadroomUsd:0.6});
+ assert.equal(quote.readyForConfirmation,false);
+ assert.ok(quote.blockers.includes('APIFY_MONTHLY_HEADROOM_INSUFFICIENT_OR_UNAVAILABLE'));
+});
