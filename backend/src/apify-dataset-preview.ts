@@ -31,6 +31,9 @@ export async function previewApifyDataset(options:{
  if(!response.ok)throw new Error('APIFY_DATASET_HTTP_'+response.status);
  const payload:unknown=await response.json();
  if(!Array.isArray(payload))throw new Error('APIFY_DATASET_INVALID_RESPONSE');
+ // Fail closed if a provider ignores the requested limit. Never normalize
+ // or forward more items than the user-selected read-only preview ceiling.
+ if(payload.length>limit)throw new Error('APIFY_DATASET_LIMIT_EXCEEDED');
  const candidates=options.kind==='posts'?normalizeApifyPosts(options.platform,payload):normalizeApifyComments(options.platform,payload,options.parentUrl);
  return{actorRunId:options.actorRunId,datasetId:options.datasetId,platform:options.platform,kind:options.kind,received:payload.length,accepted:candidates.length,rejected:payload.length-candidates.length,candidates};
 }
