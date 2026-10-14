@@ -87,3 +87,14 @@ test('fractional-cent approval cannot reach the ledger or paid provider',async()
  assert.equal(result.started,false);
  assert.equal(result.reason,'APIFY_PRICING_APPROVAL_EXPIRED_OR_INVALID');
 });
+
+test('disabled collector fails before any ledger claim or paid request',async()=>{
+ let networkCalled=false;
+ const result=await executeClaimedApifyRun(unreachablePool,{
+  ...base,collectorEnabled:false,explicitlyConfirmed:true,providerChargeCapVerified:true,
+  fetcher:async()=>{networkCalled=true;throw new Error('NETWORK_MUST_NOT_BE_TOUCHED')}
+ });
+ assert.equal(result.started,false);
+ assert.equal(result.reason,'APIFY_COLLECTOR_DISABLED');
+ assert.equal(networkCalled,false);
+});
