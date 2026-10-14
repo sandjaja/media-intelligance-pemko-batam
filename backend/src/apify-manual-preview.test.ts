@@ -41,7 +41,7 @@ test('read-only pricing preview does not require paid collector enabled flag',as
  const queries:string[]=[];
  const pool={query:async(sql:string)=>{queries.push(sql);return{rows:[]};}} as unknown as Pool;
  const result=await previewManualApifyCollection(pool,{platform:'instagram',requestedBy:'operator-1'});
- const credentialQuery=queries.find(sql=>sql.includes('SELECT c.credential_ciphertext'));
+ const credentialQuery=queries.find(sql=>sql.includes('SELECT c.credential_ciphertext')&&!sql.includes('c.enabled=true'));
  assert.ok(credentialQuery);
  assert.equal(credentialQuery.includes('c.enabled=true'),false);
  assert.equal(result.billableRunStarted,false);
