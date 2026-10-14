@@ -18,7 +18,10 @@ export async function fetchApifyRunStatus(input:{
   if(data?.id!==input.providerRunId||typeof data.status!=='string')
    return{verified:false,reason:'APIFY_RUN_RESPONSE_INVALID',status:null,actualUsd:null};
   const raw=data.usageTotalUsd;
-  // usageTotalUsd is provider-reported usage, not independently proven final billing.\n  // Never expose a reconciliable amount for a nonterminal provider status.\n  const terminal=['SUCCEEDED','FAILED','TIMED-OUT','ABORTED'].includes(data.status);\n  const actualUsd=terminal&&typeof raw==='number'&&Number.isFinite(raw)&&raw>=0?raw:null;
+  // usageTotalUsd is provider-reported usage, not independently proven final billing.
+  // Never expose a reconciliable amount for a nonterminal provider status.
+  const terminal=['SUCCEEDED','FAILED','TIMED-OUT','ABORTED'].includes(data.status);
+  const actualUsd=terminal&&typeof raw==='number'&&Number.isFinite(raw)&&raw>=0?raw:null;
   return{verified:true,reason:actualUsd===null?'APIFY_RUN_COST_UNVERIFIED':'APIFY_RUN_STATUS_READ',status:data.status,actualUsd};
  }catch{
   return{verified:false,reason:'APIFY_RUN_LOOKUP_UNAVAILABLE',status:null,actualUsd:null};
