@@ -68,3 +68,10 @@ test('mismatched approved estimate stops before database and network',async()=>{
  const result=await reserveApifyWithLiveLimits(pool,{...input,estimatedUsd:0.3});
  assert.equal(result.reason,'APIFY_PRICING_APPROVAL_REQUIRED');
 });
+
+test('sub-cent estimate mismatch is rejected before database or provider access',async()=>{
+ const pool={query:()=>{throw Error('DATABASE_MUST_NOT_BE_TOUCHED')}} as unknown as Pool;
+ const result=await reserveApifyWithLiveLimits(pool,{...input,estimatedUsd:0.2000001});
+ assert.equal(result.reserved,false);
+ assert.equal(result.reason,'APIFY_PRICING_APPROVAL_REQUIRED');
+});
