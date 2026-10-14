@@ -11,3 +11,12 @@ test('accepts only explicit finite nonnegative USD balance',()=>{
  assert.equal(parseApifyUsdBalance({data:{availableBalanceUsd:1.25}}),1.25);
  assert.equal(parseApifyUsdBalance({data:{availableBalanceUsd:0}}),0);
 });
+
+test('rejects malformed balance payloads and non-finite values',()=>{
+ assert.equal(parseApifyUsdBalance(null),null);
+ assert.equal(parseApifyUsdBalance({data:null}),null);
+ assert.equal(parseApifyUsdBalance({data:{availableBalanceUsd:NaN}}),null);
+ assert.equal(parseApifyUsdBalance({data:{availableBalanceUsd:Infinity}}),null);
+ assert.equal(parseApifyUsdBalance({data:{availableBalanceUsd:-Infinity}}),null);
+ assert.equal(parseApifyUsdBalance({data:{availableBalanceUsd:true}}),null);
+});
