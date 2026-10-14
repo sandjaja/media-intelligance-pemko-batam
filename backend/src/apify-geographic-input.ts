@@ -21,7 +21,9 @@ export function previewGeographicActorInput(input:{actorId:string;plan:Geographi
   throw Error('APIFY_GEOGRAPHIC_QUERY_OUT_OF_SCOPE');
  let proposedInput:Record<string,unknown>={};
  if(input.actorId==='clockworks/tiktok-scraper'){
-  proposedInput={searchQueries:searchTerms,searchSection:'/video',resultsPerPage:Math.max(1,Math.ceil(maxVideos/searchTerms.length)),scrapeRelatedVideos:false,commentsPerPost:0,shouldDownloadVideos:false,aiVideoDescription:false,aiVideoSummary:false};
+  // Round down to avoid intentionally requesting more than the selected total.
+  // Provider results are not guaranteed; this remains a proposal, not a hard cap.
+  proposedInput={searchQueries:searchTerms,searchSection:'/video',resultsPerPage:Math.max(1,Math.floor(maxVideos/searchTerms.length)),scrapeRelatedVideos:false,commentsPerPost:0,shouldDownloadVideos:false,aiVideoDescription:false,aiVideoSummary:false};
  }else if(input.actorId==='apify/instagram-scraper'){
   proposedInput={search:searchTerms[0],searchType:'place',resultsType:'posts',resultsLimit:maxVideos,searchLimit:1};
  }else{
