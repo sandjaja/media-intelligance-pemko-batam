@@ -22,9 +22,10 @@ jobs:
       - name: Verify Preview database secret exists
         env:
           PREVIEW_DB: ${{ secrets.APIFY_LEDGER_TEST_DATABASE_URL }}
+          PREVIEW_HOST: ${{ vars.APIFY_LEDGER_TEST_EXPECTED_HOST }}
         run: |
-          if [ -z "$PREVIEW_DB" ]; then
-            echo "::error::Missing APIFY_LEDGER_TEST_DATABASE_URL in apify-ledger-preview environment"
+          if [ -z "$PREVIEW_DB" ] || [ -z "$PREVIEW_HOST" ]; then
+            echo "::error::Missing Preview database URL or expected Neon host in apify-ledger-preview environment"
             exit 1
           fi
       # This repository has no committed package-lock.json; npm ci cannot run.
@@ -33,4 +34,5 @@ jobs:
         env:
           APIFY_LEDGER_TEST_DATABASE_URL: ${{ secrets.APIFY_LEDGER_TEST_DATABASE_URL }}
           APIFY_LEDGER_TEST_PREVIEW: 'true'
+          APIFY_LEDGER_TEST_EXPECTED_HOST: ${{ vars.APIFY_LEDGER_TEST_EXPECTED_HOST }}
         run: npm run test:apify-ledger-preview
