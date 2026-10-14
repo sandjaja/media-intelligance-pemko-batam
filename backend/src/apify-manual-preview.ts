@@ -1,6 +1,7 @@
 import type {Pool} from 'pg';
 import {previewApifyPlatform} from './apify-shared-preview.js';
 import {loadApifyAdminBudget} from './apify-admin-budget.js';
+import {loadApifyMonthlyLedgerCommitment} from './apify-monthly-ledger-summary.js';
 import {loadApifyAdminCollectorSettings} from './apify-admin-collector-settings.js';
 import {decryptIntegrationCredential} from './integration-credentials.js';
 import {inspectApifyActorPricing,type ApifyPricingLookup} from './apify-actor-pricing-client.js';
@@ -13,7 +14,7 @@ import {previewGeographicActorInput} from './apify-geographic-input.js';
 /** Read-only manual preview using the same authorization scope as scheduler. */
 export async function previewManualApifyCollection(pool:Pool,input:{
  platform:'tiktok'|'instagram';requestedBy:string;maxVideos?:10|20|50;
-}):Promise<{ready:false;reason:string;collectors:string[];actorDetails:{kind:string;actorId:string;adminMaxCostUsd:number|null;pricingModel:string|null;minimumChargeUsd:number|null;pricingCapCandidate:boolean;pricingLookupStatus:ApifyPricingLookup['reason']|'CREDENTIAL_UNAVAILABLE';pricingMetadataShape:string|null;inputSchemaVerified:boolean;inputSchemaReason:string|null;missingInputKeys:string[];geographicInputReady:boolean;geographicInputReason:string|null;searchTerms:string[];requestedVideoLimit:number|null;proposedResultsPerPage:number|null}[];billableRunStarted:false;requiresExplicitConfirmation:true;adminMonthlyBudgetUsd:number|null;accountMonthlyHeadroomUsd:number|null;executionBlockers:string[];chargeQuotes:{kind:string;actorId:string;readyForConfirmation:boolean;maximumChargeUsd:number|null;adminLimitUsd:number|null;monthlyHeadroomUsd:number|null;blockers:string[]}[]}>{
+}):Promise<{ready:false;reason:string;collectors:string[];actorDetails:{kind:string;actorId:string;adminMaxCostUsd:number|null;pricingModel:string|null;minimumChargeUsd:number|null;pricingCapCandidate:boolean;pricingLookupStatus:ApifyPricingLookup['reason']|'CREDENTIAL_UNAVAILABLE';pricingMetadataShape:string|null;inputSchemaVerified:boolean;inputSchemaReason:string|null;missingInputKeys:string[];geographicInputReady:boolean;geographicInputReason:string|null;searchTerms:string[];requestedVideoLimit:number|null;proposedResultsPerPage:number|null}[];billableRunStarted:false;requiresExplicitConfirmation:true;adminMonthlyBudgetUsd:number|null;adminMonthlyCommittedUsd:number|null;adminMonthlyRemainingUsd:number|null;accountMonthlyHeadroomUsd:number|null;executionBlockers:string[];chargeQuotes:{kind:string;actorId:string;readyForConfirmation:boolean;maximumChargeUsd:number|null;adminLimitUsd:number|null;monthlyHeadroomUsd:number|null;blockers:string[]}[]}>{
  const maxVideos=input.maxVideos??10;
  if(![10,20,50].includes(maxVideos))throw Error('APIFY_VIDEO_LIMIT_INVALID');
  const result=await previewApifyPlatform(pool,{trigger:'manual',platform:input.platform,requestedBy:input.requestedBy});
@@ -21,6 +22,8 @@ export async function previewManualApifyCollection(pool:Pool,input:{
  const adminMonthlyBudgetUsd=await loadApifyAdminBudget(pool).catch(()=>null);
  // This is the provider's read-only account headroom, not spend authorization.
  const accountMonthlyHeadroomUsd=await loadApifyAccountHeadroom(pool).catch(()=>null);
+ const adminMonthlyCommittedUsd=await loadApifyMonthlyLedgerCommitment(pool);
+ const adminMonthlyRemainingUsd=adminMonthlyBudgetUsd===null||adminMonthlyCommittedUsd===null?null:Math.max(0,adminMonthlyBudgetUsd-adminMonthlyCommittedUsd);
  const {rows:limitRows}=await pool.query(`SELECT s.settings->'actorMaxCostUsd' AS limits FROM integration_settings s JOIN integration_providers p ON p.id=s.provider_id AND p.code='apify' AND p.active=true JOIN organizations o ON o.id=s.organization_id AND o.active=true LIMIT 2`).catch(()=>({rows:[]}));
  const limits=limitRows.length===1&&limitRows[0]?.limits&&typeof limitRows[0].limits==='object'&&!Array.isArray(limitRows[0].limits)?limitRows[0].limits as Record<string,unknown>:{};
  const actorDetails=result.collectors.map(c=>({kind:c.kind,actorId:c.actorId,adminMaxCostUsd:typeof limits[c.kind]==='number'&&Number.isFinite(limits[c.kind])&&(limits[c.kind] as number)>=0.01&&(limits[c.kind] as number)<=5&&!(c.kind==='tiktok_posts'&&(limits[c.kind] as number)<0.5)?limits[c.kind] as number:null,pricingModel:null as string|null,minimumChargeUsd:null as number|null,pricingCapCandidate:false,pricingLookupStatus:'CREDENTIAL_UNAVAILABLE' as ApifyPricingLookup['reason']|'CREDENTIAL_UNAVAILABLE',pricingMetadataShape:null as string|null,inputSchemaVerified:false,inputSchemaReason:null as string|null,missingInputKeys:[] as string[],geographicInputReady:false,geographicInputReason:null as string|null,searchTerms:[] as string[],requestedVideoLimit:null as number|null,proposedResultsPerPage:null as number|null}));
@@ -80,6 +83,7 @@ export async function previewManualApifyCollection(pool:Pool,input:{
  else if(credentialDecryptFailed)executionBlockers.push('APIFY_CREDENTIAL_DECRYPT_FAILED');
  if(!result.configured)executionBlockers.push(result.reason);
  if(adminMonthlyBudgetUsd===null)executionBlockers.push('APIFY_ADMIN_BUDGET_UNAVAILABLE');
+ if(adminMonthlyRemainingUsd===null)executionBlockers.push('APIFY_ADMIN_MONTHLY_LEDGER_UNAVAILABLE');
  if(accountMonthlyHeadroomUsd===null)executionBlockers.push('APIFY_ACCOUNT_HEADROOM_UNAVAILABLE');
  else if(accountMonthlyHeadroomUsd<=0)executionBlockers.push('APIFY_ACCOUNT_HEADROOM_EXHAUSTED');
  if(actorDetails.some(c=>(c.actorId==='clockworks/tiktok-scraper'||c.actorId==='apify/instagram-scraper')&&!c.geographicInputReady))executionBlockers.push('APIFY_GEOGRAPHIC_PLAN_UNAVAILABLE');
@@ -101,5 +105,5 @@ export async function previewManualApifyCollection(pool:Pool,input:{
  executionBlockers.push('APIFY_PRICING_NOT_VERIFIED','APIFY_CHARGE_CAP_NOT_VERIFIED','APIFY_MANUAL_EXECUTOR_NOT_CONNECTED');
  return{ready:false,reason:result.configured?'APIFY_MANUAL_EXECUTOR_NOT_CONNECTED':result.reason,
   collectors:result.collectors.map(c=>c.kind),actorDetails,
-  billableRunStarted:false,requiresExplicitConfirmation:true,adminMonthlyBudgetUsd,accountMonthlyHeadroomUsd,executionBlockers,chargeQuotes};
+  billableRunStarted:false,requiresExplicitConfirmation:true,adminMonthlyBudgetUsd,adminMonthlyCommittedUsd,adminMonthlyRemainingUsd,accountMonthlyHeadroomUsd,executionBlockers,chargeQuotes};
 }
