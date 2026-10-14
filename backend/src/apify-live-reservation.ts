@@ -27,6 +27,10 @@ export async function reserveApifyWithLiveLimits(pool:Pool,input:{
  // a browser-supplied approximation must never authorize a different amount.
  if(approved===null||approved!==input.estimatedUsd)
   return{reserved:false,reason:'APIFY_PRICING_APPROVAL_REQUIRED',remainingUsd:null};
+ // Paid rollout is intentionally limited to the TikTok Posts Actor.
+ // A valid quote for another Actor must not reserve budget prematurely.
+ if(input.platform!=='tiktok'||input.actorId!=='clockworks/tiktok-scraper')
+  return{reserved:false,reason:'APIFY_MANUAL_COLLECTOR_NOT_ENABLED_FOR_ROLLOUT',remainingUsd:null};
  const configured=await loadApifyAdminCollectorSettings(pool);
  const selected=configured.find(c=>c.actorId===input.actorId);
  if(!selected||!selected.enabled)return{reserved:false,reason:'APIFY_ACTOR_DISABLED_OR_NOT_CONFIGURED',remainingUsd:null};
