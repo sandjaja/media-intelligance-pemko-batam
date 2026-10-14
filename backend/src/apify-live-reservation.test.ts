@@ -75,3 +75,13 @@ test('sub-cent estimate mismatch is rejected before database or provider access'
  assert.equal(result.reserved,false);
  assert.equal(result.reason,'APIFY_PRICING_APPROVAL_REQUIRED');
 });
+
+test('Instagram cannot reserve paid budget during TikTok Posts-only rollout',async()=>{
+ const pool={query:()=>{throw Error('DATABASE_MUST_NOT_BE_TOUCHED')},connect:()=>{throw Error('LEDGER_MUST_NOT_BE_TOUCHED')}} as unknown as Pool;
+ const actorId='apify/instagram-scraper';
+ const result=await reserveApifyWithLiveLimits(pool,{
+  ...input,actorId,platform:'instagram',pricingApproval:{...input.pricingApproval,actorId}
+ },async()=>{throw Error('PROVIDER_MUST_NOT_BE_TOUCHED')});
+ assert.equal(result.reserved,false);
+ assert.equal(result.reason,'APIFY_MANUAL_COLLECTOR_NOT_ENABLED_FOR_ROLLOUT');
+});
