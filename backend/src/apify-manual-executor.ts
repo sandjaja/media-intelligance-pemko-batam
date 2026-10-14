@@ -69,9 +69,16 @@ export async function executeClaimedApifyRun(pool:Pool,input:{
    reason:'APIFY_START_RESPONSE_UNCERTAIN'});
   return{started:false,reason:'APIFY_START_UNKNOWN_RECONCILIATION_REQUIRED'};
  }
- const confirmed=await confirmApifyProviderRun(pool,{
-  reservationKey:input.reservationKey,claimId:input.claimId,providerRunId
- });
+ // Provider already returned a run id. A ledger error must not propagate as
+ // a generic retryable failure that could trigger a second paid Actor run.
+ let confirmed:{confirmed:boolean;reason:string};
+ try{
+  confirmed=await confirmApifyProviderRun(pool,{
+   reservationKey:input.reservationKey,claimId:input.claimId,providerRunId
+  });
+ }catch{
+  return{started:false,reason:'APIFY_PROVIDER_STARTED_LEDGER_CONFIRMATION_FAILED',providerRunId};
+ }
  if(!confirmed.confirmed)
   return{started:false,reason:'APIFY_PROVIDER_STARTED_LEDGER_CONFIRMATION_FAILED',providerRunId};
  return{started:true,reason:'APIFY_PROVIDER_RUN_STARTED',providerRunId};
