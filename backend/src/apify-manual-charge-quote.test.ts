@@ -67,3 +67,17 @@ test('preview numbers do not authorize payment without independent price approva
  assert.ok(quote.blockers.includes('APIFY_PRICING_APPROVAL_REQUIRED'));
  assert.ok(quote.blockers.includes('APIFY_CHARGE_CAP_NOT_VERIFIED'));
 });
+
+test('unpriced preview warns when Admin ceiling exceeds monthly remaining budget',()=>{
+ const quote=buildApifyManualChargeQuote({...base,pricingApproval:null,
+  providerChargeCapVerified:false,adminMonthlyRemainingUsd:0.2,monthlyHeadroomUsd:4});
+ assert.equal(quote.readyForConfirmation,false);
+ assert.equal(quote.maximumChargeUsd,null);
+ assert.ok(quote.blockers.includes('APIFY_ADMIN_MONTHLY_BUDGET_INSUFFICIENT_OR_UNAVAILABLE'));
+});
+test('unpriced preview warns when Admin ceiling exceeds provider headroom',()=>{
+ const quote=buildApifyManualChargeQuote({...base,pricingApproval:null,
+  providerChargeCapVerified:false,adminMonthlyRemainingUsd:4,monthlyHeadroomUsd:0.2});
+ assert.equal(quote.readyForConfirmation,false);
+ assert.ok(quote.blockers.includes('APIFY_MONTHLY_HEADROOM_INSUFFICIENT_OR_UNAVAILABLE'));
+});
