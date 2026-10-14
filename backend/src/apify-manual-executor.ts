@@ -13,9 +13,13 @@ export async function executeClaimedApifyRun(pool:Pool,input:{
  configuredActorId:string;configuredMaxUsd:number|null;
  collectorEnabled:boolean;pricingApproval:ApifyPricingApproval|null;
  claimId:string;token:string;explicitlyConfirmed:boolean;
- actorInput:Record<string,unknown>;fetcher?:typeof fetch;
+ actorInput:Record<string,unknown>;providerChargeCapVerified?:boolean;fetcher?:typeof fetch;
 }):Promise<{started:boolean;reason:string;providerRunId?:string}>{
  if(!input.explicitlyConfirmed)return{started:false,reason:'APIFY_USER_CONFIRMATION_REQUIRED'};
+ // The request parameter alone is not proof that this Actor's pricing model
+ // enforces the configured USD cap. Require trusted server-side verification.
+ if(input.providerChargeCapVerified!==true)
+  return{started:false,reason:'APIFY_CHARGE_CAP_NOT_VERIFIED'};
  // Initial rollout is TikTok Posts only; Instagram and other collectors stay preview-only.
  if(input.platform!=='tiktok'||input.actorId!=='clockworks/tiktok-scraper'||
     input.configuredActorId!==input.actorId)
