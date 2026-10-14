@@ -295,7 +295,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
       opdId: z.string().regex(/^\d+$/).optional(),
       keywordId: z.string().regex(/^\d+$/).optional(),
       sentiment: sentimentSchema.optional(),
-      riskLevel: z.enum(['low','medium','high','critical']).optional(),
+      riskLevel: z.enum(['low','medium','high','critical','high_or_critical']).optional(),
       classification: z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL','SCOPE_REVIEW']).optional(),
       sourceKind: z.enum(['external','owned']).default('external'),
       from: z.string().optional(),
@@ -331,7 +331,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     }
     if (parsed.data.platform) where.push(`sm.platform=${bind(parsed.data.platform)}`);
     if (parsed.data.sentiment) where.push(`sm.sentiment=${bind(parsed.data.sentiment)}`);
-    if (parsed.data.riskLevel) where.push(`sm.risk_level=${bind(parsed.data.riskLevel)}`);
+    if (parsed.data.riskLevel) where.push(parsed.data.riskLevel==='high_or_critical'?`sm.risk_level IN ('high','critical')`:`sm.risk_level=${bind(parsed.data.riskLevel)}`);
     if (parsed.data.classification&&parsed.data.classification!=='SCOPE_REVIEW') { const cp=bind(parsed.data.classification); where.push(`CASE WHEN COALESCE(sm.metadata->'manualClassification'->>'locked','false')='true' THEN 'MANUAL' WHEN COALESCE(sm.metadata->'v16Routing'->>'routingStatus','UNROUTED')='AMBIGUOUS' THEN 'AMBIGU' ELSE COALESCE(sm.metadata->'v16Routing'->>'newsClassification',CASE WHEN COALESCE(sm.metadata->'v16Routing'->>'routingStatus','UNROUTED')='ROUTED' THEN 'UTAMA' ELSE 'PENDUKUNG' END) END=${cp}`); }
     if (parsed.data.from) where.push(`sm.published_at >= ${bind(parsed.data.from)}`);
     else if(parsed.data.days===1) where.push(`COALESCE(sm.published_at,sm.captured_at) >= date_trunc('day', NOW() AT TIME ZONE 'Asia/Jakarta') AT TIME ZONE 'Asia/Jakarta'`);
@@ -493,7 +493,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   const auditConversation=async(client:any,userId:string,action:string,metadata:any)=>client.query('INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,$2,$3::jsonb)',[userId,action,JSON.stringify(metadata)]);
 
   app.get('/api/social/conversation-clusters',{preHandler: [auth, requireRead]},async(request,reply)=>{
-    const parsed=z.object({days:z.coerce.number().int().refine(v=>[1,7,14,30].includes(v)).default(7),platform:platformSchema.optional(),opdId:z.string().regex(/^\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional()}).safeParse(request.query);
+    const parsed=z.object({days:z.coerce.number().int().refine(v=>[1,7,14,30].includes(v)).default(7),platform:platformSchema.optional(),opdId:z.string().regex(/^\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical','high_or_critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional()}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
     const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
     const params:unknown[]=[organizationId,parsed.data.days],memberWhere:string[]=["COALESCE(sm.metadata->'organizationScope'->>'status','RELEVANT')='RELEVANT'","COALESCE(sm.published_at,sm.captured_at)>=NOW()-($2::int*INTERVAL '1 day')"];
@@ -502,7 +502,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     if(opdId)memberWhere.push(`sm.opd_id=${bind(opdId)}`);
     if(parsed.data.platform)memberWhere.push(`sm.platform=${bind(parsed.data.platform)}`);
     if(parsed.data.sentiment)memberWhere.push(`sm.sentiment=${bind(parsed.data.sentiment)}`);
-    if(parsed.data.riskLevel)memberWhere.push(`sm.risk_level=${bind(parsed.data.riskLevel)}`);
+    if(parsed.data.riskLevel)memberWhere.push(parsed.data.riskLevel==='high_or_critical'?`sm.risk_level IN ('high','critical')`:`sm.risk_level=${bind(parsed.data.riskLevel)}`);
     if(parsed.data.classification){const cp=bind(parsed.data.classification);memberWhere.push(`CASE WHEN COALESCE(sm.metadata->'manualClassification'->>'locked','false')='true' THEN 'MANUAL' WHEN COALESCE(sm.metadata->'v16Routing'->>'routingStatus','UNROUTED')='AMBIGUOUS' THEN 'AMBIGU' ELSE COALESCE(sm.metadata->'v16Routing'->>'newsClassification',CASE WHEN COALESCE(sm.metadata->'v16Routing'->>'routingStatus','UNROUTED')='ROUTED' THEN 'UTAMA' ELSE 'PENDUKUNG' END) END=${cp}`)}
     const memberFilter=memberWhere.join(' AND ');
     // Keep cluster cards on the same filtered evidence scope used by cluster
@@ -564,7 +564,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   });
 
   app.get('/api/social/conversation-insights', { preHandler: [auth, requireRead] }, async (request, reply) => {
-    const parsed=z.object({days:z.coerce.number().int().refine(v=>[1,7,14,30].includes(v)).default(7),platform:platformSchema.optional(),opdId:z.string().regex(/^\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional()}).safeParse(request.query);
+    const parsed=z.object({days:z.coerce.number().int().refine(v=>[1,7,14,30].includes(v)).default(7),platform:platformSchema.optional(),opdId:z.string().regex(/^\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical','high_or_critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional()}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
     const params:unknown[]=[parsed.data.days],where:string[]=["source_kind='external'","COALESCE(metadata->'organizationScope'->>'status','RELEVANT')='RELEVANT'","COALESCE(published_at,captured_at) >= NOW() - ($1::int * INTERVAL '1 day')"];
     const bind=(value:unknown)=>{params.push(value);return '$'+params.length;};
@@ -572,7 +572,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     if(opdId)where.push(`opd_id=${bind(opdId)}`);
     if(parsed.data.platform)where.push(`platform=${bind(parsed.data.platform)}`);
     if(parsed.data.sentiment)where.push(`sentiment=${bind(parsed.data.sentiment)}`);
-    if(parsed.data.riskLevel)where.push(`risk_level=${bind(parsed.data.riskLevel)}`);
+    if(parsed.data.riskLevel)where.push(parsed.data.riskLevel==='high_or_critical'?`risk_level IN ('high','critical')`:`risk_level=${bind(parsed.data.riskLevel)}`);
     if(parsed.data.classification){const cp=bind(parsed.data.classification);where.push(`CASE WHEN COALESCE(metadata->'manualClassification'->>'locked','false')='true' THEN 'MANUAL' WHEN COALESCE(metadata->'v16Routing'->>'routingStatus','UNROUTED')='AMBIGUOUS' THEN 'AMBIGU' ELSE COALESCE(metadata->'v16Routing'->>'newsClassification',CASE WHEN COALESCE(metadata->'v16Routing'->>'routingStatus','UNROUTED')='ROUTED' THEN 'UTAMA' ELSE 'PENDUKUNG' END) END=${cp}`)}
     const filter='WHERE '+where.join(' AND ');
     const mentions=await pool.query(`SELECT id::text,platform,title,content,published_at,captured_at,sentiment,risk_level,risk_score,metadata FROM social_mentions ${filter} ORDER BY COALESCE(published_at,captured_at) ASC,id ASC`,params);
@@ -586,7 +586,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   });
 
   app.get('/api/social/summary', { preHandler: [auth, requireRead] }, async (request, reply) => {
-    const parsed=z.object({opdId:z.string().regex(/^\d+$/).optional(),platform:platformSchema.optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional(),from:z.string().optional(),to:z.string().optional(),days:z.coerce.number().int().refine(v=>[1,7,14,30].includes(v)).default(7)}).safeParse(request.query);
+    const parsed=z.object({opdId:z.string().regex(/^\d+$/).optional(),platform:platformSchema.optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical','high_or_critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional(),from:z.string().optional(),to:z.string().optional(),days:z.coerce.number().int().refine(v=>[1,7,14,30].includes(v)).default(7)}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
     const params:unknown[]=[],where:string[]=[`source_kind='external'`,`COALESCE(metadata->'organizationScope'->>'status','RELEVANT')='RELEVANT'`];
     const ctx=request.socialAuth!,globalReader=ctx.legacyRole==='admin'||ctx.roles.some(role=>role==='super_admin'||role==='humas'||role==='executive'),opdId=scopedOpd(ctx,parsed.data.opdId);
@@ -601,7 +601,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     }
     if(parsed.data.platform)where.push(`platform=${bind(parsed.data.platform)}`);
     if(parsed.data.sentiment)where.push(`sentiment=${bind(parsed.data.sentiment)}`);
-    if(parsed.data.riskLevel)where.push(`risk_level=${bind(parsed.data.riskLevel)}`);
+    if(parsed.data.riskLevel)where.push(parsed.data.riskLevel==='high_or_critical'?`risk_level IN ('high','critical')`:`risk_level=${bind(parsed.data.riskLevel)}`);
     if(parsed.data.classification){const cp=bind(parsed.data.classification);where.push(`CASE WHEN COALESCE(metadata->'manualClassification'->>'locked','false')='true' THEN 'MANUAL' WHEN COALESCE(metadata->'v16Routing'->>'routingStatus','UNROUTED')='AMBIGUOUS' THEN 'AMBIGU' ELSE COALESCE(metadata->'v16Routing'->>'newsClassification',CASE WHEN COALESCE(metadata->'v16Routing'->>'routingStatus','UNROUTED')='ROUTED' THEN 'UTAMA' ELSE 'PENDUKUNG' END) END=${cp}`)}
     if(parsed.data.from)where.push(`published_at >= ${bind(parsed.data.from)}`);
     else where.push(`COALESCE(published_at,captured_at) >= NOW() - (${bind(parsed.data.days)}::int * INTERVAL '1 day')`);
