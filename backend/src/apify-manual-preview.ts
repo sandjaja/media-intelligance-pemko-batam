@@ -16,7 +16,9 @@ export async function previewManualApifyCollection(pool:Pool,input:{
  const limits=limitRows.length===1&&limitRows[0]?.limits&&typeof limitRows[0].limits==='object'&&!Array.isArray(limitRows[0].limits)?limitRows[0].limits as Record<string,unknown>:{};
  const actorDetails=result.collectors.map(c=>({kind:c.kind,actorId:c.actorId,adminMaxCostUsd:typeof limits[c.kind]==='number'&&Number.isFinite(limits[c.kind])&&(limits[c.kind] as number)>=0.01&&(limits[c.kind] as number)<=5&&!(c.kind==='tiktok_posts'&&(limits[c.kind] as number)<0.5)?limits[c.kind] as number:null,pricingModel:null as string|null,minimumChargeUsd:null as number|null,pricingCapCandidate:false,pricingLookupStatus:'CREDENTIAL_UNAVAILABLE' as ApifyPricingLookup['reason']|'CREDENTIAL_UNAVAILABLE'}));
  // Read-only provider metadata. Missing credentials or failed lookups never authorize a run.
- const {rows:credentials}=await pool.query(`SELECT c.credential_ciphertext FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id AND p.code='apify' AND p.active=true JOIN organizations o ON o.id=c.organization_id AND o.active=true WHERE c.enabled=true LIMIT 2`).catch(()=>({rows:[]}));
+ let credentialReadFailed=false;
+ const {rows:credentials}=await pool.query(`SELECT c.credential_ciphertext FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id AND p.code='apify' AND p.active=true JOIN organizations o ON o.id=c.organization_id AND o.active=true WHERE c.enabled=true LIMIT 2`).catch(()=>{credentialReadFailed=true;return{rows:[]};});
+ let credentialDecryptFailed=false;
  if(credentials.length===1&&credentials[0]?.credential_ciphertext){
   try{
    const token=decryptIntegrationCredential(credentials[0].credential_ciphertext);
@@ -26,7 +28,7 @@ export async function previewManualApifyCollection(pool:Pool,input:{
     const pricing=lookup.snapshot;
     if(pricing){actor.pricingModel=pricing.pricingModel;actor.minimumChargeUsd=pricing.minimalMaxTotalChargeUsd;actor.pricingCapCandidate=pricing.capEligible&&actor.adminMaxCostUsd!==null&&pricing.minimalMaxTotalChargeUsd!==null&&pricing.minimalMaxTotalChargeUsd<=actor.adminMaxCostUsd;}
    }));
-  }catch{/* Fail closed; no credentials or pricing details leave this server. */}
+  }catch{credentialDecryptFailed=true;/* Fail closed; no credentials or pricing details leave this server. */}
  }
  const executionBlockers:string[]=[];
  // Check all enabled collectors, including the other platform: an Actor ID
@@ -34,7 +36,9 @@ export async function previewManualApifyCollection(pool:Pool,input:{
  const allConfigured=await loadApifyAdminCollectorSettings(pool).catch(()=>[]);
  const enabledIds=allConfigured.filter(c=>c.enabled&&c.actorId).map(c=>c.actorId);
  if(new Set(enabledIds).size!==enabledIds.length)executionBlockers.push('APIFY_ACTOR_ID_AMBIGUOUS');
- if(credentials.length!==1||!credentials[0]?.credential_ciphertext)executionBlockers.push('APIFY_CREDENTIAL_UNAVAILABLE');
+ if(credentialReadFailed)executionBlockers.push('APIFY_CREDENTIAL_QUERY_FAILED');
+ else if(credentials.length!==1||!credentials[0]?.credential_ciphertext)executionBlockers.push('APIFY_CREDENTIAL_UNAVAILABLE');
+ else if(credentialDecryptFailed)executionBlockers.push('APIFY_CREDENTIAL_DECRYPT_FAILED');
  if(!result.configured)executionBlockers.push(result.reason);
  if(adminMonthlyBudgetUsd===null)executionBlockers.push('APIFY_ADMIN_BUDGET_UNAVAILABLE');
  if(actorDetails.some(c=>c.adminMaxCostUsd===null))executionBlockers.push('APIFY_ACTOR_LIMIT_UNAVAILABLE');
