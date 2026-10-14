@@ -101,6 +101,8 @@ app.put('/api/admin/integrations/apify/settings',{preHandler:[requireAuth,requir
  const body=z.object({
   tiktokActor:actor,instagramActor:actor,tiktokCommentsActor:actor,instagramCommentsActor:actor,
   tiktokHashtagActor:actor.optional(),instagramHashtagActor:actor.optional(),
+  tiktokPostsEnabled:z.boolean().default(true),instagramPostsEnabled:z.boolean().default(true),
+  tiktokCommentsEnabled:z.boolean().default(true),instagramCommentsEnabled:z.boolean().default(true),
   tiktokHashtagEnabled:z.boolean().default(false),instagramHashtagEnabled:z.boolean().default(false),
   monthlyBudgetUsd:z.number().min(0.5).max(5).default(4),
   actorMaxCostUsd:z.partialRecord(z.enum(['tiktok_posts','instagram_posts','tiktok_comments','instagram_comments','tiktok_hashtag','instagram_hashtag']),z.number().min(0.01).max(5)).refine(v=>v.tiktok_posts===undefined||v.tiktok_posts>=0.5,{message:'TikTok Posts requires at least $0.50 per run'}).optional(),
@@ -111,6 +113,16 @@ app.put('/api/admin/integrations/apify/settings',{preHandler:[requireAuth,requir
  }).strict().safeParse(request.body);
  if(!body.success)return reply.code(400).send({error:'INVALID_APIFY_SETTINGS'});
  const config=body.data;
+ const enabledCollectors=[
+  {enabled:config.tiktokPostsEnabled,id:config.tiktokActor,kind:'tiktok_posts'},
+  {enabled:config.instagramPostsEnabled,id:config.instagramActor,kind:'instagram_posts'},
+  {enabled:config.tiktokCommentsEnabled,id:config.tiktokCommentsActor,kind:'tiktok_comments'},
+  {enabled:config.instagramCommentsEnabled,id:config.instagramCommentsActor,kind:'instagram_comments'},
+  {enabled:config.tiktokHashtagEnabled,id:config.tiktokHashtagActor,kind:'tiktok_hashtag'},
+  {enabled:config.instagramHashtagEnabled,id:config.instagramHashtagActor,kind:'instagram_hashtag'}
+ ];
+ if(!enabledCollectors.some(item=>item.enabled))return reply.code(400).send({error:'APIFY_AT_LEAST_ONE_ACTOR_REQUIRED'});
+ if(enabledCollectors.some(item=>item.enabled&&!item.id))return reply.code(400).send({error:'APIFY_ENABLED_ACTOR_ID_REQUIRED'});
  const standby=[
   {enabled:config.tiktokHashtagEnabled,id:config.tiktokHashtagActor,expected:'clockworks/tiktok-hashtag-scraper',kind:'tiktok_hashtag',minimum:0.5},
   {enabled:config.instagramHashtagEnabled,id:config.instagramHashtagActor,expected:'apify/instagram-hashtag-scraper',kind:'instagram_hashtag',minimum:0.01}
