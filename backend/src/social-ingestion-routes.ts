@@ -245,7 +245,7 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
       const proposed=previewGeographicActorInput({actorId,plan,maxQueries:5,maxVideos:parsed.data.maxVideos});
       const actorInput=proposed.proposedInput;
       const terms=actorInput.searchQueries;
-      if(!Array.isArray(terms)||terms.length===0||terms.some(x=>typeof x!=='string'||!/(?:^|\\s)batam(?:$|\\s)/i.test(x)))
+      if(!Array.isArray(terms)||terms.length===0||terms.some(x=>typeof x!=='string'||!/(?:^|\s)batam(?:$|\s)/i.test(x)))
         return reply.code(409).send({error:'APIFY_TIKTOK_GEOGRAPHIC_INPUT_INVALID'});
       const {inspectApifyActorPricing}=await import('./apify-actor-pricing-client.js');
       const pricing=await inspectApifyActorPricing(actorId,token);
