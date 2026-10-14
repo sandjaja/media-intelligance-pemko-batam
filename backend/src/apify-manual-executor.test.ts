@@ -192,3 +192,20 @@ test('ledger exception after provider starts preserves run id and avoids retry',
  assert.equal(result.providerRunId,'provider_run_99999');
  assert.equal(calls,1);
 });
+
+test('uncertain provider start and failed quarantine returns explicit non-retryable uncertainty',async()=>{
+ const pool={query:async(q:string)=>{
+  if(q.startsWith('SELECT'))return{rows:[{actor_id:base.actorId,platform:'tiktok',status:'RESERVED',reserved_usd:'0.500000'}]};
+  if(q.includes("status='RESERVED'")&&q.includes("status='RUNNING'"))return{rows:[{reserved_usd:'0.500000'}]};
+  if(q.includes("SET status='UNKNOWN'"))throw Error('SIMULATED_LEDGER_OUTAGE');
+  throw Error('UNEXPECTED_SQL');
+ }} as unknown as Pool;
+ let calls=0;
+ const result=await executeClaimedApifyRun(pool,{
+  ...base,explicitlyConfirmed:true,providerChargeCapVerified:true,
+  fetcher:async()=>{calls++;throw Error('SIMULATED_PROVIDER_TIMEOUT')}
+ });
+ assert.equal(result.started,false);
+ assert.equal(result.reason,'APIFY_START_UNKNOWN_LEDGER_UNAVAILABLE');
+ assert.equal(calls,1);
+});
