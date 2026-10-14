@@ -31,6 +31,9 @@ export async function executeClaimedApifyRun(pool:Pool,input:{
     approvedMaximum>input.configuredMaxUsd)
   return{started:false,reason:'APIFY_APPROVED_COST_EXCEEDS_ADMIN_LIMIT'};
  if(!input.collectorEnabled)return{started:false,reason:'APIFY_COLLECTOR_DISABLED'};
+ // Never trust an arbitrary claim identifier: it is used for ledger ownership.
+ if(!/^claim:[a-zA-Z0-9_-]{8,120}$/.test(input.claimId))
+  return{started:false,reason:'APIFY_CLAIM_ID_INVALID'};
  if(!input.token.trim())return{started:false,reason:'APIFY_TOKEN_REQUIRED'};
  if(!input.actorInput||Array.isArray(input.actorInput)||typeof input.actorInput!=='object')
   return{started:false,reason:'APIFY_ACTOR_INPUT_INVALID'};
