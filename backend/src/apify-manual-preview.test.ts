@@ -36,3 +36,14 @@ test('duplicate Actor ID across TikTok and Instagram is flagged even for TikTok-
  assert.ok(result.executionBlockers.includes('APIFY_ACTOR_ID_AMBIGUOUS'));
  assert.equal(result.billableRunStarted,false);
 });
+
+test('read-only pricing preview does not require paid collector enabled flag',async()=>{
+ const queries:string[]=[];
+ const pool={query:async(sql:string)=>{queries.push(sql);return{rows:[]};}} as unknown as Pool;
+ const result=await previewManualApifyCollection(pool,{platform:'instagram',requestedBy:'operator-1'});
+ const credentialQuery=queries.find(sql=>sql.includes('SELECT c.credential_ciphertext'));
+ assert.ok(credentialQuery);
+ assert.equal(credentialQuery.includes('c.enabled=true'),false);
+ assert.equal(result.billableRunStarted,false);
+ assert.equal(result.ready,false);
+});
