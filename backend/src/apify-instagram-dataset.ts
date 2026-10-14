@@ -19,7 +19,10 @@ export async function ingestCompletedApifyInstagramDataset(pool:Pool,input:{
  await verifyApifyLedgerRun(pool,{runId:input.confirmedRunId,actorId:'apify/instagram-scraper',platform:'instagram'});
  const expectedActorInternalId=await resolveApifyActorInternalId({actorId:'apify/instagram-scraper',token:input.token,fetcher:input.fetcher});
  await verifyCompletedApifyRunDataset({runId:input.confirmedRunId,datasetId:input.datasetId,actorId:'apify/instagram-scraper',expectedActorInternalId,token:input.token,fetcher:input.fetcher});
+ // Revalidate authorization after provider metadata and before processing results.
+ await verifyApifyLedgerRun(pool,{runId:input.confirmedRunId,actorId:'apify/instagram-scraper',platform:'instagram'});
  const items=await fetchApifyTikTokDataset(input);
+ await verifyApifyLedgerRun(pool,{runId:input.confirmedRunId,actorId:'apify/instagram-scraper',platform:'instagram'});
  const {candidates,rejected}=normalizeApifyInstagramPosts(items);
  const scope=await loadOrganizationMediaScope(pool);
  if(!scope)throw Error('APIFY_ORGANIZATION_SCOPE_UNAVAILABLE');
