@@ -41,8 +41,6 @@ export async function reserveApifyWithLiveLimits(pool:Pool,input:{
  const expectedPlatform=kind?.startsWith('tiktok_')?'tiktok':kind?.startsWith('instagram_')?'instagram':null;
  if(!expectedPlatform||expectedPlatform!==input.platform)
   return{reserved:false,reason:'APIFY_ACTOR_PLATFORM_MISMATCH',remainingUsd:null};
- if(selected.kind!==kind)
-  return{reserved:false,reason:'APIFY_ACTOR_KIND_MISMATCH',remainingUsd:null};
  const ceiling=kind&&limits&&typeof limits==='object'&&!Array.isArray(limits)?(limits as Record<string,unknown>)[kind]:null;
  if(typeof ceiling!=='number'||!Number.isFinite(ceiling)||ceiling<0.01||ceiling>5)
   return{reserved:false,reason:'APIFY_ACTOR_LIMIT_UNAVAILABLE',remainingUsd:null};
