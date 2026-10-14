@@ -124,8 +124,8 @@ app.put('/api/admin/integrations/apify/settings',{preHandler:[requireAuth,requir
  if(!enabledCollectors.some(item=>item.enabled))return reply.code(400).send({error:'APIFY_AT_LEAST_ONE_ACTOR_REQUIRED'});
  if(enabledCollectors.some(item=>item.enabled&&!item.id))return reply.code(400).send({error:'APIFY_ENABLED_ACTOR_ID_REQUIRED'});
  const standby=[
-  {enabled:config.tiktokHashtagEnabled,id:config.tiktokHashtagActor,expected:'clockworks/tiktok-hashtag-scraper',kind:'tiktok_hashtag',minimum:0.5},
-  {enabled:config.instagramHashtagEnabled,id:config.instagramHashtagActor,expected:'apify/instagram-hashtag-scraper',kind:'instagram_hashtag',minimum:0.01}
+  {enabled:config.tiktokHashtagEnabled,id:config.tiktokHashtagActor,kind:'tiktok_hashtag',minimum:0.5},
+  {enabled:config.instagramHashtagEnabled,id:config.instagramHashtagActor,kind:'instagram_hashtag',minimum:0.01}
  ] as const;
  for(const item of standby){
   if(!item.enabled)continue;
