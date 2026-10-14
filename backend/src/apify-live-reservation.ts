@@ -2,6 +2,8 @@ import type {Pool} from 'pg';
 import {loadApifyAdminBudget} from './apify-admin-budget.js';
 import {loadApifyAdminCollectorSettings} from './apify-admin-collector-settings.js';
 import {loadApifyAccountHeadroom} from './apify-account-headroom.js';
+import {reserveApifyCost} from './apify-cost-reservation.js';
+import {conservativeApifyRunEstimate,type ApifyPricingApproval} from './apify-pricing-approval.js';
 
 /** Combined fail-closed preflight. Account headroom is a usage-limit allowance,
  * not cash balance. Does not execute Actors. The caller must supply a
@@ -10,6 +12,7 @@ import {loadApifyAccountHeadroom} from './apify-account-headroom.js';
 export async function reserveApifyWithLiveLimits(pool:Pool,input:{
  reservationKey:string;actorId:string;platform:'instagram'|'tiktok';
  estimatedUsd:number|null;credentialsVerified:boolean;actorConfigured:boolean;
+ pricingApproval?:ApifyPricingApproval|null;providerChargeCapVerified?:boolean;
 },fetcher:typeof fetch=fetch):Promise<{reserved:boolean;reason:string;remainingUsd:number|null}>{
  if(input.estimatedUsd===null||!Number.isFinite(input.estimatedUsd)||input.estimatedUsd<=0)
   return{reserved:false,reason:'APIFY_ESTIMATE_REQUIRED',remainingUsd:null};
@@ -41,7 +44,16 @@ export async function reserveApifyWithLiveLimits(pool:Pool,input:{
  const headroom=await loadApifyAccountHeadroom(pool,fetcher);
  if(headroom===null)return{reserved:false,reason:'APIFY_ACCOUNT_LIMITS_UNAVAILABLE',remainingUsd:null};
  if(headroom<input.estimatedUsd)return{reserved:false,reason:'APIFY_MONTHLY_HEADROOM_INSUFFICIENT',remainingUsd:headroom};
- // Monthly headroom does not prove actual spendable USD balance. Until a
- // verified provider balance is available, never create a paid reservation.
- return{reserved:false,reason:'APIFY_PROVIDER_BALANCE_UNAVAILABLE',remainingUsd:null};
+ // Headroom is an account usage allowance, not prepaid cash. Only reserve
+ // against it when a trusted server-side caller independently verified that
+ // Apify enforces the per-run PAY_PER_EVENT charge cap.
+ if(input.providerChargeCapVerified!==true)
+  return{reserved:false,reason:'APIFY_CHARGE_CAP_NOT_VERIFIED',remainingUsd:null};
+ const approved=conservativeApifyRunEstimate(input.actorId,input.pricingApproval??null);
+ if(approved===null||Math.abs(approved-input.estimatedUsd)>0.000001)
+  return{reserved:false,reason:'APIFY_PRICING_APPROVAL_REQUIRED',remainingUsd:null};
+ return reserveApifyCost(pool,{
+  reservationKey:input.reservationKey,actorId:input.actorId,platform:input.platform,
+  estimatedUsd:approved,monthlyBudgetUsd:budget,providerBalanceUsd:headroom
+ });
 }
