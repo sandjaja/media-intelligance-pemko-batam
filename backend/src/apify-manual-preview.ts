@@ -12,8 +12,10 @@ import {previewGeographicActorInput} from './apify-geographic-input.js';
 
 /** Read-only manual preview using the same authorization scope as scheduler. */
 export async function previewManualApifyCollection(pool:Pool,input:{
- platform:'tiktok'|'instagram';requestedBy:string;
+ platform:'tiktok'|'instagram';requestedBy:string;maxVideos?:10|20|50;
 }):Promise<{ready:false;reason:string;collectors:string[];actorDetails:{kind:string;actorId:string;adminMaxCostUsd:number|null;pricingModel:string|null;minimumChargeUsd:number|null;pricingCapCandidate:boolean;pricingLookupStatus:ApifyPricingLookup['reason']|'CREDENTIAL_UNAVAILABLE';pricingMetadataShape:string|null;inputSchemaVerified:boolean;inputSchemaReason:string|null;missingInputKeys:string[];geographicInputReady:boolean;geographicInputReason:string|null;searchTerms:string[];requestedVideoLimit:number|null;proposedResultsPerPage:number|null}[];billableRunStarted:false;requiresExplicitConfirmation:true;adminMonthlyBudgetUsd:number|null;accountMonthlyHeadroomUsd:number|null;executionBlockers:string[];chargeQuotes:{kind:string;actorId:string;readyForConfirmation:boolean;maximumChargeUsd:number|null;adminLimitUsd:number|null;monthlyHeadroomUsd:number|null;blockers:string[]}[]}>{
+ const maxVideos=input.maxVideos??10;
+ if(![10,20,50].includes(maxVideos))throw Error('APIFY_VIDEO_LIMIT_INVALID');
  const result=await previewApifyPlatform(pool,{trigger:'manual',platform:input.platform,requestedBy:input.requestedBy});
  // Display-only monthly budget; it is not a verified per-Actor price or authorization.
  const adminMonthlyBudgetUsd=await loadApifyAdminBudget(pool).catch(()=>null);
@@ -28,9 +30,9 @@ export async function previewManualApifyCollection(pool:Pool,input:{
   const plan=await loadApifyGeographicSearchPlan(pool);
   for(const actor of actorDetails){
    if(actor.actorId!=='clockworks/tiktok-scraper'&&actor.actorId!=='apify/instagram-scraper')continue;
-   const proposal=previewGeographicActorInput({actorId:actor.actorId,plan,maxQueries:5});
+   const proposal=previewGeographicActorInput({actorId:actor.actorId,plan,maxQueries:5,maxVideos});
    actor.searchTerms=proposal.searchTerms;
-   actor.requestedVideoLimit=10;
+   actor.requestedVideoLimit=maxVideos;
    actor.proposedResultsPerPage=typeof proposal.proposedInput.resultsPerPage==='number'?proposal.proposedInput.resultsPerPage:null;
    actor.geographicInputReady=proposal.searchTerms.length>0;
    actor.geographicInputReason=actor.geographicInputReady?'APIFY_GEOGRAPHIC_PLAN_PREPARED':'APIFY_GEOGRAPHIC_PLAN_EMPTY';
