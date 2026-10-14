@@ -28,3 +28,11 @@ test('manual preview reports missing credentials and pricing metadata without at
  assert.ok(result.executionBlockers.includes('APIFY_ACTOR_PRICING_METADATA_UNAVAILABLE'));
  assert.ok(result.actorDetails.every(actor=>actor.pricingModel===null));
 });
+
+test('duplicate Actor ID across TikTok and Instagram is flagged even for TikTok-only preview',async()=>{
+ const settings={tiktokActor:'clockworks/tiktok-scraper',instagramActor:'clockworks/tiktok-scraper',tiktokCommentsEnabled:false,instagramCommentsEnabled:false};
+ const pool={query:async(sql:string)=>sql.includes('integration_credentials')?{rows:[]}:{rows:[{settings}]}} as unknown as Pool;
+ const result=await previewManualApifyCollection(pool,{platform:'tiktok',requestedBy:'operator-1'});
+ assert.ok(result.executionBlockers.includes('APIFY_ACTOR_ID_AMBIGUOUS'));
+ assert.equal(result.billableRunStarted,false);
+});
