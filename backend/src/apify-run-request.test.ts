@@ -12,9 +12,11 @@ test('no request for disabled or unreserved collectors',()=>{
  assert.equal(prepareApifyRunRequest({...base,actorId:'bad?actor'}),null);
 });
 
-test('unknown but syntactically valid Actor is never authorized',()=>{
- const rogue={...base,actorId:'unknown/paid-actor',configuredActorId:'unknown/paid-actor'};
- assert.equal(prepareApifyRunRequest(rogue),null);
+test('admin-configured Actor can be used when exact settings and safety checks match',()=>{
+ const configured={...base,actorId:'custom/paid-actor',configuredActorId:'custom/paid-actor'};
+ assert.deepEqual(prepareApifyRunRequest(configured),{path:'/v2/acts/custom~paid-actor/runs',query:{maxTotalChargeUsd:0.5},method:'POST'});
+ assert.equal(prepareApifyRunRequest({...configured,configuredActorId:'other/actor'}),null);
+ assert.equal(prepareApifyRunRequest({...configured,collectorEnabled:false}),null);
 });
 test('standby Actor needs enabled configuration and verified pricing',()=>{
  const standby={...base,actorId:'clockworks/tiktok-hashtag-scraper',configuredActorId:'clockworks/tiktok-hashtag-scraper'};
