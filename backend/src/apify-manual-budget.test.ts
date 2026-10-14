@@ -9,8 +9,9 @@ const base={actorId,configuredActorId:actorId,collectorEnabled:true,
 test('budget can be evaluated without a manually configured Actor cap',()=>{
  const result=evaluateApifyManualBudget(base);
  assert.equal(result.maximumChargeUsd,0.5);
- assert.equal(result.readyForConfirmation,true);
+ assert.equal(result.readyForConfirmation,false);
  assert.equal(result.cashBalanceVerified,false);
+ assert.ok(result.blockers.includes('APIFY_CASH_BALANCE_UNVERIFIED'));
 });
 test('monthly provider and Admin budgets are independent mandatory guards',()=>{
  const provider=evaluateApifyManualBudget({...base,monthlyHeadroomUsd:0.49});
@@ -31,4 +32,11 @@ test('known insufficient cash credits block even if monthly headroom is sufficie
  const result=evaluateApifyManualBudget({...base,cashBalanceUsd:0.1});
  assert.equal(result.readyForConfirmation,false);
  assert.ok(result.blockers.includes('APIFY_CASH_BALANCE_INSUFFICIENT'));
+});
+
+test('verified cash credits and both monthly budgets are required together',()=>{
+ const result=evaluateApifyManualBudget({...base,cashBalanceUsd:0.75});
+ assert.equal(result.readyForConfirmation,true);
+ assert.equal(result.cashBalanceVerified,true);
+ assert.deepEqual(result.blockers,[]);
 });
