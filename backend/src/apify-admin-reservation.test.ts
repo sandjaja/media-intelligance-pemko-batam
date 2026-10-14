@@ -25,3 +25,10 @@ test('saved Admin budget is passed into atomic reservation',async()=>{
  assert.equal(result.remainingUsd,1.3);
  assert.ok(statements.includes('COMMIT'));
 });
+
+test('missing provider USD balance blocks ledger writes',async()=>{
+ const pool={query:async()=>({rows:[{budget:'1.5'}]}),connect:()=>{throw Error('ledger must not start')}} as unknown as Pool;
+ const result=await reserveApifyWithAdminBudget(pool,{...input,providerBalanceUsd:null});
+ assert.equal(result.reserved,false);
+ assert.equal(result.reason,'APIFY_PROVIDER_BALANCE_UNAVAILABLE');
+});
