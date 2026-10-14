@@ -30,6 +30,7 @@ export async function executeClaimedApifyRun(pool:Pool,input:{
  if(input.configuredMaxUsd===null||!Number.isFinite(input.configuredMaxUsd)||input.configuredMaxUsd<=0||
     approvedMaximum>input.configuredMaxUsd)
   return{started:false,reason:'APIFY_APPROVED_COST_EXCEEDS_ADMIN_LIMIT'};
+ if(!input.collectorEnabled)return{started:false,reason:'APIFY_COLLECTOR_DISABLED'};
  if(!input.token.trim())return{started:false,reason:'APIFY_TOKEN_REQUIRED'};
  if(!input.actorInput||Array.isArray(input.actorInput)||typeof input.actorInput!=='object')
   return{started:false,reason:'APIFY_ACTOR_INPUT_INVALID'};
