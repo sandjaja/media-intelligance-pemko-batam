@@ -21,3 +21,8 @@ test('rejects unknown Actor and excessive query count',()=>{
  assert.throws(()=>previewGeographicActorInput({actorId:'unknown/actor',plan}),/APIFY_GEOGRAPHIC_ACTOR_NOT_SUPPORTED/);
  assert.throws(()=>previewGeographicActorInput({actorId:'clockworks/tiktok-scraper',plan,maxQueries:100}),/APIFY_SEARCH_LIMIT_INVALID/);
 });
+
+test('rejects geographic terms outside active organization city',()=>{
+ const invalid={...plan,queries:['Batam','Jakarta','Sekupang Batam']};
+ assert.throws(()=>previewGeographicActorInput({actorId:'clockworks/tiktok-scraper',plan:invalid}),/APIFY_GEOGRAPHIC_QUERY_OUT_OF_SCOPE/);
+});
