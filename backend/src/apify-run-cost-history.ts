@@ -15,6 +15,22 @@ export async function fetchApifyActorCostHistory(input:{token:string;actorId:str
   const cost=typeof row.usageTotalUsd==='number'&&Number.isFinite(row.usageTotalUsd)&&row.usageTotalUsd>=0?row.usageTotalUsd:null;
   return{runId:typeof row.id==='string'?row.id:'',status:typeof row.status==='string'?row.status:'UNKNOWN',costUsd:cost,finishedAt:typeof row.finishedAt==='string'?row.finishedAt:null,itemCount:typeof row.stats==='object'&&row.stats!==null&&typeof (row.stats as Record<string,unknown>).outputItems==='number'&&Number.isSafeInteger((row.stats as Record<string,unknown>).outputItems)&&((row.stats as Record<string,unknown>).outputItems as number)>=0?(row.stats as Record<string,unknown>).outputItems as number:null};
  });
+ // Actor run lists may omit detailed cost/output stats. Read completed run details
+ // for a bounded sample before calculating any per-item estimate.
+ const candidates=samples.filter(s=>s.runId&&s.finishedAt&&(s.costUsd===null||s.itemCount===null)).slice(0,10);
+ await Promise.all(candidates.map(async sample=>{
+  try{
+   const detail=await fetcher('https://api.apify.com/v2/actor-runs/'+encodeURIComponent(sample.runId),{
+    headers:{Authorization:'Bearer '+token,Accept:'application/json'},signal:AbortSignal.timeout(10000)});
+   if(!detail.ok)return;
+   const payload=await detail.json() as {data?:Record<string,unknown>};
+   const run=payload?.data;
+   if(!run||run.id!==sample.runId)return;
+   if(typeof run.usageTotalUsd==='number'&&Number.isFinite(run.usageTotalUsd)&&run.usageTotalUsd>=0)sample.costUsd=run.usageTotalUsd;
+   const stats=run.stats as Record<string,unknown>|undefined;
+   if(stats&&typeof stats.outputItems==='number'&&Number.isSafeInteger(stats.outputItems)&&stats.outputItems>=0)sample.itemCount=stats.outputItems;
+  }catch{/* Incomplete provider history must not fabricate cost. */}
+ }));
  const complete=samples.filter(s=>['SUCCEEDED','FAILED','TIMED-OUT','ABORTED'].includes(s.status)&&s.finishedAt!==null&&s.costUsd!==null);
  const averageCostUsd=complete.length?complete.reduce((sum,s)=>sum+s.costUsd!,0)/complete.length:null;
  const withItems=complete.filter(s=>s.status==='SUCCEEDED'&&s.itemCount!==null&&s.itemCount>0);
