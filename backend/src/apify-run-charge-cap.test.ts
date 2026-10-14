@@ -31,3 +31,19 @@ test('provider charge cap uses saved ceiling for a changed Actor ID',()=>{
  assert.deepEqual(buildApifyChargeCap(configured),{maxTotalChargeUsd:0.2});
  assert.equal(buildApifyChargeCap({...configured,reservedUsd:0.3}),null);
 });
+
+test('provider cap never exceeds the approved ceiling at cent boundaries',()=>{
+ for(const [cap,reserved] of [[0.1,0.1],[0.29,0.29],[0.5,0.5],[1.01,1.01],[0.15,0.149999999999]]){
+  const result=buildApifyChargeCap({...base,configuredMaxUsd:cap,reservedUsd:reserved});
+  assert.ok(result!==null);
+  assert.ok(result.maxTotalChargeUsd<=cap);
+  assert.ok(result.maxTotalChargeUsd<=reserved);
+  assert.ok(Number.isInteger(Math.round(result.maxTotalChargeUsd*100)));
+ }
+});
+test('invalid provider cap input fails closed',()=>{
+ for(const value of [0,-1,NaN,Infinity,-Infinity]){
+  assert.equal(buildApifyChargeCap({...base,configuredMaxUsd:value}),null);
+  assert.equal(buildApifyChargeCap({...base,reservedUsd:value}),null);
+ }
+});
