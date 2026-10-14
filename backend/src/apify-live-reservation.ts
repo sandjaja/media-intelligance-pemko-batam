@@ -28,12 +28,7 @@ export async function reserveApifyWithLiveLimits(pool:Pool,input:{
  const {rows:settingsRows}=await pool.query(`SELECT s.settings->'actorMaxCostUsd' AS limits FROM integration_settings s JOIN integration_providers p ON p.id=s.provider_id AND p.code='apify' AND p.active=true JOIN organizations o ON o.id=s.organization_id AND o.active=true LIMIT 2`);
  if(settingsRows.length!==1)return{reserved:false,reason:'APIFY_ACTOR_LIMIT_UNAVAILABLE',remainingUsd:null};
  const limits=settingsRows[0]?.limits;
- const kinds:Record<string,string>={
-  'clockworks/tiktok-scraper':'tiktok_posts','apify/instagram-scraper':'instagram_posts',
-  'clockworks/tiktok-comments-scraper':'tiktok_comments','apidojo/instagram-comments-scraper-api':'instagram_comments',
-  'clockworks/tiktok-hashtag-scraper':'tiktok_hashtag','apify/instagram-hashtag-scraper':'instagram_hashtag'
- };
- const kind=kinds[input.actorId];
+ const kind=selected.kind;
  const expectedPlatform=kind?.startsWith('tiktok_')?'tiktok':kind?.startsWith('instagram_')?'instagram':null;
  if(!expectedPlatform||expectedPlatform!==input.platform)
   return{reserved:false,reason:'APIFY_ACTOR_PLATFORM_MISMATCH',remainingUsd:null};
