@@ -24,6 +24,7 @@ export async function executeClaimedApifyRun(pool:Pool,input:{
  if(input.platform!=='tiktok'||input.actorId!=='clockworks/tiktok-scraper'||
     input.configuredActorId!==input.actorId)
   return{started:false,reason:'APIFY_MANUAL_COLLECTOR_NOT_ENABLED_FOR_ROLLOUT'};
+ if(!input.pricingApproval||input.pricingApproval.actorId!==input.actorId||!input.pricingApproval.includesAllEventsAndOverheads)return{started:false,reason:'APIFY_PRICING_APPROVAL_REQUIRED'};
  if(!input.token.trim())return{started:false,reason:'APIFY_TOKEN_REQUIRED'};
  if(!input.actorInput||Array.isArray(input.actorInput)||typeof input.actorInput!=='object')
   return{started:false,reason:'APIFY_ACTOR_INPUT_INVALID'};
