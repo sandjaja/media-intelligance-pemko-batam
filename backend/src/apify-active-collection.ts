@@ -59,7 +59,7 @@ export function buildActiveApifyInput(step:Step,city:string,queries:string[],com
  }
  if(step.kind==='tiktok_hashtag')return{hashtags:[tag],resultsPerPage:step.limit,shouldDownloadVideos:false};
  if(step.kind==='instagram_hashtag')return{hashtags:[tag],resultsType:'posts',resultsLimit:step.limit};
- if(step.kind==='instagram_posts')return{search:city,searchType:'place',resultsType:'posts',resultsLimit:step.limit,searchLimit:1};
+ if(step.kind==='instagram_posts')return{search:'#'+tag,searchType:'hashtag',resultsType:'posts',resultsLimit:step.limit,searchLimit:1};
  // Reuse the proven TikTok input adapter, retaining the total Admin item limit.
  const target=([10,20,50].includes(step.limit)?step.limit:10) as 10|20|50;
  const proposed=previewGeographicActorInput({actorId:step.actorId,plan:{organizationId:0,city,queries,excludedAmbiguousTerms:[]},maxVideos:target,maxQueries:Math.min(5,step.limit)}).proposedInput;
@@ -181,7 +181,8 @@ export async function advanceActiveApifyJob(pool:Pool,jobId:string){
     step.counts.datasetItems+=items.length;step.counts.rejected+=normalized.rejected;step.counts.outOfScope+=normalized.candidates.length-candidates.length;
     step.counts.received+=result.received;step.counts.succeeded+=result.succeeded;step.counts.failed+=result.failed;step.counts.skipped+=result.results.filter(r=>r.skipped===true).length;
     step.offset+=items.length;
-    if(items.length<pageSize||step.offset>=maximum){step.status=step.counts.failed?'FAILED':'DONE';if(step.counts.failed)step.error='APIFY_INGESTION_FAILED';}
+    if(items.length>0&&normalized.rejected===items.length){step.status='FAILED';step.error='APIFY_DATASET_NO_SUPPORTED_ITEMS';}
+    if(step.status!=='FAILED'&&(items.length<pageSize||step.offset>=maximum)){step.status=step.counts.failed?'FAILED':'DONE';if(step.counts.failed)step.error='APIFY_INGESTION_FAILED';}
    }
   }
   await save(client,row.id,job);await client.query('COMMIT');transaction=false;return job;
@@ -201,6 +202,18 @@ export async function registerActiveApifyRoutes(app:FastifyInstance,pool:Pool,gu
   try{return{data:await createActiveApifyJob(pool,parsed.data.platform,parsed.data.maxVideos,request.socialIngestAuth!.id)}}catch(e){app.log.error({err:e},'Apify collection preparation failed');return reply.code(422).send({error:safeError(e)});}
  });
  app.get('/api/social/collection/apify/jobs/latest',{preHandler},async()=>({data:(await pool.query(`SELECT metadata FROM audit_logs WHERE action='APIFY_ACTIVE_COLLECTION' ORDER BY created_at DESC LIMIT 1`)).rows[0]?.metadata??null}));
+ app.get('/api/social/collection/apify/jobs/:jobId/diagnostics',{preHandler},async(request,reply)=>{
+  const parsed=z.object({jobId:z.string().uuid()}).safeParse(request.params);if(!parsed.success)return reply.code(400).send({error:'APIFY_COLLECTION_ID_INVALID'});
+  const job=(await pool.query(`SELECT metadata FROM audit_logs WHERE action='APIFY_ACTIVE_COLLECTION' AND metadata->>'jobId'=$1`,[parsed.data.jobId])).rows[0]?.metadata as ActiveApifyJob|undefined;
+  if(!job)return reply.code(404).send({error:'APIFY_COLLECTION_NOT_FOUND'});
+  const {token}=await config(pool);const data=[];
+  for(const step of job.steps.filter(s=>s.datasetId&&s.counts?.rejected)){
+   const response=await provider('datasets/'+encodeURIComponent(step.datasetId!)+'/items?clean=true&limit=1',token);if(!response.ok)continue;
+   const items:unknown=await response.json();if(!Array.isArray(items))continue;
+   data.push({kind:step.kind,runId:step.runId,records:items.map(item=>{const r=item&&typeof item==='object'?item as Record<string,unknown>:{};return{keys:Object.keys(r).slice(0,40),error:typeof r.error==='string'?r.error.slice(0,300):null,errorDescription:typeof r.errorDescription==='string'?r.errorDescription.slice(0,500):null};})});
+  }
+  return{data};
+ });
  app.post('/api/social/collection/apify/jobs/:jobId/advance',{preHandler},async(request,reply)=>{
   const parsed=z.object({jobId:z.string().uuid()}).safeParse(request.params);if(!parsed.success)return reply.code(400).send({error:'APIFY_COLLECTION_ID_INVALID'});
   try{const job=await advanceActiveApifyJob(pool,parsed.data.jobId);return{data:job,busy:!job};}catch(e){app.log.error({err:e},'Apify collection progress failed');return reply.code(422).send({error:safeError(e)});}

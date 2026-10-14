@@ -22,7 +22,7 @@ test('all six documented actor inputs are bounded and city/parent scoped',()=>{
   step.parents=[{externalId:'ABCde123',canonicalUrl:'https://www.instagram.com/p/ABCde123/',title:'Batam',content:'Batam'}];
   const input=buildActiveApifyInput(step,'Batam',['Batam','Sekupang Batam'],3)!;
   if(step.kind==='tiktok_posts')assert.deepEqual(input.searchQueries,['Batam','Sekupang Batam']);
-  if(step.kind==='instagram_posts'){assert.equal(input.search,'Batam');assert.equal(input.resultsLimit,10);}
+  if(step.kind==='instagram_posts'){assert.equal(input.search,'#batam');assert.equal(input.searchType,'hashtag');assert.equal(input.resultsLimit,10);}
   if(step.kind.endsWith('_hashtag'))assert.deepEqual(input.hashtags,['batam']);
   if(step.kind==='tiktok_comments'){assert.equal(input.commentsPerPost,3);assert.equal(input.maxRepliesPerComment,0);}
   if(step.kind==='instagram_comments'){assert.equal(input.maxItems,3);assert.equal(input.fetchReplies,false);}
