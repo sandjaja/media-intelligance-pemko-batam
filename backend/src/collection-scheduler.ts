@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import {previewScheduledApifyCollection} from './apify-scheduled-preview.js';
 import { runOnlineSourceCollection } from './online-article-moderation-routes.js';
 import { clusterNewOnlineArticles } from './online-story-clustering.js';
 import { collectOwnedWebsiteAccount } from './website-collector.js';
@@ -121,7 +122,15 @@ export async function runCollection(pool:Pool,trigger:CollectionTrigger,requeste
     const result:any={};
     if(sources.includes('online'))result.online=summarizeOnline(await collectOnline(pool));
     if(sources.includes('owned'))result.owned=await collectOwned(pool);
-    if(sources.includes('social'))result.social=await collectSocial(pool,trigger);
+    if(sources.includes('social')){
+      result.social=await collectSocial(pool,trigger);
+      // Existing YouTube runner remains unchanged. Scheduled Apify is preview
+      // only until billable execution, reconciliation and recovery are approved.
+      if(trigger==='SCHEDULED'){
+        try{result.apify=await previewScheduledApifyCollection(pool)}
+        catch{result.apify={mode:'preview_only',billableRunStarted:false,reason:'APIFY_SCHEDULE_PREVIEW_UNAVAILABLE'}}
+      }
+    }
     const failed=Number(result.online?.failed||0)+Number(result.owned?.failed||0)+Number(result.social?.failed||0);
     const successful=(result.online?.succeeded||0)+(result.owned?.succeeded||0)+(result.social?.succeeded||0);
     const status=failed>0?(successful>0?'PARTIAL':'FAILED'):'SUCCESS';
