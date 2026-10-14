@@ -129,7 +129,7 @@ app.put('/api/admin/integrations/apify/settings',{preHandler:[requireAuth,requir
  ] as const;
  for(const item of standby){
   if(!item.enabled)continue;
-  if(item.id!==item.expected)return reply.code(400).send({error:'APIFY_ENABLED_HASHTAG_ACTOR_INVALID',kind:item.kind});
+  if(!item.id||!/^[a-zA-Z0-9_-]+[\\/~][a-zA-Z0-9_.-]+$/.test(item.id))return reply.code(400).send({error:'APIFY_ENABLED_HASHTAG_ACTOR_INVALID',kind:item.kind});
   const ceiling=config.actorMaxCostUsd?.[item.kind];
   if(typeof ceiling!=='number'||ceiling<item.minimum)return reply.code(400).send({error:'APIFY_ENABLED_HASHTAG_COST_LIMIT_REQUIRED',kind:item.kind});
  }
