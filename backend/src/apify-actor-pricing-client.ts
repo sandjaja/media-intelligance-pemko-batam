@@ -13,7 +13,9 @@ export function parseApifyActorPricing(payload:unknown):ApifyActorPricingSnapsho
   const started=(entry as Record<string,unknown>).startedAt;
   return typeof started==='string'&&Number.isFinite(Date.parse(started))&&Date.parse(started)<=Date.now();
  }).sort((a,b)=>Date.parse(b.startedAt as string)-Date.parse(a.startedAt as string));
- const pricing=effective[0]??actor.currentPricingInfo;
+ // If historical records exist but none are effective, do not silently
+ // trust an unverified currentPricingInfo fallback for paid-run metadata.
+ const pricing=records.length?effective[0]:actor.currentPricingInfo;
  if(!pricing||typeof pricing!=='object'||Array.isArray(pricing))return null;
  const info=pricing as Record<string,unknown>;
  const model=info.pricingModel;
