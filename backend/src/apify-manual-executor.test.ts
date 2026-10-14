@@ -261,3 +261,20 @@ test('executor rejects unscoped TikTok queries before claiming funds',async()=>{
  assert.equal(result.started,false);
  assert.equal(result.reason,'APIFY_TIKTOK_GEOGRAPHIC_INPUT_NOT_VERIFIED');
 });
+
+test('executor accepts bounded 10/20/50 geographic proposals past input guard',async()=>{
+ for(const [page,queries] of [[3,3],[6,3],[16,3],[10,5]] as const){
+  const result=await executeClaimedApifyRun(unreachablePool,{
+   ...base,explicitlyConfirmed:true,providerChargeCapVerified:true,
+   actorInput:{...base.actorInput,searchQueries:Array.from({length:queries},(_,i)=>'Batam '+(i+1)),resultsPerPage:page}
+  }).catch(e=>({reason:String(e)}));
+  assert.notEqual(result.reason,'APIFY_TIKTOK_GEOGRAPHIC_INPUT_NOT_VERIFIED');
+ }
+});
+test('executor rejects aggregate TikTok requests above 50 before ledger access',async()=>{
+ const result=await executeClaimedApifyRun(unreachablePool,{
+  ...base,explicitlyConfirmed:true,providerChargeCapVerified:true,
+  actorInput:{...base.actorInput,searchQueries:['Batam','Sekupang Batam','Batu Aji Batam'],resultsPerPage:20}
+ });
+ assert.equal(result.reason,'APIFY_TIKTOK_GEOGRAPHIC_INPUT_NOT_VERIFIED');
+});
