@@ -319,3 +319,27 @@ test('paid executor fails closed when selected video limit is absent',async()=>{
  });
  assert.equal(result.reason,'APIFY_SELECTED_VIDEO_LIMIT_REQUIRED');
 });
+
+test('direct paid executor never treats UI consent as verified provider cap',async()=>{
+ for(const providerChargeCapVerified of [undefined,false] as const){
+  let networkCalled=false;
+  const result=await executeClaimedApifyRun(unreachablePool,{
+   ...base,explicitlyConfirmed:true,providerChargeCapVerified,
+   fetcher:async()=>{networkCalled=true;throw Error('PAID_ACTOR_MUST_NOT_START')}
+  });
+  assert.equal(result.started,false);
+  assert.equal(result.reason,'APIFY_CHARGE_CAP_NOT_VERIFIED');
+  assert.equal(networkCalled,false);
+ }
+});
+test('direct paid executor refuses approval for another Actor even with confirmation',async()=>{
+ let networkCalled=false;
+ const result=await executeClaimedApifyRun(unreachablePool,{
+  ...base,explicitlyConfirmed:true,providerChargeCapVerified:true,
+  pricingApproval:{...base.pricingApproval,actorId:'clockworks/tiktok-comments-scraper'},
+  fetcher:async()=>{networkCalled=true;throw Error('PAID_ACTOR_MUST_NOT_START')}
+ });
+ assert.equal(result.started,false);
+ assert.equal(result.reason,'APIFY_PRICING_APPROVAL_REQUIRED');
+ assert.equal(networkCalled,false);
+});
