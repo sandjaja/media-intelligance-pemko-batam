@@ -6,6 +6,7 @@ const STORAGE_KEY='mi.admin.activeTab';
 function validId(id){return typeof id==='string'&&/^[a-z0-9_-]+$/i.test(id)}
 function remember(id){if(!validId(id))return;try{sessionStorage.setItem(STORAGE_KEY,id)}catch{}}
 function remembered(){try{const id=sessionStorage.getItem(STORAGE_KEY);return validId(id)?id:null}catch{return null}}
+function rowsReady(){const rows=document.getElementById('integrationRows');return !!rows&&rows.querySelectorAll('article').length>0}
 function activate(id,{persist=true}={}){
  const ws=document.getElementById('workspace'); if(!ws||!id)return false;
  const panel=document.getElementById(id+'Panel');
@@ -15,10 +16,13 @@ function activate(id,{persist=true}={}){
  panel.classList.remove('hidden');
  ws.querySelectorAll('[data-tab]').forEach(b=>{b.className=b.dataset.tab===id?ACTIVE:INACTIVE});
  if(persist)remember(id);
- if(id==='integrations'){
+ if(id==='integrations'&&(!panel.dataset.integrationLoaded||!rowsReady())){
   const rows=document.getElementById('integrationRows');
   if(typeof window.loadAdminIntegrations==='function'){
-   Promise.resolve().then(()=>window.loadAdminIntegrations()).catch(()=>{if(rows)rows.textContent='Gagal memuat integrasi. Muat ulang halaman atau periksa koneksi backend.'});
+   if(panel.dataset.integrationLoading!=='1'){
+    panel.dataset.integrationLoading='1';
+    Promise.resolve().then(()=>window.loadAdminIntegrations()).then(()=>{panel.dataset.integrationLoaded='1'}).catch(()=>{if(rows)rows.textContent='Gagal memuat integrasi. Muat ulang halaman atau periksa koneksi backend.'}).finally(()=>{panel.dataset.integrationLoading='0'});
+   }
   }else if(rows){rows.textContent='Modul Integrasi & API belum termuat. Muat ulang halaman; jika tetap kosong, hubungi administrator.';}
  }
  return true;
@@ -28,11 +32,9 @@ document.addEventListener('click',e=>{
  const b=e.target.closest?.('#workspace [data-tab]'); if(!b)return;
  const id=b.dataset.tab;remember(id);setTimeout(()=>activate(id),0);
 });
-const observer=new MutationObserver(()=>{restore()});
 const start=()=>{
  const ws=document.getElementById('workspace');
  if(!ws)return;
- observer.observe(ws,{childList:true,subtree:true});
  restore();
  setTimeout(restore,150);
  setTimeout(restore,500);
