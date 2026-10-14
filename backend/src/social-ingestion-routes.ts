@@ -200,9 +200,22 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
 
   app.post('/api/social/collection/run',{preHandler:[auth,requireWrite]},async(request,reply)=>{
     const ctx=request.socialIngestAuth!;
-    const result=await runCollection(pool,'MANUAL',String(ctx.id),['social']);
+    const selection=z.object({platform:z.enum(['semua','tiktok','instagram','youtube']).default('youtube')}).strict().safeParse(request.body??{});
+    if(!selection.success)return reply.code(400).send({error:'INVALID_SOCIAL_COLLECTION_PLATFORM'});
+    // Preserve the existing YouTube path; paid Apify platforms remain preview-only.
+    const platform=selection.data.platform;
+    const youtube=platform==='youtube'||platform==='semua';
+    const result=youtube?await runCollection(pool,'MANUAL',String(ctx.id),['social']):{ok:true,skipped:true,reason:'YOUTUBE_NOT_SELECTED'};
+    const apifyPlatforms=(platform==='semua'?['tiktok','instagram']:platform==='youtube'?[]:[platform]) as ('tiktok'|'instagram')[];
+    const apify=await Promise.all(apifyPlatforms.map(async selected=>{
+      try{
+        const {previewManualApifyCollection}=await import('./apify-manual-preview.js');
+        return{platform:selected,...await previewManualApifyCollection(pool,{platform:selected,requestedBy:String(ctx.id)})};
+      }catch{return{platform:selected,ready:false,reason:'APIFY_PREVIEW_UNAVAILABLE',collectors:[] as string[]}}
+    }));
+    const response={...result,selection:platform,apify,billableRunStarted:false};
     await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'SOCIAL_MANUAL_COLLECTION',$2::jsonb)`,[ctx.id,JSON.stringify({runId:result.runId??null,status:result.status??null,skipped:result.skipped??false,reason:result.reason??null})]);
-    return reply.send({data:result});
+    return reply.send({data:response});
   });
 
   app.get('/api/social/ingestion/status',{preHandler:auth},async(request)=>{
