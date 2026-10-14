@@ -18,3 +18,10 @@ test('missing Admin budget, balance, estimate and credentials fail before databa
   assert.equal(result.reason,reason);
  }
 });
+
+test('insufficient verified provider balance fails before ledger access',async()=>{
+ const pool={connect:()=>{throw Error('ledger must not be accessed')}} as unknown as Pool;
+ const result=await preflightApifyReservation(pool,{...input,estimatedUsd:0.5,providerBalanceUsd:0.49});
+ assert.equal(result.reserved,false);
+ assert.equal(result.reason,'APIFY_PROVIDER_BALANCE_INSUFFICIENT');
+});
