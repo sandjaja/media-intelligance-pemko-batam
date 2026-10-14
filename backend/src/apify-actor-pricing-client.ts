@@ -11,6 +11,11 @@ export function parseApifyActorPricing(payload:unknown):ApifyActorPricingSnapsho
  // are absent; reject it instead of trusting a fallback current price.
  if(actor.pricingInfos!==undefined&&!Array.isArray(actor.pricingInfos))return null;
  const records=Array.isArray(actor.pricingInfos)?actor.pricingInfos:[];
+ // Do not silently skip malformed historical records: an omitted effective
+ // record could change which price should apply to a paid run.
+ if(records.some(entry=>!entry||typeof entry!=='object'||Array.isArray(entry)||
+   typeof (entry as Record<string,unknown>).startedAt!=='string'||
+   !Number.isFinite(Date.parse((entry as Record<string,unknown>).startedAt as string))))return null;
  const effective=records.filter((entry):entry is Record<string,unknown>=>{
   if(!entry||typeof entry!=='object'||Array.isArray(entry))return false;
   const started=(entry as Record<string,unknown>).startedAt;
