@@ -18,7 +18,7 @@ export async function inspectUnknownApifyRun(pool:Pool,reservationKey:string):Pr
  if(!Number.isFinite(reservedUsd)||reservedUsd<=0)
   return{recoverable:false,reason:'APIFY_RESERVATION_AMOUNT_INVALID',providerRunId:null,reservedUsd:null};
  const runId=String(row.run_id||'');
- if(!runId||runId.startsWith('claim:'))
+ if(!/^[a-zA-Z0-9_-]{5,160}$/.test(runId)||runId.startsWith('claim:'))
   return{recoverable:false,reason:'APIFY_PROVIDER_RUN_ID_UNCONFIRMED_MANUAL_REVIEW',providerRunId:null,reservedUsd};
  return{recoverable:true,reason:'APIFY_PROVIDER_RUN_CAN_BE_QUERIED_READ_ONLY',providerRunId:runId,reservedUsd};
 }
