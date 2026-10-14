@@ -26,11 +26,13 @@ export function evaluateApifyManualBudget(input:{
   blockers.push('APIFY_MONTHLY_HEADROOM_INSUFFICIENT_OR_UNAVAILABLE');
  if(!enough(input.adminMonthlyRemainingUsd))
   blockers.push('APIFY_ADMIN_MONTHLY_BUDGET_INSUFFICIENT_OR_UNAVAILABLE');
- // Usage headroom is not cash balance. If no authoritative balance API is
- // available, preserve an explicit unknown status rather than inventing funds.
+ // Usage headroom is not cash balance. Unknown funds must fail closed for
+ // paid execution; a budget quote alone cannot prove prepaid credits.
  const cashBalanceVerified=typeof input.cashBalanceUsd==='number'&&
   Number.isFinite(input.cashBalanceUsd)&&input.cashBalanceUsd>=0;
- if(cashBalanceVerified&&cap!==null&&input.cashBalanceUsd!<cap)
+ if(!cashBalanceVerified)
+  blockers.push('APIFY_CASH_BALANCE_UNVERIFIED');
+ else if(cap!==null&&input.cashBalanceUsd!<cap)
   blockers.push('APIFY_CASH_BALANCE_INSUFFICIENT');
  return{readyForConfirmation:blockers.length===0,maximumChargeUsd:cap,
   blockers,cashBalanceVerified};
