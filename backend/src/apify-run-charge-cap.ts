@@ -13,5 +13,11 @@ export function buildApifyChargeCap(input:{
  if(input.actorId==='clockworks/tiktok-scraper'&&cap<0.5)return null;
  if(reserved>cap)return null;
  // Always pass a provider-side cap; a locally persisted Admin limit alone is insufficient.
- return{maxTotalChargeUsd:Math.round(Math.min(cap,reserved)*100)/100};
+ // Round DOWN to cents: rounding up would authorize more than reserved.
+ // Reject sub-cent reservations instead of returning a zero-dollar cap.
+ const cents=Math.floor((Math.min(cap,reserved)+Number.EPSILON)*100);
+ if(cents<1)return null;
+ const maxTotalChargeUsd=cents/100;
+ if(maxTotalChargeUsd>cap||maxTotalChargeUsd>reserved)return null;
+ return{maxTotalChargeUsd};
 }
