@@ -32,6 +32,17 @@ export async function fetchApifyActorCostHistory(input:{token:string;actorId:str
    if(typeof run.usageTotalUsd==='number'&&Number.isFinite(run.usageTotalUsd)&&run.usageTotalUsd>=0)sample.costUsd=run.usageTotalUsd;
    const stats=run.stats as Record<string,unknown>|undefined;
    if(stats&&typeof stats.outputItems==='number'&&Number.isSafeInteger(stats.outputItems)&&stats.outputItems>=0)sample.itemCount=stats.outputItems;
+   // Some Actor runs report their output only in the default dataset metadata.
+   // Read metadata (not dataset items); this is bounded and read-only.
+   if(sample.itemCount===null&&typeof run.defaultDatasetId==='string'&&/^[a-zA-Z0-9_-]{5,160}$/.test(run.defaultDatasetId)){
+    const datasetResponse=await fetcher('https://api.apify.com/v2/datasets/'+encodeURIComponent(run.defaultDatasetId),{
+     headers:{Authorization:'Bearer '+token,Accept:'application/json'},signal:AbortSignal.timeout(10000)});
+    if(datasetResponse.ok){
+     const datasetPayload=await datasetResponse.json() as {data?:{itemCount?:unknown}};
+     const count=datasetPayload?.data?.itemCount;
+     if(typeof count==='number'&&Number.isSafeInteger(count)&&count>=0)sample.itemCount=count;
+    }
+   }
   }catch{/* Incomplete provider history must not fabricate cost. */}
  }));
  const complete=samples.filter(s=>s.runId&&['SUCCEEDED','FAILED','TIMED-OUT','ABORTED'].includes(s.status)&&s.finishedAt!==null&&s.costUsd!==null);
