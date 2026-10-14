@@ -2,15 +2,18 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {Pool} from 'pg';
 import {executeClaimedApifyRun} from './apify-manual-executor.js';
+import {previewGeographicActorInput} from './apify-geographic-input.js';
 
 const unreachablePool={query:async()=>{throw new Error('DATABASE_MUST_NOT_BE_TOUCHED')},
  connect:async()=>{throw new Error('DATABASE_MUST_NOT_BE_TOUCHED')}} as unknown as Pool;
+const trustedGeographicPlan={organizationId:1,city:'Batam',queries:['Batam','Sekupang Batam'],excludedAmbiguousTerms:[]};
 const base={
  reservationKey:'test-reservation',actorId:'clockworks/tiktok-scraper',
  platform:'tiktok' as const,configuredActorId:'clockworks/tiktok-scraper',
  configuredMaxUsd:0.5,collectorEnabled:true,pricingApproval:{actorId:'clockworks/tiktok-scraper',maximumRunCostUsd:0.5,verifiedAt:new Date().toISOString(),source:'actor-pricing-confirmed' as const,includesAllEventsAndOverheads:true},
  claimId:'claim:test12345678',token:'secret',explicitlyConfirmed:false,
- actorInput:{searchQueries:['Batam','Sekupang Batam'],searchSection:'/video',resultsPerPage:5,commentsPerPost:0,shouldDownloadVideos:false}
+ trustedGeographicPlan,selectedVideoLimit:10 as const,
+ actorInput:previewGeographicActorInput({actorId:'clockworks/tiktok-scraper',plan:trustedGeographicPlan,maxVideos:10}).proposedInput
 };
 test('executor refuses execution without explicit confirmation',async()=>{
  let called=false;
@@ -277,4 +280,18 @@ test('executor rejects aggregate TikTok requests above 50 before ledger access',
   actorInput:{...base.actorInput,searchQueries:['Batam','Sekupang Batam','Batu Aji Batam'],resultsPerPage:20}
  });
  assert.equal(result.reason,'APIFY_TIKTOK_GEOGRAPHIC_INPUT_NOT_VERIFIED');
+});
+
+test('paid executor rejects arbitrary in-scope terms without trusted plan match',async()=>{
+ const result=await executeClaimedApifyRun(unreachablePool,{
+  ...base,explicitlyConfirmed:true,providerChargeCapVerified:true,
+  actorInput:{...base.actorInput,searchQueries:['Batam','Bengkong Batam']}
+ });
+ assert.equal(result.reason,'APIFY_TIKTOK_INPUT_PLAN_MISMATCH');
+});
+test('paid executor fails closed when trusted geographic plan is absent',async()=>{
+ const result=await executeClaimedApifyRun(unreachablePool,{
+  ...base,explicitlyConfirmed:true,providerChargeCapVerified:true,trustedGeographicPlan:undefined
+ });
+ assert.equal(result.reason,'APIFY_TRUSTED_GEOGRAPHIC_PLAN_REQUIRED');
 });
