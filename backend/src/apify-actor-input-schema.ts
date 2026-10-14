@@ -20,5 +20,5 @@ export async function inspectApifyActorInputSchema(input:{actorId:'clockworks/ti
    }
   }
   return{verified:true,reason:'APIFY_INPUT_SCHEMA_READ',acceptedKeys:Object.keys(props).slice(0,200),propertyTypes};
- }catch{return{verified:false,reason:'APIFY_INPUT_SCHEMA_UNAVAILABLE',acceptedKeys:[]}}
+ }catch{return{verified:false,reason:'APIFY_INPUT_SCHEMA_UNAVAILABLE',acceptedKeys:[],propertyTypes:{}}}
 }
