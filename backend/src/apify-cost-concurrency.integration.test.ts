@@ -11,7 +11,7 @@ import {reserveApifyCost} from './apify-cost-reservation.js';
  */
 const url=process.env.APIFY_LEDGER_TEST_DATABASE_URL;
 const preview=isApifyPreviewTestConnection({databaseUrl:url,expectedHost:process.env.APIFY_LEDGER_TEST_EXPECTED_HOST,previewFlag:process.env.APIFY_LEDGER_TEST_PREVIEW});
-test('concurrent reservations cannot exceed shared budget (Preview opt-in)',{skip:!url},async()=>{
+test('concurrent reservations cannot exceed shared budget (Preview opt-in)',{skip:!url&&!process.env.APIFY_LEDGER_TEST_PREVIEW},async()=>{
  assert.equal(preview,true,'Refusing integration test: connection is not the approved Neon Preview endpoint');
  const pool=new Pool({connectionString:url,max:3});
  const prefix='apify-ci-concurrency-'+randomUUID();
