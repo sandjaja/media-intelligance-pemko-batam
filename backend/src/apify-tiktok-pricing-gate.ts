@@ -23,12 +23,6 @@ export function assessTikTokPricingForPaidRun(input:{
  else if(typeof minimum==='number'&&input.requestedChargeCapUsd<minimum)
   blockers.push('APIFY_CHARGE_CAP_BELOW_ACTOR_MINIMUM');
  if(!input.providerCapSupported)blockers.push('APIFY_CHARGE_CAP_NOT_VERIFIED');
- // A zero or fractional-cent cap must not be proposed for a paid request.
- // The Actor's published minimum is only a feasibility check, not a quote.
- if(typeof minimum==='number'&&Number.isFinite(minimum)&&minimum>=0&&
-    input.requestedChargeCapUsd>=minimum&&input.providerCapSupported){
-  // Provider cap support still cannot establish billable-event overheads.
- }
  // An API minimum plus a supported maxTotalChargeUsd parameter does not
  // establish a conservative all-in cost estimate for this exact run.
  blockers.push('APIFY_ALL_IN_MAXIMUM_COST_NOT_VERIFIED');
