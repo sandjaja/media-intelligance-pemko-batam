@@ -17,7 +17,7 @@ export async function previewManualApifyCollection(pool:Pool,input:{
  const actorDetails=result.collectors.map(c=>({kind:c.kind,actorId:c.actorId,adminMaxCostUsd:typeof limits[c.kind]==='number'&&Number.isFinite(limits[c.kind])&&(limits[c.kind] as number)>=0.01&&(limits[c.kind] as number)<=5&&!(c.kind==='tiktok_posts'&&(limits[c.kind] as number)<0.5)?limits[c.kind] as number:null,pricingModel:null as string|null,minimumChargeUsd:null as number|null,pricingCapCandidate:false,pricingLookupStatus:'CREDENTIAL_UNAVAILABLE' as ApifyPricingLookup['reason']|'CREDENTIAL_UNAVAILABLE'}));
  // Read-only provider metadata. Missing credentials or failed lookups never authorize a run.
  let credentialReadFailed=false;
- const {rows:credentials}=await pool.query(`SELECT c.credential_ciphertext FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id AND p.code='apify' AND p.active=true JOIN organizations o ON o.id=c.organization_id AND o.active=true WHERE c.enabled=true LIMIT 2`).catch(()=>{credentialReadFailed=true;return{rows:[]};});
+ const {rows:credentials}=await pool.query(`SELECT c.credential_ciphertext FROM integration_credentials c JOIN integration_providers p ON p.id=c.provider_id AND p.code='apify' AND p.active=true JOIN organizations o ON o.id=c.organization_id AND o.active=true LIMIT 2`).catch(()=>{credentialReadFailed=true;return{rows:[]};});
  let credentialDecryptFailed=false;
  if(credentials.length===1&&credentials[0]?.credential_ciphertext){
   try{
