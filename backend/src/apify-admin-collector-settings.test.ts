@@ -17,3 +17,12 @@ test('missing checkbox defaults to disabled and ambiguous org fails closed',asyn
  const ambiguous={query:async()=>({rows:[{settings:base},{settings:base}]})} as unknown as Pool;
  assert.deepEqual(await loadApifyAdminCollectorSettings(ambiguous),[]);
 });
+
+test('all six collector enabled flags are read from Admin settings',async()=>{
+ const pool={query:async()=>({rows:[{settings:{...base,tiktokPostsEnabled:false,instagramPostsEnabled:true,tiktokCommentsEnabled:false,instagramCommentsEnabled:true,tiktokHashtagEnabled:false,instagramHashtagEnabled:true}}]})} as unknown as Pool;
+ const settings=await loadApifyAdminCollectorSettings(pool);
+ assert.deepEqual(settings.map(s=>[s.kind,s.enabled]),[
+  ['tiktok_posts',false],['instagram_posts',true],['tiktok_comments',false],
+  ['instagram_comments',true],['tiktok_hashtag',false],['instagram_hashtag',true]
+ ]);
+});
