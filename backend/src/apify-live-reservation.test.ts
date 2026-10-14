@@ -26,7 +26,7 @@ test('per-actor ceiling blocks excessive estimate before provider access',async(
 test('disabled hashtag is rejected before provider access or cost reservation',async()=>{
  let queries=0;
  const pool={query:async()=>{queries++;return{rows:[{settings:{tiktokHashtagActor:'clockworks/tiktok-hashtag-scraper',tiktokHashtagEnabled:false}}]}},connect:()=>{throw Error('unexpected reservation')}} as unknown as Pool;
- const result=await reserveApifyWithLiveLimits(pool,{...input,actorId:'clockworks/tiktok-hashtag-scraper'},async()=>{throw Error('unexpected provider access')});
+ const result=await reserveApifyWithLiveLimits(pool,{...input,actorId:'clockworks/tiktok-hashtag-scraper',pricingApproval:{...input.pricingApproval,actorId:'clockworks/tiktok-hashtag-scraper'}},async()=>{throw Error('unexpected provider access')});
  assert.equal(result.reason,'APIFY_ACTOR_DISABLED_OR_NOT_CONFIGURED');
  assert.equal(queries,1);
 });
