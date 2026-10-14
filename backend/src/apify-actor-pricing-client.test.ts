@@ -46,3 +46,11 @@ test('Actor metadata chooses currently effective pricing, never future pricing',
  assert.equal(parseApifyActorPricing({data:{pricingInfos:[{pricingModel:'PAY_PER_EVENT',minimalMaxTotalChargeUsd:0.5,startedAt:'2099-01-01T00:00:00.000Z'}]}}),null);
  assert.equal(parseApifyActorPricing({data:{currentPricingInfo:{pricingModel:'PRICE_PER_DATASET_ITEM'}}})?.capEligible,false);
 });
+
+test('future-only pricing history cannot fall back to unverified current price',()=>{
+ const snapshot=parseApifyActorPricing({data:{
+  pricingInfos:[{pricingModel:'PAY_PER_EVENT',minimalMaxTotalChargeUsd:0.5,startedAt:'2099-01-01T00:00:00.000Z'}],
+  currentPricingInfo:{pricingModel:'PAY_PER_EVENT',minimalMaxTotalChargeUsd:0.5}
+ }});
+ assert.equal(snapshot,null);
+});
