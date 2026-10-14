@@ -26,3 +26,12 @@ test('target count never changes the verified USD cap',()=>{
   assert.equal(result.maximumChargeUsd,0.5);
  }
 });
+
+test('Instagram cannot be approved by the TikTok-only capped quote',()=>{
+ const instagram='apify/instagram-scraper';
+ const result=quoteApifyProviderCappedRun({...base,actorId:instagram,
+  configuredActorId:instagram,
+  pricingApproval:{...base.pricingApproval,actorId:instagram}});
+ assert.equal(result.readyForConfirmation,false);
+ assert.ok(result.blockers.includes('APIFY_MANUAL_COLLECTOR_NOT_ENABLED_FOR_ROLLOUT'));
+});
