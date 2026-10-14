@@ -18,3 +18,13 @@ test('manual preview fails closed without saved settings',async()=>{
  assert.equal(result.ready,false);
  assert.equal(result.reason,'APIFY_ADMIN_COLLECTORS_UNAVAILABLE');
 });
+
+test('manual preview reports missing credentials and pricing metadata without attempting paid run',async()=>{
+ const settings={tiktokActor:'clockworks/tiktok-scraper',tiktokCommentsActor:'clockworks/tiktok-comments-scraper'};
+ const pool={query:async(sql:string)=>sql.includes('integration_credentials')?{rows:[]}:{rows:[{settings}]}} as unknown as Pool;
+ const result=await previewManualApifyCollection(pool,{platform:'tiktok',requestedBy:'operator-1'});
+ assert.equal(result.billableRunStarted,false);
+ assert.ok(result.executionBlockers.includes('APIFY_CREDENTIAL_UNAVAILABLE'));
+ assert.ok(result.executionBlockers.includes('APIFY_ACTOR_PRICING_METADATA_UNAVAILABLE'));
+ assert.ok(result.actorDetails.every(actor=>actor.pricingModel===null));
+});
