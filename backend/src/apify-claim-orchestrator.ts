@@ -16,7 +16,7 @@ export async function prepareAndClaimApifyRun(pool:Pool,input:{
 }):Promise<{ready:boolean;reason:string;request?:{method:'POST';path:string;query:{maxTotalChargeUsd:number}}}>{
  const prepared=await prepareRunFromLedger(pool,input);
  if(!prepared.ready||!prepared.request)return{ready:false,reason:prepared.reason};
- const claimed=await claimApifyReservation(pool,input);
+ const claimed=await claimApifyReservation(pool,{...input,minimumReservedUsd:prepared.request.query.maxTotalChargeUsd});
  if(!claimed.claimed)return{ready:false,reason:claimed.reason};
  // The conditional claim wins exactly once; verify amount against prepared cap.
  // If the ledger was altered between read and claim, fail closed and retain
