@@ -14,13 +14,14 @@ export async function fetchApifyActorCostHistory(input:{token:string;actorId:str
  if(!Array.isArray(body?.data?.items))throw Error('APIFY_COST_HISTORY_INVALID_RESPONSE');
  const samples:ApifyCostSample[]=body.data.items.slice(0,limit).map((item:unknown)=>{
   const row=(item&&typeof item==='object'?item:{}) as Record<string,unknown>;
-  if(row.actId!==internalActorId)return{runId:'',status:'ACTOR_MISMATCH',costUsd:null,finishedAt:null,itemCount:null};
+  if(row.actId!==undefined&&row.actId!==internalActorId)return{runId:'',status:'ACTOR_MISMATCH',costUsd:null,finishedAt:null,itemCount:null};
   const cost=typeof row.usageTotalUsd==='number'&&Number.isFinite(row.usageTotalUsd)&&row.usageTotalUsd>=0?row.usageTotalUsd:null;
   return{runId:typeof row.id==='string'?row.id:'',status:typeof row.status==='string'?row.status:'UNKNOWN',costUsd:cost,finishedAt:typeof row.finishedAt==='string'?row.finishedAt:null,itemCount:typeof row.stats==='object'&&row.stats!==null&&typeof (row.stats as Record<string,unknown>).outputItems==='number'&&Number.isSafeInteger((row.stats as Record<string,unknown>).outputItems)&&((row.stats as Record<string,unknown>).outputItems as number)>=0?(row.stats as Record<string,unknown>).outputItems as number:null};
  });
  // Actor run lists may omit detailed cost/output stats. Read completed run details
  // for a bounded sample before calculating any per-item estimate.
- const candidates=samples.filter(s=>s.runId&&s.finishedAt&&(s.costUsd===null||s.itemCount===null)).slice(0,10);
+ const verifiedIds=new Set<string>();
+ const candidates=samples.filter(s=>s.runId&&s.finishedAt).slice(0,10);
  await Promise.all(candidates.map(async sample=>{
   try{
    const detail=await fetcher('https://api.apify.com/v2/actor-runs/'+encodeURIComponent(sample.runId),{
@@ -29,6 +30,7 @@ export async function fetchApifyActorCostHistory(input:{token:string;actorId:str
    const payload=await detail.json() as {data?:Record<string,unknown>};
    const run=payload?.data;
    if(!run||run.id!==sample.runId||run.actId!==internalActorId||run.status!==sample.status)return;
+   verifiedIds.add(sample.runId);
    if(typeof run.usageTotalUsd==='number'&&Number.isFinite(run.usageTotalUsd)&&run.usageTotalUsd>=0)sample.costUsd=run.usageTotalUsd;
    const stats=run.stats as Record<string,unknown>|undefined;
    if(stats&&typeof stats.outputItems==='number'&&Number.isSafeInteger(stats.outputItems)&&stats.outputItems>=0)sample.itemCount=stats.outputItems;
@@ -45,7 +47,9 @@ export async function fetchApifyActorCostHistory(input:{token:string;actorId:str
    }
   }catch{/* Incomplete provider history must not fabricate cost. */}
  }));
- const complete=samples.filter(s=>s.runId&&['SUCCEEDED','FAILED','TIMED-OUT','ABORTED'].includes(s.status)&&s.finishedAt!==null&&s.costUsd!==null);
+ // Only detailed runs whose immutable Actor identity matches may contribute.
+ // A missing detail response is not proof of ownership.
+ const complete=samples.filter(s=>verifiedIds.has(s.runId)&&['SUCCEEDED','FAILED','TIMED-OUT','ABORTED'].includes(s.status)&&s.finishedAt!==null&&s.costUsd!==null);
  const averageCostUsd=complete.length?complete.reduce((sum,s)=>sum+s.costUsd!,0)/complete.length:null;
  const withItems=complete.filter(s=>s.status==='SUCCEEDED'&&s.itemCount!==null&&s.itemCount>0);
  const totalItems=withItems.reduce((sum,s)=>sum+s.itemCount!,0);
@@ -53,5 +57,5 @@ export async function fetchApifyActorCostHistory(input:{token:string;actorId:str
  // historical ratio is display-only and must never authorize a paid run.
  const costPerItemUsd=totalItems>0?withItems.reduce((sum,s)=>sum+s.costUsd!,0)/totalItems:null;
  const estimatedCostsUsd=withItems.length>=3&&costPerItemUsd!==null?{'10':costPerItemUsd*10,'20':costPerItemUsd*20,'50':costPerItemUsd*50}:null;
- return{samples,averageCostUsd,costKnownCount:complete.length,partial:samples.some(s=>s.status==='ACTOR_MISMATCH'||(s.runId&&s.finishedAt&&(s.costUsd===null||s.itemCount===null))),costPerItemUsd,costPerItemSampleCount:withItems.length,estimatedCostsUsd};
+ return{samples,averageCostUsd,costKnownCount:complete.length,partial:samples.some(s=>s.status==='ACTOR_MISMATCH'||(s.runId&&s.finishedAt&&(!verifiedIds.has(s.runId)||s.costUsd===null||s.itemCount===null))),costPerItemUsd,costPerItemSampleCount:withItems.length,estimatedCostsUsd};
 }
