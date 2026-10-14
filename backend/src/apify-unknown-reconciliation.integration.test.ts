@@ -1,3 +1,4 @@
+import {isApifyPreviewTestConnection} from './apify-preview-test-guard.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {randomUUID} from 'node:crypto';
@@ -8,7 +9,7 @@ import {reconcileUnknownApifyRun} from './apify-unknown-reconciliation.js';
  * Uses a fake GET response and cleans up only its own unique ledger row.
  */
 const url=process.env.APIFY_LEDGER_TEST_DATABASE_URL;
-const preview=process.env.APIFY_LEDGER_TEST_PREVIEW==='true';
+const preview=isApifyPreviewTestConnection({databaseUrl:url,expectedHost:process.env.APIFY_LEDGER_TEST_EXPECTED_HOST,previewFlag:process.env.APIFY_LEDGER_TEST_PREVIEW});
 test('UNKNOWN provider reconciliation updates only verified Preview ledger row',{skip:!url||!preview},async()=>{
  const pool=new Pool({connectionString:url,max:2});
  const reservationKey='apify-ci-unknown-'+randomUUID();
