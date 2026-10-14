@@ -19,6 +19,10 @@ export async function executeClaimedApifyRun(pool:Pool,input:{
  providerChargeCapVerified?:boolean;fetcher?:typeof fetch;
 }):Promise<{started:boolean;reason:string;providerRunId?:string}>{
  if(!input.explicitlyConfirmed)return{started:false,reason:'APIFY_USER_CONFIRMATION_REQUIRED'};
+ // Runtime guard: TypeScript types do not validate HTTP or database values.
+ // Never start a paid run with an unrecognized target, even if the caller casts it.
+ if(![10,20,50].includes(input.selectedVideoLimit as number))
+  return{started:false,reason:'APIFY_SELECTED_VIDEO_LIMIT_INVALID'};
  // The request parameter alone is not proof that this Actor's pricing model
  // enforces the configured USD cap. Require trusted server-side verification.
  if(input.providerChargeCapVerified!==true)
