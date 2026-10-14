@@ -78,3 +78,12 @@ test('approved maximum above Admin ceiling is rejected before database access',a
  });
  assert.equal(result.reason,'APIFY_APPROVED_COST_EXCEEDS_ADMIN_LIMIT');
 });
+
+test('fractional-cent approval cannot reach the ledger or paid provider',async()=>{
+ const result=await executeClaimedApifyRun(unreachablePool,{
+  ...base,explicitlyConfirmed:true,providerChargeCapVerified:true,
+  pricingApproval:{...base.pricingApproval,maximumRunCostUsd:0.495}
+ });
+ assert.equal(result.started,false);
+ assert.equal(result.reason,'APIFY_PRICING_APPROVAL_EXPIRED_OR_INVALID');
+});
