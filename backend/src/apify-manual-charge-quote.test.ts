@@ -42,3 +42,19 @@ test('Instagram Actor remains outside initial paid rollout even with otherwise v
  assert.equal(quote.readyForConfirmation,false);
  assert.ok(quote.blockers.includes('APIFY_MANUAL_COLLECTOR_NOT_ENABLED_FOR_ROLLOUT'));
 });
+
+test('rejects verified quote exceeding remaining Admin monthly budget',()=>{
+ const quote=buildApifyManualChargeQuote({...base,adminMonthlyRemainingUsd:0.49});
+ assert.equal(quote.readyForConfirmation,false);
+ assert.ok(quote.blockers.includes('APIFY_ADMIN_MONTHLY_BUDGET_INSUFFICIENT_OR_UNAVAILABLE'));
+});
+test('missing remaining Admin monthly budget fails closed when provided',()=>{
+ const quote=buildApifyManualChargeQuote({...base,adminMonthlyRemainingUsd:null});
+ assert.equal(quote.readyForConfirmation,false);
+ assert.ok(quote.blockers.includes('APIFY_ADMIN_MONTHLY_BUDGET_INSUFFICIENT_OR_UNAVAILABLE'));
+});
+test('sufficient verified Admin monthly remaining budget alone cannot approve a run',()=>{
+ const quote=buildApifyManualChargeQuote({...base,adminMonthlyRemainingUsd:3,providerChargeCapVerified:false});
+ assert.equal(quote.readyForConfirmation,false);
+ assert.ok(quote.blockers.includes('APIFY_CHARGE_CAP_NOT_VERIFIED'));
+});
