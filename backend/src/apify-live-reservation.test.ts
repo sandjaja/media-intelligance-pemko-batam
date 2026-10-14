@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type {Pool} from 'pg';
 import {reserveApifyWithLiveLimits} from './apify-live-reservation.js';
-const input={reservationKey:'test',actorId:'clockworks/tiktok-scraper',platform:'tiktok' as const,estimatedUsd:0.2,credentialsVerified:true,actorConfigured:true};
+const input={reservationKey:'test',actorId:'clockworks/tiktok-scraper',platform:'tiktok' as const,estimatedUsd:0.2,credentialsVerified:true,actorConfigured:true,providerChargeCapVerified:true,pricingApproval:{actorId:'clockworks/tiktok-scraper',maximumRunCostUsd:0.2,verifiedAt:new Date().toISOString(),source:'actor-pricing-confirmed' as const,includesAllEventsAndOverheads:true}};
 test('unknown cost estimate fails before database or provider requests',async()=>{
  const pool={query:()=>{throw Error('unexpected database access')}} as unknown as Pool;
  const fetcher=(async()=>{throw Error('unexpected network access')}) as typeof fetch;
@@ -19,7 +19,7 @@ test('unavailable account limits prevent ledger reservation',async()=>{
 
 test('per-actor ceiling blocks excessive estimate before provider access',async()=>{
  const pool={query:async(sql:string)=>sql.includes('SELECT s.settings\n')?{rows:[{settings:{tiktokActor:'clockworks/tiktok-scraper'}}]}:sql.includes('actorMaxCostUsd')?{rows:[{limits:{tiktok_posts:0.5}}]}:{rows:[{budget:'4'}]}} as unknown as Pool;
- const result=await reserveApifyWithLiveLimits(pool,{...input,estimatedUsd:0.6},async()=>{throw Error('unexpected provider access')});
+ const result=await reserveApifyWithLiveLimits(pool,{...input,estimatedUsd:0.6,pricingApproval:{...input.pricingApproval,maximumRunCostUsd:0.6}},async()=>{throw Error('unexpected provider access')});
  assert.equal(result.reason,'APIFY_ACTOR_LIMIT_EXCEEDED');
 });
 
@@ -51,4 +51,20 @@ test('invalid encrypted credential prevents reservation',async()=>{
  const result=await reserveApifyWithLiveLimits(pool,input);
  assert.equal(result.reserved,false);
  assert.equal(result.reason,'APIFY_ACCOUNT_LIMITS_UNAVAILABLE');
+});
+
+test('missing provider cap verification stops before database and network',async()=>{
+ const pool={query:()=>{throw Error('DATABASE_MUST_NOT_BE_TOUCHED')}} as unknown as Pool;
+ const result=await reserveApifyWithLiveLimits(pool,{...input,providerChargeCapVerified:false});
+ assert.equal(result.reason,'APIFY_CHARGE_CAP_NOT_VERIFIED');
+});
+test('unverified pricing estimate stops before database and network',async()=>{
+ const pool={query:()=>{throw Error('DATABASE_MUST_NOT_BE_TOUCHED')}} as unknown as Pool;
+ const result=await reserveApifyWithLiveLimits(pool,{...input,pricingApproval:null});
+ assert.equal(result.reason,'APIFY_PRICING_APPROVAL_REQUIRED');
+});
+test('mismatched approved estimate stops before database and network',async()=>{
+ const pool={query:()=>{throw Error('DATABASE_MUST_NOT_BE_TOUCHED')}} as unknown as Pool;
+ const result=await reserveApifyWithLiveLimits(pool,{...input,estimatedUsd:0.3});
+ assert.equal(result.reason,'APIFY_PRICING_APPROVAL_REQUIRED');
 });
