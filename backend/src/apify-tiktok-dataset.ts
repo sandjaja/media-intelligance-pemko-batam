@@ -37,7 +37,7 @@ export function resolveApifyManualImportLimit(requested:unknown):10|20|50{
  * the confirmed run. Never import arbitrary dataset IDs from browser requests.
  */
 export async function ingestCompletedApifyTikTokDataset(pool:Pool,input:{
- datasetId:string;token:string;confirmedRunId:string;fetcher?:Fetcher;limit?:number
+ datasetId:string;token:string;confirmedRunId:string;fetcher?:Fetcher;limit?:number;manualVideoLimit?:10|20|50
 }){
  if(!/^[a-zA-Z0-9_-]{5,160}$/.test(input.confirmedRunId))throw Error('APIFY_RUN_ID_INVALID');
  await verifyApifyLedgerRun(pool,{runId:input.confirmedRunId,actorId:'clockworks/tiktok-scraper',platform:'tiktok'});
@@ -46,7 +46,10 @@ export async function ingestCompletedApifyTikTokDataset(pool:Pool,input:{
  // Recheck the ledger after remote metadata calls; an operator may have
  // quarantined the reservation while provider verification was in flight.
  await verifyApifyLedgerRun(pool,{runId:input.confirmedRunId,actorId:'clockworks/tiktok-scraper',platform:'tiktok'});
- const items=await fetchApifyTikTokDataset(input);
+ const datasetLimit=input.manualVideoLimit===undefined?input.limit:resolveApifyManualImportLimit(input.manualVideoLimit);
+ if(input.manualVideoLimit!==undefined&&input.limit!==undefined&&input.limit!==datasetLimit)
+  throw Error('APIFY_MANUAL_IMPORT_LIMIT_MISMATCH');
+ const items=await fetchApifyTikTokDataset({...input,limit:datasetLimit});
  // Verify authorization once more immediately before persisting candidates.
  await verifyApifyLedgerRun(pool,{runId:input.confirmedRunId,actorId:'clockworks/tiktok-scraper',platform:'tiktok'});
  const {candidates,rejected}=normalizeApifyTikTokPosts(items);
