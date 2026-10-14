@@ -7,6 +7,7 @@ test('only pay-per-event is a candidate for charge cap verification',()=>{
  assert.equal(parseApifyActorPricing({data:{pricingInfo:{pricingModel:'PRICE_PER_DATASET_ITEM'}}})?.capEligible,false);
  assert.equal(parseApifyActorPricing({data:{pricingInfo:{pricingModel:'FLAT_PRICE_PER_MONTH'}}})?.capEligible,false);
  assert.equal(parseApifyActorPricing({data:{pricingInfo:{pricingModel:'UNRECOGNIZED'}}}),null);
+ assert.equal(parseApifyActorPricing({data:{pricingInfo:{pricingModel:'PAY_PER_EVENT'}}})?.minimalMaxTotalChargeUsd,null);
  assert.equal(parseApifyActorPricing({data:{pricingInfo:{pricingModel:'PAY_PER_EVENT',minimalMaxTotalChargeUsd:-1}}})?.minimalMaxTotalChargeUsd,null);
 });
 test('invalid actor IDs never reach network',async()=>{
