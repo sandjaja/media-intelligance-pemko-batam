@@ -2,7 +2,7 @@
 export type ApifyCostSample={runId:string;status:string;costUsd:number|null;finishedAt:string|null;itemCount:number|null};
 export async function fetchApifyActorCostHistory(input:{token:string;actorId:string;limit?:number;fetcher?:typeof fetch}):Promise<{samples:ApifyCostSample[];averageCostUsd:number|null;costKnownCount:number;partial:boolean;costPerItemUsd:number|null;costPerItemSampleCount:number;estimatedCostsUsd:{'10':number;'20':number;'50':number}|null}>{
  const {token,actorId}=input;
- if(!token?.trim()||!/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+$/.test(actorId))throw Error('APIFY_COST_HISTORY_INVALID_INPUT');
+ if(!token?.trim()||!['clockworks/tiktok-scraper','apify/instagram-scraper'].includes(actorId))throw Error('APIFY_COST_HISTORY_INVALID_INPUT');
  const limit=Math.min(20,Math.max(1,Math.trunc(input.limit??10)));
  const fetcher=input.fetcher??fetch;
  const {resolveApifyActorInternalId}=await import('./apify-actor-identity.js');
