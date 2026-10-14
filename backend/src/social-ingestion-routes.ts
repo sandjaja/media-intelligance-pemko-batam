@@ -265,6 +265,60 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
     }
   });
 
+  // Import a historical run executed directly in the owner's Apify account.
+  // This path is deliberately separate from the paid-run ledger: it cannot
+  // start an Actor or grant budget authorization to a future paid run.
+  app.post('/api/social/collection/apify/import-external',{preHandler:[auth,requireWrite]},async(request,reply)=>{
+    const ctx=request.socialIngestAuth!;
+    if(!ctx.roles.includes('super_admin'))return reply.code(403).send({error:'SUPER_ADMIN_REQUIRED'});
+    const parsed=z.object({platform:z.enum(['tiktok','instagram']),runId:z.string().regex(/^[a-zA-Z0-9_-]{5,160}$/)}).strict().safeParse(request.body);
+    if(!parsed.success)return reply.code(400).send({error:'INVALID_APIFY_EXTERNAL_IMPORT_REQUEST'});
+    const {platform,runId}=parsed.data;
+    const actorId=platform==='tiktok'?'clockworks/tiktok-scraper':'apify/instagram-scraper';
+    try{
+      const {decryptIntegrationCredential}=await import('./integration-credentials.js');
+      const credentials=await pool.query(`SELECT c.credential_ciphertext FROM integration_credentials c
+        JOIN integration_providers p ON p.id=c.provider_id AND p.code='apify' AND p.active=true
+        JOIN organizations o ON o.id=c.organization_id AND o.active=true
+        WHERE c.enabled=true LIMIT 2`);
+      if(credentials.rows.length!==1||!credentials.rows[0]?.credential_ciphertext)
+        return reply.code(503).send({error:'APIFY_CREDENTIAL_UNAVAILABLE'});
+      const token=decryptIntegrationCredential(credentials.rows[0].credential_ciphertext);
+      const {resolveApifyActorInternalId}=await import('./apify-actor-identity.js');
+      const expectedActorInternalId=await resolveApifyActorInternalId({actorId,token});
+      const response=await fetch('https://api.apify.com/v2/actor-runs/'+encodeURIComponent(runId),{
+        headers:{Authorization:'Bearer '+token,Accept:'application/json'},signal:AbortSignal.timeout(20000)});
+      if(!response.ok)return reply.code(502).send({error:'APIFY_EXTERNAL_RUN_LOOKUP_FAILED'});
+      const payload=await response.json() as {data?:{id?:unknown;status?:unknown;defaultDatasetId?:unknown;actId?:unknown}};
+      const run=payload?.data;
+      if(run?.id!==runId||run.status!=='SUCCEEDED'||run.actId!==expectedActorInternalId||
+        typeof run.defaultDatasetId!=='string'||!/^[a-zA-Z0-9_-]{5,160}$/.test(run.defaultDatasetId))
+        return reply.code(409).send({error:'APIFY_EXTERNAL_RUN_NOT_VERIFIED'});
+      const datasetId=run.defaultDatasetId;
+      const {verifyCompletedApifyRunDataset}=await import('./apify-run-dataset-verification.js');
+      await verifyCompletedApifyRunDataset({runId,datasetId,actorId,expectedActorInternalId,token});
+      const items=platform==='tiktok'
+        ?await (await import('./apify-tiktok-dataset.js')).fetchApifyTikTokDataset({datasetId,token})
+        :await (await import('./apify-instagram-dataset.js')).fetchApifyInstagramDataset({datasetId,token});
+      const normalized=platform==='tiktok'
+        ?(await import('./apify-tiktok-post-normalizer.js')).normalizeApifyTikTokPosts(items)
+        :(await import('./apify-instagram-post-normalizer.js')).normalizeApifyInstagramPosts(items);
+      const {loadOrganizationMediaScope}=await import('./organization-media-scope.js');
+      const {classifySocialOrganizationScope}=await import('./social-organization-scope.js');
+      const scope=await loadOrganizationMediaScope(pool);
+      if(!scope)throw Error('APIFY_ORGANIZATION_SCOPE_UNAVAILABLE');
+      const inScope=normalized.candidates.filter(candidate=>classifySocialOrganizationScope({title:candidate.title,content:candidate.content},scope).status!=='OUT_OF_SCOPE');
+      const outOfScope=normalized.candidates.length-inScope.length;
+      const result=inScope.length?await ingestSocialBatch(pool,inScope,'apify-'+platform+'-external'):{received:0,succeeded:0,failed:0,results:[]};
+      await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'APIFY_EXTERNAL_RUN_IMPORT',$2::jsonb)`,
+        [ctx.id,JSON.stringify({platform,runId,datasetItems:items.length,rejected:normalized.rejected,outOfScope,received:result.received,succeeded:result.succeeded,failed:result.failed})]);
+      return reply.send({data:{platform,runId,datasetItems:items.length,rejected:normalized.rejected,outOfScope,...result,billableRunStarted:false,source:'EXTERNAL_APIFY_RUN'}});
+    }catch(error){
+      app.log.error({err:error,platform,runId},'Apify external run import failed');
+      return reply.code(422).send({error:'APIFY_EXTERNAL_RUN_IMPORT_FAILED'});
+    }
+  });
+
   app.get('/api/social/ingestion/status',{preHandler:auth},async(request)=>{
     const ctx=request.socialIngestAuth!;
     const params:unknown[]=[];
