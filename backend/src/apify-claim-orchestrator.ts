@@ -24,7 +24,8 @@ export async function prepareAndClaimApifyRun(pool:Pool,input:{
  if(claimed.reservedUsd===null||
     !Number.isFinite(claimed.reservedUsd)||
     claimed.reservedUsd<prepared.request.query.maxTotalChargeUsd||
-    claimed.reservedUsd>input.configuredMaxUsd!){
+    input.configuredMaxUsd===null||
+    claimed.reservedUsd>input.configuredMaxUsd){
   await markApifyRunUnknown(pool,{reservationKey:input.reservationKey,claimId:input.claimId,
    reason:'CLAIMED_RESERVATION_BELOW_APPROVED_CHARGE_CAP'});
   return{ready:false,reason:'APIFY_CLAIM_AMOUNT_MISMATCH'};
