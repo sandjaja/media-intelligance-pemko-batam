@@ -12,7 +12,7 @@ const base={
  platform:'tiktok' as const,configuredActorId:'clockworks/tiktok-scraper',
  configuredMaxUsd:0.5,collectorEnabled:true,pricingApproval:{actorId:'clockworks/tiktok-scraper',maximumRunCostUsd:0.5,verifiedAt:new Date().toISOString(),source:'actor-pricing-confirmed' as const,includesAllEventsAndOverheads:true},
  claimId:'claim:test12345678',token:'secret',explicitlyConfirmed:false,
- trustedGeographicPlan,selectedVideoLimit:10 as const,
+ selectedVideoLimit:10 as const,
  actorInput:previewGeographicActorInput({actorId:'clockworks/tiktok-scraper',plan:trustedGeographicPlan,maxVideos:10}).proposedInput
 };
 test('executor refuses execution without explicit confirmation',async()=>{
@@ -114,6 +114,10 @@ test('mocked TikTok paid request uses exact approved charge cap and records prov
  const sql:string[]=[];
  const pool={query:async(q:string)=>{
   sql.push(q);
+  if(q.includes('FROM organizations WHERE active=true'))return{rows:[{id:1,name:'Pemko Batam',code:'BATAM'}]};
+  if(q.includes('FROM government_branding'))return{rows:[{city_name:'Batam'}]};
+  if(q.includes('FROM districts'))return{rows:[{name:'Sekupang'}]};
+  if(q.includes('FROM villages')||q.includes('FROM organization_area_aliases')||q.includes('FROM opd ')||q.includes('FROM uptd '))return{rows:[]};
   if(q.startsWith('SELECT'))return{rows:[{actor_id:base.actorId,platform:'tiktok',status:'RESERVED',reserved_usd:'0.500000'}]};
   if(q.includes("status='RESERVED'")&&q.includes("status='RUNNING'"))return{rows:[{reserved_usd:'0.500000'}]};
   if(q.includes('SET run_id=$3'))return{rows:[{id:1}]};
@@ -140,6 +144,10 @@ test('uncertain mocked provider response quarantines claimed reservation',async(
  const sql:string[]=[];
  const pool={query:async(q:string)=>{
   sql.push(q);
+  if(q.includes('FROM organizations WHERE active=true'))return{rows:[{id:1,name:'Pemko Batam',code:'BATAM'}]};
+  if(q.includes('FROM government_branding'))return{rows:[{city_name:'Batam'}]};
+  if(q.includes('FROM districts'))return{rows:[{name:'Sekupang'}]};
+  if(q.includes('FROM villages')||q.includes('FROM organization_area_aliases')||q.includes('FROM opd ')||q.includes('FROM uptd '))return{rows:[]};
   if(q.startsWith('SELECT'))return{rows:[{actor_id:base.actorId,platform:'tiktok',status:'RESERVED',reserved_usd:'0.500000'}]};
   if(q.includes("status='RESERVED'")&&q.includes("status='RUNNING'"))return{rows:[{reserved_usd:'0.500000'}]};
   if(q.includes("SET status='UNKNOWN'"))return{rows:[{id:1}]};
@@ -161,6 +169,10 @@ test('provider starts but ledger confirmation fails: report run id for reconcili
  const sql:string[]=[];
  const pool={query:async(q:string)=>{
   sql.push(q);
+  if(q.includes('FROM organizations WHERE active=true'))return{rows:[{id:1,name:'Pemko Batam',code:'BATAM'}]};
+  if(q.includes('FROM government_branding'))return{rows:[{city_name:'Batam'}]};
+  if(q.includes('FROM districts'))return{rows:[{name:'Sekupang'}]};
+  if(q.includes('FROM villages')||q.includes('FROM organization_area_aliases')||q.includes('FROM opd ')||q.includes('FROM uptd '))return{rows:[]};
   if(q.startsWith('SELECT'))return{rows:[{actor_id:base.actorId,platform:'tiktok',status:'RESERVED',reserved_usd:'0.500000'}]};
   if(q.includes("status='RESERVED'")&&q.includes("status='RUNNING'"))return{rows:[{reserved_usd:'0.500000'}]};
   if(q.includes('SET run_id=$3'))return{rows:[]};
@@ -180,6 +192,10 @@ test('provider starts but ledger confirmation fails: report run id for reconcili
 
 test('ledger exception after provider starts preserves run id and avoids retry',async()=>{
  const pool={query:async(q:string)=>{
+  if(q.includes('FROM organizations WHERE active=true'))return{rows:[{id:1,name:'Pemko Batam',code:'BATAM'}]};
+  if(q.includes('FROM government_branding'))return{rows:[{city_name:'Batam'}]};
+  if(q.includes('FROM districts'))return{rows:[{name:'Sekupang'}]};
+  if(q.includes('FROM villages')||q.includes('FROM organization_area_aliases')||q.includes('FROM opd ')||q.includes('FROM uptd '))return{rows:[]};
   if(q.startsWith('SELECT'))return{rows:[{actor_id:base.actorId,platform:'tiktok',status:'RESERVED',reserved_usd:'0.500000'}]};
   if(q.includes("status='RESERVED'")&&q.includes("status='RUNNING'"))return{rows:[{reserved_usd:'0.500000'}]};
   if(q.includes('SET run_id=$3'))throw Error('SIMULATED_DATABASE_OUTAGE');
@@ -198,6 +214,10 @@ test('ledger exception after provider starts preserves run id and avoids retry',
 
 test('uncertain provider start and failed quarantine returns explicit non-retryable uncertainty',async()=>{
  const pool={query:async(q:string)=>{
+  if(q.includes('FROM organizations WHERE active=true'))return{rows:[{id:1,name:'Pemko Batam',code:'BATAM'}]};
+  if(q.includes('FROM government_branding'))return{rows:[{city_name:'Batam'}]};
+  if(q.includes('FROM districts'))return{rows:[{name:'Sekupang'}]};
+  if(q.includes('FROM villages')||q.includes('FROM organization_area_aliases')||q.includes('FROM opd ')||q.includes('FROM uptd '))return{rows:[]};
   if(q.startsWith('SELECT'))return{rows:[{actor_id:base.actorId,platform:'tiktok',status:'RESERVED',reserved_usd:'0.500000'}]};
   if(q.includes("status='RESERVED'")&&q.includes("status='RUNNING'"))return{rows:[{reserved_usd:'0.500000'}]};
   if(q.includes("SET status='UNKNOWN'"))throw Error('SIMULATED_LEDGER_OUTAGE');
@@ -240,6 +260,10 @@ test('provider HTTP error is treated as uncertain, not a safe retry',async()=>{
  const sql:string[]=[];
  const pool={query:async(q:string)=>{
   sql.push(q);
+  if(q.includes('FROM organizations WHERE active=true'))return{rows:[{id:1,name:'Pemko Batam',code:'BATAM'}]};
+  if(q.includes('FROM government_branding'))return{rows:[{city_name:'Batam'}]};
+  if(q.includes('FROM districts'))return{rows:[{name:'Sekupang'}]};
+  if(q.includes('FROM villages')||q.includes('FROM organization_area_aliases')||q.includes('FROM opd ')||q.includes('FROM uptd '))return{rows:[]};
   if(q.startsWith('SELECT'))return{rows:[{actor_id:base.actorId,platform:'tiktok',status:'RESERVED',reserved_usd:'0.500000'}]};
   if(q.includes("status='RESERVED'")&&q.includes("status='RUNNING'"))return{rows:[{reserved_usd:'0.500000'}]};
   if(q.includes("SET status='UNKNOWN'"))return{rows:[{id:1}]};
@@ -282,16 +306,16 @@ test('executor rejects aggregate TikTok requests above 50 before ledger access',
  assert.equal(result.reason,'APIFY_TIKTOK_GEOGRAPHIC_INPUT_NOT_VERIFIED');
 });
 
-test('paid executor rejects arbitrary in-scope terms without trusted plan match',async()=>{
+test('paid executor fails closed on unavailable tenant plan',async()=>{
  const result=await executeClaimedApifyRun(unreachablePool,{
   ...base,explicitlyConfirmed:true,providerChargeCapVerified:true,
   actorInput:{...base.actorInput,searchQueries:['Batam','Bengkong Batam']}
  });
- assert.equal(result.reason,'APIFY_TIKTOK_INPUT_PLAN_MISMATCH');
+ assert.equal(result.reason,'APIFY_TRUSTED_GEOGRAPHIC_PLAN_INVALID');
 });
-test('paid executor fails closed when trusted geographic plan is absent',async()=>{
+test('paid executor fails closed when selected video limit is absent',async()=>{
  const result=await executeClaimedApifyRun(unreachablePool,{
-  ...base,explicitlyConfirmed:true,providerChargeCapVerified:true,trustedGeographicPlan:undefined
+  ...base,explicitlyConfirmed:true,providerChargeCapVerified:true,selectedVideoLimit:undefined
  });
- assert.equal(result.reason,'APIFY_TRUSTED_GEOGRAPHIC_PLAN_REQUIRED');
+ assert.equal(result.reason,'APIFY_SELECTED_VIDEO_LIMIT_REQUIRED');
 });
