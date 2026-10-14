@@ -9,7 +9,7 @@ export async function reconcileApifyRun(pool:Pool,input:{
  actualUsd:number|null;
  errorMessage?:string;
 }):Promise<{updated:boolean;reason:string}>{
- if(!input.reservationKey||!input.runId||!['RUNNING','SUCCEEDED','FAILED','UNKNOWN'].includes(input.status))
+ if(!input.reservationKey||!input.runId||input.runId.startsWith('claim:')||!['RUNNING','SUCCEEDED','FAILED','UNKNOWN'].includes(input.status))
   return{updated:false,reason:'APIFY_RECONCILE_INVALID'};
  if(input.actualUsd!==null&&(!Number.isFinite(input.actualUsd)||input.actualUsd<0))
   return{updated:false,reason:'APIFY_RECONCILE_INVALID_COST'};
@@ -21,9 +21,10 @@ export async function reconcileApifyRun(pool:Pool,input:{
       finished_at=CASE WHEN $3 IN ('SUCCEEDED','FAILED') THEN NOW() ELSE NULL END,
       updated_at=NOW()
   WHERE reservation_key=$1
-    AND (run_id IS NULL OR run_id=$2)
-    AND status IN ('RESERVED','RUNNING','UNKNOWN')
+    AND run_id=$2
+    AND status IN ('RUNNING','UNKNOWN')
     AND ($4::numeric IS NULL OR actual_usd IS NULL OR $4::numeric >= actual_usd)
+    AND ($3 NOT IN ('SUCCEEDED','FAILED') OR $4::numeric IS NOT NULL)
   RETURNING id`,
   [input.reservationKey,input.runId,input.status,input.actualUsd,input.errorMessage??null]);
  return result.rowCount?{updated:true,reason:'APIFY_RECONCILED'}:{updated:false,reason:'APIFY_RESERVATION_NOT_FOUND_OR_FINAL'};
