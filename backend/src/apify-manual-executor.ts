@@ -3,7 +3,7 @@ import {prepareAndClaimApifyRun} from './apify-claim-orchestrator.js';
 import {confirmApifyProviderRun,markApifyRunUnknown} from './apify-run-lifecycle.js';
 import {conservativeApifyRunEstimate,type ApifyPricingApproval} from './apify-pricing-approval.js';
 import {previewGeographicActorInput} from './apify-geographic-input.js';
-import type {GeographicSearchPlan} from './apify-geographic-search.js';
+import {loadApifyGeographicSearchPlan} from './apify-geographic-search.js';
 
 /** Execute one explicitly approved, previously RESERVED Apify run.
  * This is an opt-in executor primitive, NOT a route or scheduler. The caller
@@ -15,7 +15,7 @@ export async function executeClaimedApifyRun(pool:Pool,input:{
  configuredActorId:string;configuredMaxUsd:number|null;
  collectorEnabled:boolean;pricingApproval:ApifyPricingApproval|null;
  claimId:string;token:string;explicitlyConfirmed:boolean;
- actorInput:Record<string,unknown>;trustedGeographicPlan?:GeographicSearchPlan;selectedVideoLimit?:10|20|50;
+ actorInput:Record<string,unknown>;selectedVideoLimit?:10|20|50;
  providerChargeCapVerified?:boolean;fetcher?:typeof fetch;
 }):Promise<{started:boolean;reason:string;providerRunId?:string}>{
  if(!input.explicitlyConfirmed)return{started:false,reason:'APIFY_USER_CONFIRMATION_REQUIRED'};
@@ -57,13 +57,14 @@ export async function executeClaimedApifyRun(pool:Pool,input:{
     input.actorInput.shouldDownloadVideos!==false)
   return{started:false,reason:'APIFY_TIKTOK_GEOGRAPHIC_INPUT_NOT_VERIFIED'};
  // Server-origin geographic plan must match the exact proposed paid input.
- // Caller must load this plan from the tenant database, never from request JSON.
- if(!input.trustedGeographicPlan||!input.selectedVideoLimit)
-  return{started:false,reason:'APIFY_TRUSTED_GEOGRAPHIC_PLAN_REQUIRED'};
+ // Reload the plan from the tenant database; never accept a browser-provided plan.
+ if(!input.selectedVideoLimit)
+  return{started:false,reason:'APIFY_SELECTED_VIDEO_LIMIT_REQUIRED'};
  let proposed:Record<string,unknown>;
  try{
+  const plan=await loadApifyGeographicSearchPlan(pool);
   proposed=previewGeographicActorInput({actorId:input.actorId,
-   plan:input.trustedGeographicPlan,maxQueries:5,maxVideos:input.selectedVideoLimit}).proposedInput;
+   plan,maxQueries:5,maxVideos:input.selectedVideoLimit}).proposedInput;
  }catch{
   return{started:false,reason:'APIFY_TRUSTED_GEOGRAPHIC_PLAN_INVALID'};
  }
