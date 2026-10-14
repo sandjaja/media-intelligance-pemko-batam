@@ -42,7 +42,7 @@ test('verified cash credits and both monthly budgets are required together',()=>
 });
 
 test('verified postpaid billing does not require prepaid cash credits',()=>{
- const result=evaluateApifyManualBudget({...base,billingMode:'POSTPAID',cashBalanceUsd:null});
+ const result=evaluateApifyManualBudget({...base,billingMode:'POSTPAID',billingModeVerified:true,cashBalanceUsd:null});
  assert.equal(result.readyForConfirmation,true);
  assert.equal(result.cashBalanceVerified,false);
 });
@@ -50,4 +50,10 @@ test('unknown billing mode cannot be assumed postpaid',()=>{
  const result=evaluateApifyManualBudget({...base,billingMode:'UNKNOWN',cashBalanceUsd:null});
  assert.equal(result.readyForConfirmation,false);
  assert.ok(result.blockers.includes('APIFY_CASH_BALANCE_UNVERIFIED'));
+});
+
+test('unverified postpaid flag cannot bypass cash balance checks',()=>{
+ const result=evaluateApifyManualBudget({...base,billingMode:'POSTPAID',cashBalanceUsd:null});
+ assert.equal(result.readyForConfirmation,false);
+ assert.ok(result.blockers.includes('APIFY_BILLING_MODE_UNVERIFIED'));
 });
