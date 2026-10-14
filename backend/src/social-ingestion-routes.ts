@@ -271,7 +271,7 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
   app.post('/api/social/collection/apify/import-external',{preHandler:[auth,requireWrite]},async(request,reply)=>{
     const ctx=request.socialIngestAuth!;
     if(!ctx.roles.includes('super_admin')&&!ctx.roles.includes('humas'))return reply.code(403).send({error:'HUMAS_OR_SUPER_ADMIN_REQUIRED'});
-    const parsed=z.object({platform:z.enum(['tiktok','instagram']),runId:z.string().regex(/^[a-zA-Z0-9_-]{5,160}$/)}).strict().safeParse(request.body);
+    const parsed=z.object({platform:z.enum(['tiktok','instagram']),runId:z.string().regex(/^[a-zA-Z0-9_-]{5,160}$/),manualVideoLimit:z.union([z.literal(10),z.literal(20),z.literal(50)]).optional()}).strict().safeParse(request.body);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_APIFY_EXTERNAL_IMPORT_REQUEST'});
     const {platform,runId}=parsed.data;
     const actorId=platform==='tiktok'?'clockworks/tiktok-scraper':'apify/instagram-scraper';
@@ -298,8 +298,8 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
       const {verifyCompletedApifyRunDataset}=await import('./apify-run-dataset-verification.js');
       await verifyCompletedApifyRunDataset({runId,datasetId,actorId,expectedActorInternalId,token});
       const items=platform==='tiktok'
-        ?await (await import('./apify-tiktok-dataset.js')).fetchApifyTikTokDataset({datasetId,token})
-        :await (await import('./apify-tiktok-dataset.js')).fetchApifyTikTokDataset({datasetId,token});
+        ?await (await import('./apify-tiktok-dataset.js')).fetchApifyTikTokDataset({datasetId,token,limit:parsed.data.manualVideoLimit})
+        :await (await import('./apify-tiktok-dataset.js')).fetchApifyTikTokDataset({datasetId,token,limit:parsed.data.manualVideoLimit});
       const normalized=platform==='tiktok'
         ?(await import('./apify-tiktok-post-normalizer.js')).normalizeApifyTikTokPosts(items)
         :(await import('./apify-instagram-post-normalizer.js')).normalizeApifyInstagramPosts(items);
@@ -311,7 +311,7 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
       const outOfScope=normalized.candidates.length-inScope.length;
       const result=inScope.length?await ingestSocialBatch(pool,inScope,'apify-'+platform+'-external'):{received:0,succeeded:0,failed:0,results:[]};
       await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'APIFY_EXTERNAL_RUN_IMPORT',$2::jsonb)`,
-        [ctx.id,JSON.stringify({platform,runId,datasetItems:items.length,rejected:normalized.rejected,outOfScope,received:result.received,succeeded:result.succeeded,failed:result.failed})]);
+        [ctx.id,JSON.stringify({platform,runId,manualVideoLimit:parsed.data.manualVideoLimit??null,datasetItems:items.length,rejected:normalized.rejected,outOfScope,received:result.received,succeeded:result.succeeded,failed:result.failed})]);
       return reply.send({data:{platform,runId,datasetItems:items.length,rejected:normalized.rejected,outOfScope,...result,billableRunStarted:false,source:'EXTERNAL_APIFY_RUN'}});
     }catch(error){
       app.log.error({err:error,platform,runId},'Apify external run import failed');
