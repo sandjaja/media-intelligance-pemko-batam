@@ -208,7 +208,7 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
     // Preserve the existing YouTube path; paid Apify platforms remain preview-only.
     const platform=selection.data.platform;
     const policy=resolveManualSocialCollectionPolicy(platform);
-     const youtube=policy.runYouTube;
+    const youtube=policy.runYouTube;
     const result=youtube?await runCollection(pool,'MANUAL',String(ctx.id),['social']):{ok:true,skipped:true,reason:'YOUTUBE_NOT_SELECTED'};
     const apifyPlatforms=policy.previewApifyPlatforms;
     const apify=await Promise.all(apifyPlatforms.map(async selected=>{
@@ -220,8 +220,8 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
     // Explicit API contract: this endpoint is preview-only for Apify, even if
     // a browser displays a consent checkbox. No paid confirmation is issued.
     const response={...result,selection:platform,apify,billableRunStarted:false,
-      apifyExecution:{mode:'PREVIEW_ONLY' as const,confirmationAvailable:false,
-        confirmationRequiredForPaidRun:true,paidRunEndpointConnected:false}};
+      apifyExecution:{mode:policy.apifyExecutionMode,paidApifyAuthorized:policy.paidApifyAuthorized,
+        confirmationAvailable:false,confirmationRequiredForPaidRun:true,paidRunEndpointConnected:false}};
     await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'SOCIAL_MANUAL_COLLECTION',$2::jsonb)`,[ctx.id,JSON.stringify({selection:platform,runId:result.runId??null,status:result.status??null,skipped:result.skipped??false,reason:result.reason??null,apify:apify.map(item=>({platform:item.platform,ready:item.ready,reason:item.reason,collectors:item.collectors})),billableRunStarted:false})]);
     return reply.send({data:response});
   });
