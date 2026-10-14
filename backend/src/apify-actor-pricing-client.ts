@@ -7,6 +7,9 @@ export function parseApifyActorPricing(payload:unknown):ApifyActorPricingSnapsho
  const actor=data as Record<string,unknown>;
  // GET /v2/acts/:actorId returns pricingInfos (historical records), not
  // run-level pricingInfo. Only use records already effective at this instant.
+ // A malformed pricingInfos field is not evidence that historical prices
+ // are absent; reject it instead of trusting a fallback current price.
+ if(actor.pricingInfos!==undefined&&!Array.isArray(actor.pricingInfos))return null;
  const records=Array.isArray(actor.pricingInfos)?actor.pricingInfos:[];
  const effective=records.filter((entry):entry is Record<string,unknown>=>{
   if(!entry||typeof entry!=='object'||Array.isArray(entry))return false;
