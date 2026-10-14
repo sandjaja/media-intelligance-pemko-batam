@@ -30,6 +30,7 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
     const ctx=request.socialIngestAuth!;
     if(!ctx.roles.includes('super_admin')&&!ctx.roles.includes('humas'))return reply.code(403).send({error:'HUMAS_OR_SUPER_ADMIN_REQUIRED'});
   };
+  await (await import('./apify-active-collection.js')).registerActiveApifyRoutes(app,pool,{auth,requireWrite});
   const canReadAll=(ctx:AuthorizationContext)=>hasPermission(ctx,'platform.admin')||hasPermission(ctx,'intelligence.read.all');
 
   const itemSchema=z.object({
