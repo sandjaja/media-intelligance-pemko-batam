@@ -24,3 +24,11 @@ test('TikTok and Instagram manual selection only previews, never starts YouTube 
   assert.equal(policy.paidApifyAuthorized,false);
  }
 });
+
+test('combined Apify selection previews both platforms without running YouTube or paid Actors',()=>{
+ const policy=resolveManualSocialCollectionPolicy('apify');
+ assert.equal(policy.runYouTube,false);
+ assert.deepEqual(policy.previewApifyPlatforms,['tiktok','instagram']);
+ assert.equal(policy.apifyExecutionMode,'PREVIEW_ONLY');
+ assert.equal(policy.paidApifyAuthorized,false);
+});
