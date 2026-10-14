@@ -343,3 +343,17 @@ test('direct paid executor refuses approval for another Actor even with confirma
  assert.equal(result.reason,'APIFY_PRICING_APPROVAL_REQUIRED');
  assert.equal(networkCalled,false);
 });
+
+test('paid executor rejects out-of-range video limits before database and network',async()=>{
+ for(const selectedVideoLimit of [0,11,100,NaN,undefined]){
+  let called=false;
+  const result=await executeClaimedApifyRun(unreachablePool,{
+   ...base,explicitlyConfirmed:true,providerChargeCapVerified:true,
+   selectedVideoLimit:selectedVideoLimit as 10,
+   fetcher:async()=>{called=true;throw Error('NETWORK_MUST_NOT_BE_TOUCHED')}
+  });
+  assert.equal(result.started,false);
+  assert.equal(result.reason,'APIFY_SELECTED_VIDEO_LIMIT_INVALID');
+  assert.equal(called,false);
+ }
+});
