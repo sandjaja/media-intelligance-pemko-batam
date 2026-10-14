@@ -26,3 +26,8 @@ test('rejects geographic terms outside active organization city',()=>{
  const invalid={...plan,queries:['Batam','Jakarta','Sekupang Batam']};
  assert.throws(()=>previewGeographicActorInput({actorId:'clockworks/tiktok-scraper',plan:invalid}),/APIFY_GEOGRAPHIC_QUERY_OUT_OF_SCOPE/);
 });
+
+test('accepts city token in multiword scoped search query',()=>{
+ const result=previewGeographicActorInput({actorId:'clockworks/tiktok-scraper',plan,maxQueries:3});
+ assert.deepEqual(result.searchTerms,['Batam','Sekupang Batam','Batu Aji Batam']);
+});
