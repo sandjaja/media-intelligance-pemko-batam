@@ -65,8 +65,14 @@ export async function executeClaimedApifyRun(pool:Pool,input:{
    throw new Error('APIFY_START_RUN_ID_UNVERIFIED');
   providerRunId=payload.data.id;
  }catch{
-  await markApifyRunUnknown(pool,{reservationKey:input.reservationKey,claimId:input.claimId,
-   reason:'APIFY_START_RESPONSE_UNCERTAIN'});
+  // The provider might have accepted the POST even if its response failed.
+  // A database outage during quarantine must not hide that uncertainty.
+  try{
+   await markApifyRunUnknown(pool,{reservationKey:input.reservationKey,claimId:input.claimId,
+    reason:'APIFY_START_RESPONSE_UNCERTAIN'});
+  }catch{
+   return{started:false,reason:'APIFY_START_UNKNOWN_LEDGER_UNAVAILABLE'};
+  }
   return{started:false,reason:'APIFY_START_UNKNOWN_RECONCILIATION_REQUIRED'};
  }
  // Provider already returned a run id. A ledger error must not propagate as
