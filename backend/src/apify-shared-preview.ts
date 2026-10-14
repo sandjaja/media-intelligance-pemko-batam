@@ -10,7 +10,8 @@ export async function previewApifyPlatform(pool:Pool,input:{
 }):Promise<{configured:boolean;reason:string;collectors:{kind:string;actorId:string}[]}>{
  const configured=await loadApifyAdminCollectorSettings(pool);
  if(!configured.length)return{configured:false,reason:'APIFY_ADMIN_COLLECTORS_UNAVAILABLE',collectors:[]};
- const selected=configured.filter(c=>c.enabled&&c.kind.startsWith(input.platform+'_'));
+ const priorities=input.platform==='instagram'?['instagram_posts','instagram_comments','instagram_hashtag']:['tiktok_posts','tiktok_comments','tiktok_hashtag'];
+ const selected=configured.filter(c=>c.enabled&&priorities.includes(c.kind)).sort((a,b)=>priorities.indexOf(a.kind)-priorities.indexOf(b.kind));
  const collectors=selected.map(c=>({kind:c.kind,actorId:c.actorId}));
  const command:ApifyCollectionCommand={...input,collectorKinds:collectors.map(c=>c.kind)};
  const decision=validateApifyCollectionCommand(command);
