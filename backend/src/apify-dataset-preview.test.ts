@@ -17,3 +17,9 @@ test('read-only Apify dataset preview normalizes items without starting Actor',a
 test('dataset preview rejects malformed dataset IDs before any fetch',async()=>{
  await assert.rejects(previewApifyDataset({token:'secret',datasetId:'../runs',actorRunId:'12345678',platform:'instagram',kind:'posts'}),/INVALID_APIFY_DATASET_IDENTIFIER/);
 });
+
+test('dataset preview rejects over-limit provider response without accepting candidates',async()=>{
+ const fetcher=async()=>new Response(JSON.stringify(Array.from({length:11},(_,i)=>({id:'v'+i,text:'Batam'}))),{status:200});
+ await assert.rejects(previewApifyDataset({token:'secret',datasetId:'abcdefgh',actorRunId:'12345678',
+  platform:'tiktok',kind:'posts',limit:10,fetcher:fetcher as typeof fetch}),/APIFY_DATASET_LIMIT_EXCEEDED/);
+});
