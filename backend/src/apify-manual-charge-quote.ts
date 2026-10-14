@@ -1,5 +1,11 @@
 import {conservativeApifyRunEstimate,type ApifyPricingApproval} from './apify-pricing-approval.js';
 
+/** Apify documents maxTotalChargeUsd as a total-cost cap for all pricing
+ * models: https://docs.apify.com/api/v2/actors-runs-post
+ * This is general API evidence, NOT proof that an individual Actor request,
+ * pricing approval, or run-specific provider cap has been verified.
+ * Keep providerChargeCapVerified false until trusted server checks are wired.
+ */
 /** Read-only server-side decision support. Never authorizes or starts an Actor. */
 export function buildApifyManualChargeQuote(input:{
  actorId:string;configuredActorId:string;configuredMaxUsd:number|null;
