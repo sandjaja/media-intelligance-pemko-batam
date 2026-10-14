@@ -27,7 +27,7 @@ test('unconfirmed provisional claim never triggers provider GET or ledger update
  assert.equal(x.queries.length,1);
 });
 test('unknown final cost cannot finalize ledger',async()=>{
- const x=setup(run,undefined);
+ const x=setup(run,null);
  const result=await reconcileUnknownApifyRun(x.pool,{reservationKey:key,token:'token',fetchImpl:x.fetchImpl});
  assert.equal(result.updated,false);
  assert.equal(x.queries.length,1);
