@@ -153,3 +153,24 @@ test('uncertain mocked provider response quarantines claimed reservation',async(
  assert.ok(sql.some(q=>q.includes("SET status='UNKNOWN'")));
  assert.ok(!sql.some(q=>q.includes('SET run_id=$3')));
 });
+
+test('provider starts but ledger confirmation fails: report run id for reconciliation',async()=>{
+ const sql:string[]=[];
+ const pool={query:async(q:string)=>{
+  sql.push(q);
+  if(q.startsWith('SELECT'))return{rows:[{actor_id:base.actorId,platform:'tiktok',status:'RESERVED',reserved_usd:'0.500000'}]};
+  if(q.includes("status='RESERVED'")&&q.includes("status='RUNNING'"))return{rows:[{reserved_usd:'0.500000'}]};
+  if(q.includes('SET run_id=$3'))return{rows:[]};
+  throw Error('UNEXPECTED_SQL');
+ }} as unknown as Pool;
+ let calls=0;
+ const result=await executeClaimedApifyRun(pool,{
+  ...base,explicitlyConfirmed:true,providerChargeCapVerified:true,
+  fetcher:async()=>{calls++;return{ok:true,json:async()=>({data:{id:'provider_run_67890'}})} as Response}
+ });
+ assert.equal(result.started,false);
+ assert.equal(result.reason,'APIFY_PROVIDER_STARTED_LEDGER_CONFIRMATION_FAILED');
+ assert.equal(result.providerRunId,'provider_run_67890');
+ assert.equal(calls,1);
+ assert.ok(sql.some(q=>q.includes('SET run_id=$3')));
+});
