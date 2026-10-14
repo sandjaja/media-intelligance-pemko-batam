@@ -19,3 +19,10 @@ test('missing ledger fails closed rather than reporting zero spend',async()=>{
  const pool={query:async()=>{throw Error('relation missing')}} as unknown as Pool;
  assert.equal(await loadApifyMonthlyLedgerCommitment(pool),null);
 });
+
+test('invalid or ambiguous ledger totals fail closed',async()=>{
+ const ambiguous={query:async()=>({rows:[{committed:'0'},{committed:'1'}]})} as unknown as Pool;
+ assert.equal(await loadApifyMonthlyLedgerCommitment(ambiguous),null);
+ const invalid={query:async()=>({rows:[{committed:'not-a-number'}]})} as unknown as Pool;
+ assert.equal(await loadApifyMonthlyLedgerCommitment(invalid),null);
+});
