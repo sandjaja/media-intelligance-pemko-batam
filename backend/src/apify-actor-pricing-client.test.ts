@@ -26,3 +26,12 @@ test('pricing lookup uses canonical tilde Actor path and GET only',async()=>{
  assert.equal(called,true);
  assert.equal(result?.pricingModel,'PAY_PER_EVENT');
 });
+
+test('pricing lookup rejects alternate separators and backslashes',async()=>{
+ for(const actorId of ['clockworks~tiktok-scraper','clockworks\\tiktok-scraper','clockworks//tiktok-scraper']){
+  let called=false;
+  const result=await fetchApifyActorPricing(actorId,'secret',async()=>{called=true;throw Error('unexpected request')});
+  assert.equal(result,null);
+  assert.equal(called,false);
+ }
+});
