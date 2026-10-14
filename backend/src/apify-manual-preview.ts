@@ -4,11 +4,12 @@ import {loadApifyAdminBudget} from './apify-admin-budget.js';
 import {loadApifyAdminCollectorSettings} from './apify-admin-collector-settings.js';
 import {decryptIntegrationCredential} from './integration-credentials.js';
 import {inspectApifyActorPricing,type ApifyPricingLookup} from './apify-actor-pricing-client.js';
+import {buildApifyManualChargeQuote} from './apify-manual-charge-quote.js';
 
 /** Read-only manual preview using the same authorization scope as scheduler. */
 export async function previewManualApifyCollection(pool:Pool,input:{
  platform:'tiktok'|'instagram';requestedBy:string;
-}):Promise<{ready:false;reason:string;collectors:string[];actorDetails:{kind:string;actorId:string;adminMaxCostUsd:number|null;pricingModel:string|null;minimumChargeUsd:number|null;pricingCapCandidate:boolean;pricingLookupStatus:ApifyPricingLookup['reason']|'CREDENTIAL_UNAVAILABLE';pricingMetadataShape:string|null}[];billableRunStarted:false;requiresExplicitConfirmation:true;adminMonthlyBudgetUsd:number|null;executionBlockers:string[]}>{
+}):Promise<{ready:false;reason:string;collectors:string[];actorDetails:{kind:string;actorId:string;adminMaxCostUsd:number|null;pricingModel:string|null;minimumChargeUsd:number|null;pricingCapCandidate:boolean;pricingLookupStatus:ApifyPricingLookup['reason']|'CREDENTIAL_UNAVAILABLE';pricingMetadataShape:string|null}[];billableRunStarted:false;requiresExplicitConfirmation:true;adminMonthlyBudgetUsd:number|null;executionBlockers:string[];chargeQuotes:{kind:string;actorId:string;readyForConfirmation:boolean;maximumChargeUsd:number|null;adminLimitUsd:number|null;monthlyHeadroomUsd:number|null;blockers:string[]}[]}>{
  const result=await previewApifyPlatform(pool,{trigger:'manual',platform:input.platform,requestedBy:input.requestedBy});
  // Display-only monthly budget; it is not a verified per-Actor price or authorization.
  const adminMonthlyBudgetUsd=await loadApifyAdminBudget(pool).catch(()=>null);
@@ -45,10 +46,17 @@ export async function previewManualApifyCollection(pool:Pool,input:{
  if(actorDetails.some(c=>c.adminMaxCostUsd===null))executionBlockers.push('APIFY_ACTOR_LIMIT_UNAVAILABLE');
  if(actorDetails.some(c=>!c.pricingModel))executionBlockers.push('APIFY_ACTOR_PRICING_METADATA_UNAVAILABLE');
  if(actorDetails.some(c=>!c.pricingCapCandidate))executionBlockers.push('APIFY_ACTOR_PRICING_UNAVAILABLE_OR_UNSUPPORTED');
+ // Quote uses only server-side verified inputs. Preview metadata is not an
+ // approved upper bound and cannot establish provider-enforced billing caps.
+ // Never accept charge approval or cap verification from this HTTP request.
+ const chargeQuotes=actorDetails.map(actor=>({kind:actor.kind,actorId:actor.actorId,
+  ...buildApifyManualChargeQuote({actorId:actor.actorId,configuredActorId:actor.actorId,
+   configuredMaxUsd:actor.adminMaxCostUsd,collectorEnabled:result.configured,
+   pricingApproval:null,providerChargeCapVerified:false,monthlyHeadroomUsd:null})}));
  // Neither verified Actor pricing nor provider-enforced caps are wired to the
  // manual endpoint yet. Do not advertise payment readiness based on Admin limits.
  executionBlockers.push('APIFY_PRICING_NOT_VERIFIED','APIFY_CHARGE_CAP_NOT_VERIFIED','APIFY_MANUAL_EXECUTOR_NOT_CONNECTED');
  return{ready:false,reason:result.configured?'APIFY_MANUAL_EXECUTOR_NOT_CONNECTED':result.reason,
   collectors:result.collectors.map(c=>c.kind),actorDetails,
-  billableRunStarted:false,requiresExplicitConfirmation:true,adminMonthlyBudgetUsd,executionBlockers};
+  billableRunStarted:false,requiresExplicitConfirmation:true,adminMonthlyBudgetUsd,executionBlockers,chargeQuotes};
 }
