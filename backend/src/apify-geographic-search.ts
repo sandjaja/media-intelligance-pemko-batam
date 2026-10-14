@@ -29,5 +29,24 @@ export function buildGeographicSearchPlan(scope:OrganizationMediaScope):Geograph
 export async function loadApifyGeographicSearchPlan(pool:Pool):Promise<GeographicSearchPlan>{
  const scope=await loadOrganizationMediaScope(pool);
  if(!scope)throw Error('APIFY_ORGANIZATION_SCOPE_UNAVAILABLE');
- return buildGeographicSearchPlan(scope);
+ const base=buildGeographicSearchPlan(scope);
+ const city=base.city,seen=new Set<string>(),queries:string[]=[];
+ const add=(value:unknown)=>{
+  const term=String(value??'').normalize('NFKC').replace(/\s+/g,' ').trim();
+  if(term.length<3||term.length>75||! /^[\p{L}\p{N} .'-]+$/u.test(term))return;
+  const query=term.toLocaleLowerCase('id').includes(city.toLocaleLowerCase('id'))?term:term+' '+city;
+  const key=query.toLocaleLowerCase('id');
+  if(query.length<=100&&!seen.has(key)){seen.add(key);queries.push(query);}
+ };
+ add(city);
+ try{
+  const {rows}=await pool.query("SELECT DISTINCT k.keyword FROM issues i JOIN issue_keywords ik ON ik.issue_id=i.id AND ik.keyword_role='PRIMARY' JOIN keywords k ON k.id=ik.keyword_id AND k.active=true WHERE i.organization_id=$1 AND LOWER(i.status) IN ('watch','active') ORDER BY k.keyword LIMIT 12",[scope.organizationId]);
+  for(const row of rows)add(row.keyword);
+ }catch{/* Geographic discovery remains available if issue lookup fails. */}
+ try{
+  const {rows}=await pool.query("SELECT keyword FROM keywords WHERE organization_id=$1 AND active=true ORDER BY priority DESC NULLS LAST,keyword LIMIT 12",[scope.organizationId]);
+  for(const row of rows)add(row.keyword);
+ }catch{/* Geographic discovery remains available if keyword lookup fails. */}
+ for(const term of base.queries.slice(1))add(term);
+ return {...base,queries:queries.slice(0,100)};
 }
