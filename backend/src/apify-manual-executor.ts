@@ -42,7 +42,7 @@ export async function executeClaimedApifyRun(pool:Pool,input:{
  // by the eventual server route; arbitrary hashtags or empty searches fail closed.
  const terms=input.actorInput.searchQueries;
  if(!Array.isArray(terms)||terms.length<1||terms.length>5||
-    terms.some(term=>typeof term!=='string'||term.length<3||term.length>100||!/(?:^|\\s)batam(?:$|\\s)/i.test(term))||
+    terms.some(term=>typeof term!=='string'||term.length<3||term.length>100||!/(?:^|\s)batam(?:$|\s)/i.test(term))||
     input.actorInput.searchSection!=='/video'||
     input.actorInput.resultsPerPage!==5||
     input.actorInput.commentsPerPost!==0||
