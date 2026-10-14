@@ -106,3 +106,29 @@ test('invalid claim identifier is rejected before database or provider access',a
  assert.equal(result.started,false);
  assert.equal(result.reason,'APIFY_CLAIM_ID_INVALID');
 });
+
+test('mocked TikTok paid request uses exact approved charge cap and records provider run',async()=>{
+ const sql:string[]=[];
+ const pool={query:async(q:string)=>{
+  sql.push(q);
+  if(q.startsWith('SELECT'))return{rows:[{actor_id:base.actorId,platform:'tiktok',status:'RESERVED',reserved_usd:'0.500000'}]};
+  if(q.includes("status='RESERVED'")&&q.includes("status='RUNNING'"))return{rows:[{reserved_usd:'0.500000'}]};
+  if(q.includes('SET run_id=$3'))return{rows:[{id:1}]};
+  throw Error('UNEXPECTED_SQL');
+ }} as unknown as Pool;
+ let calls=0;
+ const result=await executeClaimedApifyRun(pool,{
+  ...base,explicitlyConfirmed:true,providerChargeCapVerified:true,
+  fetcher:async(input,init)=>{
+   calls++;
+   const url=new URL(String(input));
+   assert.equal(url.searchParams.get('maxTotalChargeUsd'),'0.5');
+   assert.equal(init?.method,'POST');
+   return{ok:true,json:async()=>({data:{id:'provider_run_12345'}})} as Response;
+  }
+ });
+ assert.equal(result.started,true);
+ assert.equal(result.providerRunId,'provider_run_12345');
+ assert.equal(calls,1);
+ assert.ok(sql.some(q=>q.includes('SET run_id=$3')));
+});
