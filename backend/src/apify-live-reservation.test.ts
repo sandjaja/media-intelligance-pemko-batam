@@ -45,3 +45,10 @@ test('unavailable balance never reaches paid reservation',async()=>{
  assert.equal(result.reserved,false);
  assert.equal(result.reason,'APIFY_ACCOUNT_LIMITS_UNAVAILABLE');
 });
+
+test('invalid encrypted credential prevents reservation',async()=>{
+ const pool={query:async(sql:string)=>sql.includes('SELECT s.settings\n')?{rows:[{settings:{tiktokActor:'clockworks/tiktok-scraper'}}]}:sql.includes('actorMaxCostUsd')?{rows:[{limits:{tiktok_posts:0.5}}]}:sql.includes('credential_ciphertext')?{rows:[{credential_ciphertext:'invalid'}]}:{rows:[{budget:'4'}]},connect:()=>{throw Error('unexpected reservation')}} as unknown as Pool;
+ const result=await reserveApifyWithLiveLimits(pool,input);
+ assert.equal(result.reserved,false);
+ assert.equal(result.reason,'APIFY_ACCOUNT_LIMITS_UNAVAILABLE');
+});
