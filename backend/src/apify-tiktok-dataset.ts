@@ -1,6 +1,7 @@
 import type {Pool} from 'pg';
 import {verifyCompletedApifyRunDataset} from './apify-run-dataset-verification.js';
 import {resolveApifyActorInternalId} from './apify-actor-identity.js';
+import {verifyApifyLedgerRun} from './apify-ledger-run-verification.js';
 import {ingestSocialBatch} from './social-collector.js';
 import {normalizeApifyTikTokPosts} from './apify-tiktok-post-normalizer.js';
 import {loadOrganizationMediaScope} from './organization-media-scope.js';
@@ -29,6 +30,7 @@ export async function ingestCompletedApifyTikTokDataset(pool:Pool,input:{
  datasetId:string;token:string;confirmedRunId:string;fetcher?:Fetcher;limit?:number
 }){
  if(!/^[a-zA-Z0-9_-]{5,160}$/.test(input.confirmedRunId))throw Error('APIFY_RUN_ID_INVALID');
+ await verifyApifyLedgerRun(pool,{runId:input.confirmedRunId,actorId:'clockworks/tiktok-scraper',platform:'tiktok'});
  const expectedActorInternalId=await resolveApifyActorInternalId({actorId:'clockworks/tiktok-scraper',token:input.token,fetcher:input.fetcher});
  await verifyCompletedApifyRunDataset({runId:input.confirmedRunId,datasetId:input.datasetId,actorId:'clockworks/tiktok-scraper',expectedActorInternalId,token:input.token,fetcher:input.fetcher});
  const items=await fetchApifyTikTokDataset(input);
