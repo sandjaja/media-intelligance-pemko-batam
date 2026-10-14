@@ -33,8 +33,10 @@ export async function previewManualApifyCollection(pool:Pool,input:{
    actor.geographicInputReady=proposal.searchTerms.length>0;
    actor.geographicInputReason=actor.geographicInputReady?'APIFY_GEOGRAPHIC_PLAN_PREPARED':'APIFY_GEOGRAPHIC_PLAN_EMPTY';
   }
- }catch{
-  for(const actor of actorDetails)actor.geographicInputReason='APIFY_GEOGRAPHIC_PLAN_UNAVAILABLE';
+ }catch(error){
+  const reason=error instanceof Error?error.message:'APIFY_GEOGRAPHIC_PLAN_UNAVAILABLE';
+  const safeReason=/^APIFY_[A-Z0-9_]+$/.test(reason)?reason:'APIFY_GEOGRAPHIC_PLAN_UNAVAILABLE';
+  for(const actor of actorDetails)actor.geographicInputReason=safeReason;
  }
  // Read-only provider metadata. Missing credentials or failed lookups never authorize a run.
  let credentialReadFailed=false;
