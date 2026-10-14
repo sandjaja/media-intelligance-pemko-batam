@@ -1,3 +1,4 @@
+import {resolveManualSocialCollectionPolicy} from './social-manual-collection-policy.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
@@ -206,9 +207,10 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
     if(!selection.success)return reply.code(400).send({error:'INVALID_SOCIAL_COLLECTION_PLATFORM'});
     // Preserve the existing YouTube path; paid Apify platforms remain preview-only.
     const platform=selection.data.platform;
-    const youtube=platform==='youtube'||platform==='semua';
+    const policy=resolveManualSocialCollectionPolicy(platform);
+     const youtube=policy.runYouTube;
     const result=youtube?await runCollection(pool,'MANUAL',String(ctx.id),['social']):{ok:true,skipped:true,reason:'YOUTUBE_NOT_SELECTED'};
-    const apifyPlatforms=(platform==='semua'?['tiktok','instagram']:platform==='youtube'?[]:[platform]) as ('tiktok'|'instagram')[];
+    const apifyPlatforms=policy.previewApifyPlatforms;
     const apify=await Promise.all(apifyPlatforms.map(async selected=>{
       try{
         const {previewManualApifyCollection}=await import('./apify-manual-preview.js');
