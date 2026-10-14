@@ -3,7 +3,9 @@
  * A matching hostname alone is not proof of Preview: GitHub environment
  * protections must also restrict who may configure both secrets.
  */
-// Verified via Neon branch br-round-cloud-ay2ed647 (Preview), not the default production branch.\nconst APPROVED_PREVIEW_HOST='ep-raspy-violet-ayau9ftu.c-5.us-east-2.aws.neon.tech';\nexport function isApifyPreviewTestConnection(input:{
+// Verified via Neon branch br-round-cloud-ay2ed647 (Preview), not the default production branch.
+const APPROVED_PREVIEW_HOST='ep-raspy-violet-ayau9ftu.c-5.us-east-2.aws.neon.tech';
+export function isApifyPreviewTestConnection(input:{
  databaseUrl:string|undefined;expectedHost:string|undefined;previewFlag:string|undefined;
 }):boolean{
  if(input.previewFlag!=='true'||!input.databaseUrl||!input.expectedHost)return false;
