@@ -32,8 +32,15 @@ export function buildApifyManualChargeQuote(input:{
  const monthlyRemaining=input.adminMonthlyRemainingUsd;
  if(monthlyRemaining!==undefined&&(monthlyRemaining===null||!Number.isFinite(monthlyRemaining)||monthlyRemaining<0||estimate!==null&&estimate>monthlyRemaining))
   blockers.push('APIFY_ADMIN_MONTHLY_BUDGET_INSUFFICIENT_OR_UNAVAILABLE');
+ // Preliminary conservative budget check against the configured per-run ceiling.
+ // This is not an Actor price quote and never authorizes a paid run.
+ if(estimate===null&&limit!==null&&Number.isFinite(limit)&&limit>0){
+  if(monthlyRemaining!==undefined&&monthlyRemaining!==null&&Number.isFinite(monthlyRemaining)&&monthlyRemaining>=0&&limit>monthlyRemaining&&!blockers.includes('APIFY_ADMIN_MONTHLY_BUDGET_INSUFFICIENT_OR_UNAVAILABLE'))
+   blockers.push('APIFY_ADMIN_MONTHLY_BUDGET_INSUFFICIENT_OR_UNAVAILABLE');
+ }
  const headroom=input.monthlyHeadroomUsd;
- if(headroom===null||!Number.isFinite(headroom)||headroom<0||estimate!==null&&estimate>headroom)
+ if(headroom===null||!Number.isFinite(headroom)||headroom<0||estimate!==null&&estimate>headroom||
+  estimate===null&&limit!==null&&Number.isFinite(limit)&&limit>0&&headroom!==null&&Number.isFinite(headroom)&&headroom>=0&&limit>headroom)
   blockers.push('APIFY_MONTHLY_HEADROOM_INSUFFICIENT_OR_UNAVAILABLE');
  return{readyForConfirmation:blockers.length===0,maximumChargeUsd:estimate,
   adminLimitUsd:limit,monthlyHeadroomUsd:headroom,blockers};
