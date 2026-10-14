@@ -50,3 +50,11 @@ test('TikTok proposed per-query results never intentionally exceed selected tota
   assert.ok((result.proposedInput.resultsPerPage as number)*result.searchTerms.length<=maxVideos);
  }
 });
+
+test('more geographic queries than video budget are trimmed before Actor proposal',()=>{
+ const expanded={...plan,queries:Array.from({length:20},(_,i)=>'Wilayah '+i+' Batam')};
+ const result=previewGeographicActorInput({actorId:'clockworks/tiktok-scraper',plan:expanded,maxQueries:20,maxVideos:10});
+ assert.equal(result.searchTerms.length,10);
+ assert.equal(result.proposedInput.resultsPerPage,1);
+ assert.ok((result.proposedInput.resultsPerPage as number)*result.searchTerms.length<=10);
+});
