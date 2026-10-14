@@ -219,6 +219,59 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
     }catch{return reply.code(502).send({error:'APIFY_COST_HISTORY_UNAVAILABLE'});}
   });
 
+  // Explicitly confirmed manual TikTok start. Apify is authoritative for account
+  // balance; the browser cannot supply Actor input, credentials, or charge cap.
+  // A successful response returns a Run ID for the existing import workflow.
+  app.post('/api/social/collection/apify/start-direct',{preHandler:[auth,requireWrite]},async(request,reply)=>{
+    const ctx=request.socialIngestAuth!;
+    const parsed=z.object({platform:z.literal('tiktok'),maxVideos:z.union([z.literal(10),z.literal(20),z.literal(50)]),confirmed:z.literal(true)}).strict().safeParse(request.body);
+    if(!parsed.success)return reply.code(400).send({error:'APIFY_EXPLICIT_CONFIRMATION_REQUIRED'});
+    try{
+      const {loadApifyAdminCollectorSettings}=await import('./apify-admin-collector-settings.js');
+      const collectors=await loadApifyAdminCollectorSettings(pool);
+      const actorId='clockworks/tiktok-scraper';
+      const matching=collectors.filter(c=>c.actorId===actorId&&c.kind==='tiktok_posts'&&c.enabled);
+      if(matching.length!==1)return reply.code(409).send({error:'APIFY_TIKTOK_ACTOR_NOT_ENABLED'});
+      const {rows}=await pool.query(`SELECT s.settings,c.credential_ciphertext FROM integration_settings s JOIN integration_providers p ON p.id=s.provider_id AND p.code='apify' AND p.active=true JOIN organizations o ON o.id=s.organization_id AND o.active=true JOIN integration_credentials c ON c.provider_id=p.id AND c.organization_id=o.id AND c.enabled=true LIMIT 2`);
+      if(rows.length!==1||!rows[0]?.credential_ciphertext)return reply.code(503).send({error:'APIFY_CONFIGURATION_UNAVAILABLE'});
+      const cap=rows[0]?.settings?.actorMaxCostUsd?.tiktok_posts;
+      if(typeof cap!=='number'||!Number.isFinite(cap)||cap<0.5||cap>5||Math.abs(cap*100-Math.round(cap*100))>1e-8)
+        return reply.code(409).send({error:'APIFY_TIKTOK_CHARGE_CAP_NOT_CONFIGURED'});
+      const {decryptIntegrationCredential}=await import('./integration-credentials.js');
+      const token=decryptIntegrationCredential(rows[0].credential_ciphertext);
+      const {loadApifyGeographicSearchPlan}=await import('./apify-geographic-search.js');
+      const {previewGeographicActorInput}=await import('./apify-geographic-input.js');
+      const plan=await loadApifyGeographicSearchPlan(pool);
+      const proposed=previewGeographicActorInput({actorId,plan,maxQueries:5,maxVideos:parsed.data.maxVideos});
+      const actorInput=proposed.proposedInput;
+      const terms=actorInput.searchQueries;
+      if(!Array.isArray(terms)||terms.length===0||terms.some(x=>typeof x!=='string'||!/(?:^|\\s)batam(?:$|\\s)/i.test(x)))
+        return reply.code(409).send({error:'APIFY_TIKTOK_GEOGRAPHIC_INPUT_INVALID'});
+      const {inspectApifyActorPricing}=await import('./apify-actor-pricing-client.js');
+      const pricing=await inspectApifyActorPricing(actorId,token);
+      if(pricing.snapshot?.pricingModel!=='PAY_PER_EVENT'||!pricing.snapshot.capEligible||
+        pricing.snapshot.minimalMaxTotalChargeUsd===null||cap<pricing.snapshot.minimalMaxTotalChargeUsd)
+        return reply.code(409).send({error:'APIFY_TIKTOK_CHARGE_CAP_UNSUPPORTED'});
+      // Never retry an uncertain provider response: it might already be billable.
+      let response:Response;
+      try{
+        response=await fetch('https://api.apify.com/v2/acts/clockworks~tiktok-scraper/runs?maxTotalChargeUsd='+encodeURIComponent(String(cap)),{
+          method:'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json',Accept:'application/json'},
+          body:JSON.stringify(actorInput),signal:AbortSignal.timeout(20000)});
+      }catch{
+        return reply.code(502).send({error:'APIFY_START_UNCERTAIN_DO_NOT_RETRY_CHECK_APIFY_CONSOLE'});
+      }
+      if(!response.ok)return reply.code(502).send({error:'APIFY_PROVIDER_REJECTED_RUN',providerStatus:response.status});
+      let runId:unknown;
+      try{runId=((await response.json()) as {data?:{id?:unknown}}).data?.id}catch{}
+      if(typeof runId!=='string'||!/^[a-zA-Z0-9_-]{5,160}$/.test(runId))
+        return reply.code(502).send({error:'APIFY_START_UNCERTAIN_DO_NOT_RETRY_CHECK_APIFY_CONSOLE'});
+      await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'APIFY_DIRECT_RUN_STARTED',$2::jsonb)`,
+        [ctx.id,JSON.stringify({platform:'tiktok',runId,maxVideos:parsed.data.maxVideos,maxTotalChargeUsd:cap})]).catch(error=>app.log.error({err:error,runId},'Apify start audit failed'));
+      return reply.send({data:{platform:'tiktok',runId,maxVideos:parsed.data.maxVideos,maxTotalChargeUsd:cap,status:'STARTED',billableRunStarted:true}});
+    }catch(error){app.log.error({err:error},'Apify direct start failed');return reply.code(422).send({error:'APIFY_DIRECT_START_PREPARATION_FAILED'});}
+  });
+
   app.post('/api/social/collection/run',{preHandler:[auth,requireWrite]},async(request,reply)=>{
     const ctx=request.socialIngestAuth!;
     // Reject client attempts to smuggle a paid-run authorization into this
