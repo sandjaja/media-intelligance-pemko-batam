@@ -29,7 +29,9 @@ export async function reserveApifyCost(pool:Pool,input:{
    WHERE started_at >= $1 AND started_at < $2`,[monthStart,nextMonth]);
   const committed=Number(rows[0]?.committed);
   if(!Number.isFinite(committed))throw new Error('APIFY_LEDGER_INVALID_TOTAL');
-  const remaining=Math.max(0,Math.min(monthlyBudgetUsd-committed,providerBalanceUsd));
+  // Provider headroom may be stale between independent manual/scheduler runs.
+ // Deduct this month's local commitments as a conservative allowance buffer.
+ const remaining=Math.max(0,Math.min(monthlyBudgetUsd-committed,providerBalanceUsd-committed));
   if(estimatedUsd>remaining){await client.query('ROLLBACK');return{reserved:false,reason:'APIFY_BUDGET_EXCEEDED',remainingUsd:remaining}}
   const inserted=await client.query(`INSERT INTO apify_usage_ledger
    (reservation_key,actor_id,platform,status,reserved_usd,started_at)
