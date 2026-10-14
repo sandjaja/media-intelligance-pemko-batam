@@ -6,6 +6,7 @@ import {loadApifyAdminCollectorSettings} from './apify-admin-collector-settings.
 import {decryptIntegrationCredential} from './integration-credentials.js';
 import {inspectApifyActorPricing,type ApifyPricingLookup} from './apify-actor-pricing-client.js';
 import {buildApifyManualChargeQuote} from './apify-manual-charge-quote.js';
+import {quoteApifyProviderCappedRun} from './apify-provider-capped-quote.js';
 import {loadApifyAccountHeadroom} from './apify-account-headroom.js';
 import {inspectApifyActorInputSchema} from './apify-actor-input-schema.js';
 import {loadApifyGeographicSearchPlan} from './apify-geographic-search.js';
@@ -14,7 +15,7 @@ import {previewGeographicActorInput} from './apify-geographic-input.js';
 /** Read-only manual preview using the same authorization scope as scheduler. */
 export async function previewManualApifyCollection(pool:Pool,input:{
  platform:'tiktok'|'instagram';requestedBy:string;maxVideos?:10|20|50;
-}):Promise<{ready:false;reason:string;collectors:string[];actorDetails:{kind:string;actorId:string;adminMaxCostUsd:number|null;pricingModel:string|null;minimumChargeUsd:number|null;pricingCapCandidate:boolean;pricingLookupStatus:ApifyPricingLookup['reason']|'CREDENTIAL_UNAVAILABLE';pricingMetadataShape:string|null;inputSchemaVerified:boolean;inputSchemaReason:string|null;missingInputKeys:string[];geographicInputReady:boolean;geographicInputReason:string|null;searchTerms:string[];requestedVideoLimit:number|null;proposedResultsPerPage:number|null}[];billableRunStarted:false;requiresExplicitConfirmation:true;adminMonthlyBudgetUsd:number|null;adminMonthlyCommittedUsd:number|null;adminMonthlyRemainingUsd:number|null;accountMonthlyHeadroomUsd:number|null;executionBlockers:string[];chargeQuotes:{kind:string;actorId:string;readyForConfirmation:boolean;maximumChargeUsd:number|null;adminLimitUsd:number|null;monthlyHeadroomUsd:number|null;blockers:string[]}[]}>{
+}):Promise<{ready:false;reason:string;collectors:string[];actorDetails:{kind:string;actorId:string;adminMaxCostUsd:number|null;pricingModel:string|null;minimumChargeUsd:number|null;pricingCapCandidate:boolean;pricingLookupStatus:ApifyPricingLookup['reason']|'CREDENTIAL_UNAVAILABLE';pricingMetadataShape:string|null;inputSchemaVerified:boolean;inputSchemaReason:string|null;missingInputKeys:string[];geographicInputReady:boolean;geographicInputReason:string|null;searchTerms:string[];requestedVideoLimit:number|null;proposedResultsPerPage:number|null}[];billableRunStarted:false;requiresExplicitConfirmation:true;adminMonthlyBudgetUsd:number|null;adminMonthlyCommittedUsd:number|null;adminMonthlyRemainingUsd:number|null;accountMonthlyHeadroomUsd:number|null;executionBlockers:string[];chargeQuotes:{kind:string;actorId:string;readyForConfirmation:boolean;maximumChargeUsd:number|null;adminLimitUsd:number|null;monthlyHeadroomUsd:number|null;blockers:string[]}[];providerCappedQuotes:{kind:string;actorId:string;readyForConfirmation:boolean;maximumChargeUsd:number|null;selectedVideoLimit:10|20|50;blockers:string[];balanceStatus:'NOT_VERIFIABLE_FROM_LIMITS_API'}[]}>{
  const maxVideos=input.maxVideos??10;
  if(![10,20,50].includes(maxVideos))throw Error('APIFY_VIDEO_LIMIT_INVALID');
  const result=await previewApifyPlatform(pool,{trigger:'manual',platform:input.platform,requestedBy:input.requestedBy});
@@ -101,10 +102,17 @@ export async function previewManualApifyCollection(pool:Pool,input:{
    configuredMaxUsd:actor.adminMaxCostUsd,collectorEnabled:result.configured,
    pricingApproval:null,providerChargeCapVerified:false,
    monthlyHeadroomUsd:accountMonthlyHeadroomUsd,adminMonthlyRemainingUsd})}));
+ // The provider-capped proposal is read-only and explicitly blocked until
+ // server-side pricing approval and cap verification are implemented.
+ const providerCappedQuotes=actorDetails.map(actor=>({kind:actor.kind,actorId:actor.actorId,
+  ...quoteApifyProviderCappedRun({actorId:actor.actorId,configuredActorId:actor.actorId,
+   collectorEnabled:result.configured,pricingApproval:null,providerChargeCapVerified:false,
+   monthlyHeadroomUsd:accountMonthlyHeadroomUsd,adminMonthlyRemainingUsd,
+   selectedVideoLimit:maxVideos})}));
  // Neither verified Actor pricing nor provider-enforced caps are wired to the
  // manual endpoint yet. Do not advertise payment readiness based on Admin limits.
  executionBlockers.push('APIFY_PRICING_NOT_VERIFIED','APIFY_CHARGE_CAP_NOT_VERIFIED','APIFY_MANUAL_EXECUTOR_NOT_CONNECTED');
  return{ready:false,reason:result.configured?'APIFY_MANUAL_EXECUTOR_NOT_CONNECTED':result.reason,
   collectors:result.collectors.map(c=>c.kind),actorDetails,
-  billableRunStarted:false,requiresExplicitConfirmation:true,adminMonthlyBudgetUsd,adminMonthlyCommittedUsd,adminMonthlyRemainingUsd,accountMonthlyHeadroomUsd,executionBlockers,chargeQuotes};
+  billableRunStarted:false,requiresExplicitConfirmation:true,adminMonthlyBudgetUsd,adminMonthlyCommittedUsd,adminMonthlyRemainingUsd,accountMonthlyHeadroomUsd,executionBlockers,chargeQuotes,providerCappedQuotes};
 }
