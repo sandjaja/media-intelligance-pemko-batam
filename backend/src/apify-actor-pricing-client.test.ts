@@ -54,3 +54,10 @@ test('future-only pricing history cannot fall back to unverified current price',
  }});
  assert.equal(snapshot,null);
 });
+
+test('malformed pricing history never falls back to a current pricing record',()=>{
+ assert.equal(parseApifyActorPricing({data:{
+  pricingInfos:{pricingModel:'PAY_PER_EVENT',startedAt:'2024-01-01T00:00:00.000Z'},
+  currentPricingInfo:{pricingModel:'PAY_PER_EVENT',minimalMaxTotalChargeUsd:0.5}
+ }}),null);
+});
