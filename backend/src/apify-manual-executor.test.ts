@@ -33,3 +33,17 @@ test('executor refuses invalid actor input before touching ledger',async()=>{
  });
  assert.equal(result.reason,'APIFY_ACTOR_INPUT_INVALID');
 });
+
+test('executor keeps Instagram preview-only during TikTok rollout',async()=>{
+ const result=await executeClaimedApifyRun(unreachablePool,{
+  ...base,platform:'instagram',actorId:'apify/instagram-scraper',
+  configuredActorId:'apify/instagram-scraper',explicitlyConfirmed:true
+ });
+ assert.equal(result.reason,'APIFY_MANUAL_COLLECTOR_NOT_ENABLED_FOR_ROLLOUT');
+});
+test('executor rejects cap higher than fifty cents before ledger access',async()=>{
+ const result=await executeClaimedApifyRun(unreachablePool,{
+  ...base,configuredMaxUsd:0.75,explicitlyConfirmed:true
+ });
+ assert.equal(result.reason,'APIFY_TIKTOK_POSTS_CAP_MUST_BE_050');
+});
