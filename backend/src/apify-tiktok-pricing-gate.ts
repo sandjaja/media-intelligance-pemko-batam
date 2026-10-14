@@ -23,8 +23,9 @@ export function assessTikTokPricingForPaidRun(input:{
  else if(typeof minimum==='number'&&input.requestedChargeCapUsd<minimum)
   blockers.push('APIFY_CHARGE_CAP_BELOW_ACTOR_MINIMUM');
  if(!input.providerCapSupported)blockers.push('APIFY_CHARGE_CAP_NOT_VERIFIED');
- // An API minimum plus a supported maxTotalChargeUsd parameter does not
- // establish a conservative all-in cost estimate for this exact run.
- blockers.push('APIFY_ALL_IN_MAXIMUM_COST_NOT_VERIFIED');
+ // The provider minimum is not a maximum. A trusted verifier must separately
+ // establish that maxTotalChargeUsd covers the complete run charge; until then
+ // this gate must never manufacture a pricing approval from actor metadata.
+ if(blockers.length===0)blockers.push('APIFY_ALL_IN_MAXIMUM_COST_NOT_VERIFIED');
  return{verified:false,pricingApproval:null,blockers};
 }
