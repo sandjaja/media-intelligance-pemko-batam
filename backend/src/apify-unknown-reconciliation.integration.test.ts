@@ -10,7 +10,8 @@ import {reconcileUnknownApifyRun} from './apify-unknown-reconciliation.js';
  */
 const url=process.env.APIFY_LEDGER_TEST_DATABASE_URL;
 const preview=isApifyPreviewTestConnection({databaseUrl:url,expectedHost:process.env.APIFY_LEDGER_TEST_EXPECTED_HOST,previewFlag:process.env.APIFY_LEDGER_TEST_PREVIEW});
-test('UNKNOWN provider reconciliation updates only verified Preview ledger row',{skip:!url||!preview},async()=>{
+test('UNKNOWN provider reconciliation updates only verified Preview ledger row',{skip:!url},async()=>{
+ assert.equal(preview,true,'Refusing integration test: connection is not the approved Neon Preview endpoint');
  const pool=new Pool({connectionString:url,max:2});
  const reservationKey='apify-ci-unknown-'+randomUUID();
  const runId='run'+randomUUID().replace(/-/g,'');
