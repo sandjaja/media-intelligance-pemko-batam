@@ -12,12 +12,12 @@ export function previewGeographicActorInput(input:{actorId:string;plan:Geographi
  const searchTerms=input.plan.queries.slice(0,limit);
  let proposedInput:Record<string,unknown>={};
  if(input.actorId==='clockworks/tiktok-scraper'){
-  proposedInput={searchQueries:searchTerms,resultsPerPage:10};
+  proposedInput={searchQueries:searchTerms,searchSection:'/video',resultsPerPage:5,scrapeRelatedVideos:false,commentsPerPost:0,shouldDownloadVideos:false,aiVideoDescription:false,aiVideoSummary:false};
  }else if(input.actorId==='apify/instagram-scraper'){
-  proposedInput={search:searchTerms,resultsLimit:10};
+  proposedInput={search:searchTerms[0],searchType:'place',resultsType:'posts',resultsLimit:5,searchLimit:1};
  }else{
   throw Error('APIFY_GEOGRAPHIC_ACTOR_NOT_SUPPORTED');
  }
  return{actorId:input.actorId,schemaVerified:false,readyForPaidRun:false,searchTerms,proposedInput,
-  blockers:['APIFY_ACTOR_INPUT_SCHEMA_NOT_VERIFIED','APIFY_PAID_EXECUTION_NOT_CONNECTED']};
+  blockers:['APIFY_ACTOR_INPUT_RUNTIME_NOT_VERIFIED','APIFY_PAID_EXECUTION_NOT_CONNECTED']};
 }
