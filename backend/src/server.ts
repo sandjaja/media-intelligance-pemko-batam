@@ -16,6 +16,7 @@ import { registerAdminRoutes } from './admin-routes.js';
 import { registerDistrictRoutes } from './district-routes.js';
 import { registerPhase5StrategyRoutes } from './phase5-strategy-routes.js';
 import { runYouTubeShortsCollection } from './youtube-shorts-runner.js';
+import { previewManualApifyCollection } from './apify-manual-preview.js';
 import { decryptIntegrationCredential, encryptIntegrationCredential, integrationCredentialHint } from './integration-credentials.js';
 import { probeInstagramPublicProfile } from './instagram-public-profile.js';
 import { loadAuthorizationContext } from './rbac.js';
@@ -314,6 +315,17 @@ app.post('/api/social/instagram/public-profile-smoke-test',{preHandler:[requireA
  const account=(await pool.query("SELECT a.id,a.account_name,a.handle,a.profile_url,a.opd_id,o.name opd_name FROM owned_social_accounts a LEFT JOIN opd o ON o.id=a.opd_id WHERE a.id=$1 AND a.platform='instagram' AND a.active=true",[parsed.data.accountId])).rows[0];if(!account)return reply.code(404).send({error:'INSTAGRAM_OWNED_ACCOUNT_NOT_FOUND'});
  const handle=String(account.handle||'').trim().replace(/^@/,'')||String(account.profile_url||'').match(/instagram\.com\/([^/?#]+)/i)?.[1]||'';if(!handle)return reply.code(409).send({error:'INSTAGRAM_HANDLE_UNRESOLVED'});
  try{const probe=await probeInstagramPublicProfile(handle);await pool.query("INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'INSTAGRAM_PUBLIC_PROFILE_SMOKE_TEST',$2::jsonb)",[request.user?.id,JSON.stringify({accountId:account.id,handle,httpStatus:probe.httpStatus,status:probe.status,bytes:probe.htmlBytes,finalUrl:probe.finalUrl})]);return{data:{provider:'instagram',mode:'public_html_smoke_test',account:{id:account.id,opdName:account.opd_name,accountName:account.account_name,handle:'@'+handle},probe,persisted:false,note:'Smoke test only; no performance snapshot is written.'}}}catch(e:any){return reply.code(502).send({error:'INSTAGRAM_PUBLIC_FETCH_FAILED',detail:String(e?.message||e).slice(0,300)})}
+});
+/** Manual TikTok/Instagram preflight for the Social Media UI.
+ * Read-only until a fully budget-capped executor is connected.
+ */
+app.post('/api/social/apify/manual-preview',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
+ const parsed=z.object({platform:z.enum(['tiktok','instagram'])}).strict().safeParse(request.body);
+ if(!parsed.success)return reply.code(400).send({error:'INVALID_APIFY_MANUAL_PLATFORM'});
+ const requestedBy=String(request.user?.id??'');
+ if(!requestedBy)return reply.code(401).send({error:'AUTH_REQUIRED'});
+ const result=await previewManualApifyCollection(pool,{platform:parsed.data.platform,requestedBy});
+ return{data:{...result,platform:parsed.data.platform,mode:'preview_only',billableRunStarted:false}};
 });
 app.post('/api/social/youtube/account-smoke-test',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
  const parsed=z.object({handle:z.string().trim().min(2).max(100)}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_YOUTUBE_HANDLE'});
