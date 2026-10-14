@@ -19,3 +19,11 @@ test('non-unknown, missing, and empty key fail closed',async()=>{
  assert.equal((await inspectUnknownApifyRun(pool(null),'key1')).recoverable,false);
  assert.equal((await inspectUnknownApifyRun(pool(null),'')).recoverable,false);
 });
+
+test('malformed provider run id requires manual review without network call',async()=>{
+ for(const id of ['https://evil.example/path','run/unsafe','bad id','']) {
+  const result=await inspectUnknownApifyRun(pool({status:'UNKNOWN',run_id:id,reserved_usd:'0.5'}),'key1');
+  assert.equal(result.recoverable,false);
+  assert.equal(result.providerRunId,null);
+ }
+});
