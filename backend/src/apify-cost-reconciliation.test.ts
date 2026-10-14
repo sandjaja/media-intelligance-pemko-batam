@@ -17,7 +17,7 @@ test('reconciles provider-confirmed completed run',async()=>{
  assert.deepEqual(result,{updated:true,reason:'APIFY_RECONCILED'});
  assert.equal(calls.length,1);
  assert.equal(calls[0].params[3],0.25);
- assert.ok(calls[0].sql.includes("status IN ('RESERVED','RUNNING','UNKNOWN')"));
+ assert.ok(calls[0].sql.includes("status IN ('RUNNING','UNKNOWN')"));
 });
 test('requires confirmed cost for final failed run',async()=>{
  const {pool,calls}=mockPool(1);
@@ -53,4 +53,14 @@ test('rejects a cost decrease in the atomic SQL update',async()=>{
  const result=await reconcileApifyRun(pool,{...base,status:'RUNNING',actualUsd:0.1});
  assert.equal(result.updated,false);
  assert.ok(calls[0].sql.includes('$4::numeric >= actual_usd'));
+});
+
+test('reconciliation cannot bypass atomic claim or use provisional claim id',async()=>{
+ const {pool,calls}=mockPool(1);
+ const rejected=await reconcileApifyRun(pool,{reservationKey:'reservation-1',runId:'claim:abcdefgh1234',status:'SUCCEEDED',actualUsd:0.1});
+ assert.equal(rejected.updated,false);
+ assert.equal(calls.length,0);
+ await reconcileApifyRun(pool,{...base,status:'SUCCEEDED',actualUsd:0.1});
+ assert.ok(calls[0].sql.includes('AND run_id=$2'));
+ assert.ok(!calls[0].sql.includes("status IN ('RESERVED'"));
 });
