@@ -87,3 +87,29 @@ for(const [platform,actorSlug,actorInternalId,ingest,item] of [
   assert.equal(mentionInserts,1);
  });
 }
+
+for(const [platform,actorSlug,actorInternalId,ingest] of [
+ ['tiktok','clockworks~tiktok-scraper','actor_tiktok123',ingestCompletedApifyTikTokDataset],
+ ['instagram','apify~instagram-scraper','actor_instagram123',ingestCompletedApifyInstagramDataset]
+] as const){
+ test(platform+' rejects revoked ledger authorization after provider verification',async()=>{
+  let ledgerReads=0;
+  let datasetFetched=false;
+  const pool={query:async(sql:string)=>{
+   if(sql.includes('FROM apify_usage_ledger')){
+    ledgerReads++;
+    return{rows:[{reservation_key:'reservation_123',actor_id:platform==='tiktok'?'clockworks/tiktok-scraper':'apify/instagram-scraper',platform,status:ledgerReads===1?'RUNNING':'UNKNOWN',run_id:'run_12345'}]};
+   }
+   return{rows:[]};
+  }};
+  const fetcher=async(url:URL|string|Request)=>{
+   const path=new URL(String(url)).pathname;
+   if(path==='/v2/acts/'+actorSlug)return{ok:true,json:async()=>({data:{id:actorInternalId}})} as Response;
+   if(path==='/v2/actor-runs/run_12345')return{ok:true,json:async()=>({data:{id:'run_12345',status:'SUCCEEDED',defaultDatasetId:'dataset_12345',actId:actorInternalId}})} as Response;
+   if(path.includes('/items'))datasetFetched=true;
+   throw Error('UNEXPECTED_PROVIDER_PATH');
+  };
+  await assert.rejects(ingest(pool as never,{datasetId:'dataset_12345',confirmedRunId:'run_12345',token:'dummy',fetcher:fetcher as typeof fetch}),/APIFY_LEDGER_RUN_NOT_AUTHORIZED/);
+  assert.equal(datasetFetched,false);
+ });
+}
