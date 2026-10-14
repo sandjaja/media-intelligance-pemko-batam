@@ -16,7 +16,7 @@ export function parseApifyActorPricing(payload:unknown):ApifyActorPricingSnapsho
  return{pricingModel:model,minimalMaxTotalChargeUsd:min,capEligible:model==='PAY_PER_EVENT'};
 }
 export async function fetchApifyActorPricing(actorId:string,apiKey:string,fetcher:typeof fetch=fetch):Promise<ApifyActorPricingSnapshot|null>{
- if(!/^[a-zA-Z0-9_-]+[\\/~][a-zA-Z0-9_.-]+$/.test(actorId)||!apiKey.trim())return null;
+ if(!/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+$/.test(actorId)||!apiKey.trim())return null;
  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),10000);
  try{
   const response=await fetcher('https://api.apify.com/v2/acts/'+actorId.replace('/','~'),{
