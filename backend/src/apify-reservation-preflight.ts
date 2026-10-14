@@ -20,6 +20,8 @@ export async function preflightApifyReservation(pool:Pool,input:{
   return blocked('APIFY_PROVIDER_BALANCE_UNAVAILABLE');
  if(input.estimatedUsd===null||!Number.isFinite(input.estimatedUsd)||input.estimatedUsd<=0)
   return blocked('APIFY_ESTIMATE_REQUIRED');
+ if(input.providerBalanceUsd<input.estimatedUsd)
+  return blocked('APIFY_PROVIDER_BALANCE_INSUFFICIENT');
  return reserveApifyCost(pool,{
   reservationKey:input.reservationKey,actorId:input.actorId,platform:input.platform,
   estimatedUsd:input.estimatedUsd,monthlyBudgetUsd:input.adminMonthlyBudgetUsd,
