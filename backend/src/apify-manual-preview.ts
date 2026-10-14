@@ -1,6 +1,7 @@
 import type {Pool} from 'pg';
 import {previewApifyPlatform} from './apify-shared-preview.js';
 import {loadApifyAdminBudget} from './apify-admin-budget.js';
+import {loadApifyAdminCollectorSettings} from './apify-admin-collector-settings.js';
 import {decryptIntegrationCredential} from './integration-credentials.js';
 import {fetchApifyActorPricing} from './apify-actor-pricing-client.js';
 
@@ -26,8 +27,11 @@ export async function previewManualApifyCollection(pool:Pool,input:{
   }catch{/* Fail closed; no credentials or pricing details leave this server. */}
  }
  const executionBlockers:string[]=[];
- const duplicateActorIds=actorDetails.filter((actor,index)=>actorDetails.findIndex(other=>other.actorId===actor.actorId)!==index).map(actor=>actor.actorId);
- if(duplicateActorIds.length)executionBlockers.push('APIFY_ACTOR_ID_AMBIGUOUS');
+ // Check all enabled collectors, including the other platform: an Actor ID
+ // shared by TikTok and Instagram must not be considered safe for execution.
+ const allConfigured=await loadApifyAdminCollectorSettings(pool).catch(()=>[]);
+ const enabledIds=allConfigured.filter(c=>c.enabled&&c.actorId).map(c=>c.actorId);
+ if(new Set(enabledIds).size!==enabledIds.length)executionBlockers.push('APIFY_ACTOR_ID_AMBIGUOUS');
  if(credentials.length!==1||!credentials[0]?.credential_ciphertext)executionBlockers.push('APIFY_CREDENTIAL_UNAVAILABLE');
  if(!result.configured)executionBlockers.push(result.reason);
  if(adminMonthlyBudgetUsd===null)executionBlockers.push('APIFY_ADMIN_BUDGET_UNAVAILABLE');
