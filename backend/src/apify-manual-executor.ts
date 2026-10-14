@@ -37,6 +37,17 @@ export async function executeClaimedApifyRun(pool:Pool,input:{
  if(!input.token.trim())return{started:false,reason:'APIFY_TOKEN_REQUIRED'};
  if(!input.actorInput||Array.isArray(input.actorInput)||typeof input.actorInput!=='object')
   return{started:false,reason:'APIFY_ACTOR_INPUT_INVALID'};
+ // Only bounded, Batam-scoped discovery inputs may reach the paid TikTok Actor.
+ // The verified runtime schema and trusted geographic plan must be supplied
+ // by the eventual server route; arbitrary hashtags or empty searches fail closed.
+ const terms=input.actorInput.searchQueries;
+ if(!Array.isArray(terms)||terms.length<1||terms.length>5||
+    terms.some(term=>typeof term!=='string'||term.length<3||term.length>100||!/(?:^|\\s)batam(?:$|\\s)/i.test(term))||
+    input.actorInput.searchSection!=='/video'||
+    input.actorInput.resultsPerPage!==5||
+    input.actorInput.commentsPerPost!==0||
+    input.actorInput.shouldDownloadVideos!==false)
+  return{started:false,reason:'APIFY_TIKTOK_GEOGRAPHIC_INPUT_NOT_VERIFIED'};
  const claimed=await prepareAndClaimApifyRun(pool,input);
  if(!claimed.ready||!claimed.request)return{started:false,reason:claimed.reason};
  const {request}=claimed;
