@@ -33,6 +33,9 @@ export async function ingestCompletedApifyTikTokDataset(pool:Pool,input:{
  await verifyApifyLedgerRun(pool,{runId:input.confirmedRunId,actorId:'clockworks/tiktok-scraper',platform:'tiktok'});
  const expectedActorInternalId=await resolveApifyActorInternalId({actorId:'clockworks/tiktok-scraper',token:input.token,fetcher:input.fetcher});
  await verifyCompletedApifyRunDataset({runId:input.confirmedRunId,datasetId:input.datasetId,actorId:'clockworks/tiktok-scraper',expectedActorInternalId,token:input.token,fetcher:input.fetcher});
+ // Recheck the ledger after remote metadata calls; an operator may have
+ // quarantined the reservation while provider verification was in flight.
+ await verifyApifyLedgerRun(pool,{runId:input.confirmedRunId,actorId:'clockworks/tiktok-scraper',platform:'tiktok'});
  const items=await fetchApifyTikTokDataset(input);
  const {candidates,rejected}=normalizeApifyTikTokPosts(items);
  const scope=await loadOrganizationMediaScope(pool);
