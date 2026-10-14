@@ -228,7 +228,7 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
   // never starts an Actor and never accepts a dataset ID or token from clients.
   app.post('/api/social/collection/apify/import-completed',{preHandler:[auth,requireWrite]},async(request,reply)=>{
     const ctx=request.socialIngestAuth!;
-    if(!ctx.roles.includes('super_admin'))return reply.code(403).send({error:'SUPER_ADMIN_REQUIRED'});
+    if(!ctx.roles.includes('super_admin')&&!ctx.roles.includes('humas'))return reply.code(403).send({error:'HUMAS_OR_SUPER_ADMIN_REQUIRED'});
     const parsed=z.object({platform:z.enum(['tiktok','instagram']),runId:z.string().regex(/^[a-zA-Z0-9_-]{5,160}$/)}).strict().safeParse(request.body);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_APIFY_IMPORT_REQUEST'});
     const {platform,runId}=parsed.data;
@@ -270,7 +270,7 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
   // start an Actor or grant budget authorization to a future paid run.
   app.post('/api/social/collection/apify/import-external',{preHandler:[auth,requireWrite]},async(request,reply)=>{
     const ctx=request.socialIngestAuth!;
-    if(!ctx.roles.includes('super_admin'))return reply.code(403).send({error:'SUPER_ADMIN_REQUIRED'});
+    if(!ctx.roles.includes('super_admin')&&!ctx.roles.includes('humas'))return reply.code(403).send({error:'HUMAS_OR_SUPER_ADMIN_REQUIRED'});
     const parsed=z.object({platform:z.enum(['tiktok','instagram']),runId:z.string().regex(/^[a-zA-Z0-9_-]{5,160}$/)}).strict().safeParse(request.body);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_APIFY_EXTERNAL_IMPORT_REQUEST'});
     const {platform,runId}=parsed.data;
