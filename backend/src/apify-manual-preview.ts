@@ -26,9 +26,13 @@ export async function previewManualApifyCollection(pool:Pool,input:{
   }catch{/* Fail closed; no credentials or pricing details leave this server. */}
  }
  const executionBlockers:string[]=[];
+ const duplicateActorIds=actorDetails.filter((actor,index)=>actorDetails.findIndex(other=>other.actorId===actor.actorId)!==index).map(actor=>actor.actorId);
+ if(duplicateActorIds.length)executionBlockers.push('APIFY_ACTOR_ID_AMBIGUOUS');
+ if(credentials.length!==1||!credentials[0]?.credential_ciphertext)executionBlockers.push('APIFY_CREDENTIAL_UNAVAILABLE');
  if(!result.configured)executionBlockers.push(result.reason);
  if(adminMonthlyBudgetUsd===null)executionBlockers.push('APIFY_ADMIN_BUDGET_UNAVAILABLE');
  if(actorDetails.some(c=>c.adminMaxCostUsd===null))executionBlockers.push('APIFY_ACTOR_LIMIT_UNAVAILABLE');
+ if(actorDetails.some(c=>!c.pricingModel))executionBlockers.push('APIFY_ACTOR_PRICING_METADATA_UNAVAILABLE');
  if(actorDetails.some(c=>!c.pricingCapCandidate))executionBlockers.push('APIFY_ACTOR_PRICING_UNAVAILABLE_OR_UNSUPPORTED');
  // Neither verified Actor pricing nor provider-enforced caps are wired to the
  // manual endpoint yet. Do not advertise payment readiness based on Admin limits.
