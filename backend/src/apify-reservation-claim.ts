@@ -10,19 +10,21 @@ import type {Pool} from 'pg';
  */
 export async function claimApifyReservation(pool:Pool,input:{
  reservationKey:string;actorId:string;platform:'tiktok'|'instagram';
- claimId:string;
+ claimId:string;minimumReservedUsd?:number;
 }):Promise<{claimed:boolean;reason:string;reservedUsd:number|null}>{
  if(!input.reservationKey||!input.actorId||!input.claimId||
   !['tiktok','instagram'].includes(input.platform)||
-  !/^claim:[a-zA-Z0-9_-]{8,120}$/.test(input.claimId))
+  !/^claim:[a-zA-Z0-9_-]{8,120}$/.test(input.claimId)||
+  (input.minimumReservedUsd!==undefined&&(!Number.isFinite(input.minimumReservedUsd)||input.minimumReservedUsd<=0)))
   return{claimed:false,reason:'APIFY_CLAIM_INVALID',reservedUsd:null};
  const {rows}=await pool.query(
   `UPDATE apify_usage_ledger
    SET status='RUNNING',run_id=$4,updated_at=NOW()
    WHERE reservation_key=$1 AND actor_id=$2 AND platform=$3
      AND status='RESERVED' AND run_id IS NULL
+     AND reserved_usd >= $5::numeric
    RETURNING reserved_usd`,
-  [input.reservationKey,input.actorId,input.platform,input.claimId]);
+  [input.reservationKey,input.actorId,input.platform,input.claimId,input.minimumReservedUsd??0]);
  if(rows.length!==1)return{claimed:false,reason:'APIFY_RESERVATION_NOT_CLAIMABLE',reservedUsd:null};
  const reservedUsd=Number(rows[0].reserved_usd);
  if(!Number.isFinite(reservedUsd)||reservedUsd<=0)
