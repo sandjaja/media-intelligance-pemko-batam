@@ -11,5 +11,7 @@ export function conservativeApifyRunEstimate(actorId:string,approval:ApifyPricin
  const date=new Date(approval.verifiedAt);
  if(!Number.isFinite(date.getTime())||date.getTime()>Date.now()||Date.now()-date.getTime()>86400000)return null;
  const amount=approval.maximumRunCostUsd;
- return Number.isFinite(amount)&&amount>0?amount:null;
+ // USD charge caps use cent precision; rejecting fractional cents prevents
+ // an approved estimate from silently rounding down at provider submission.
+ return Number.isFinite(amount)&&amount>=0.01&&Number.isInteger(Math.round(amount*100))&&Math.abs(amount*100-Math.round(amount*100))<1e-8?amount:null;
 }
