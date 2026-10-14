@@ -7,6 +7,8 @@ test('manual TikTok preview includes enabled hashtag and excludes Instagram',asy
  const pool={query:async()=>({rows:[{settings}]})} as unknown as Pool;
  const result=await previewManualApifyCollection(pool,{platform:'tiktok',requestedBy:'operator-1'});
  assert.deepEqual(result.collectors,['tiktok_posts','tiktok_comments','tiktok_hashtag']);
+ assert.equal(result.actorDetails.length,3);
+ assert.equal(result.actorDetails[0]?.actorId,'clockworks/tiktok-scraper');
  assert.equal(result.ready,false);
  assert.equal(result.reason,'APIFY_MANUAL_EXECUTOR_NOT_CONNECTED');
 });
