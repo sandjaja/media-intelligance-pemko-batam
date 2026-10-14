@@ -72,6 +72,6 @@ test('stale provider headroom cannot double-spend locally committed allowance',a
  const {pool,statements}=mockPool({committed:0.4});
  const result=await reserveApifyCost(pool,{...request,providerBalanceUsd:0.7});
  assert.equal(result.reason,'APIFY_BUDGET_EXCEEDED');
- assert.equal(result.remainingUsd,0.3);
+ assert.ok(result.remainingUsd!==null&&Math.abs(result.remainingUsd-0.3)<1e-9);
  assert.equal(statements.some(s=>s.includes('INSERT INTO apify_usage_ledger')),false);
 });
