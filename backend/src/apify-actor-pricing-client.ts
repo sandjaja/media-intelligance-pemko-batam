@@ -19,7 +19,7 @@ export async function fetchApifyActorPricing(actorId:string,apiKey:string,fetche
  if(!/^[a-zA-Z0-9_-]+[\\/~][a-zA-Z0-9_.-]+$/.test(actorId)||!apiKey.trim())return null;
  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),10000);
  try{
-  const response=await fetcher('https://api.apify.com/v2/acts/'+encodeURIComponent(actorId),{
+  const response=await fetcher('https://api.apify.com/v2/acts/'+actorId.replace('/','~'),{
    method:'GET',headers:{Authorization:'Bearer '+apiKey,Accept:'application/json'},signal:controller.signal
   });
   if(!response.ok)return null;
