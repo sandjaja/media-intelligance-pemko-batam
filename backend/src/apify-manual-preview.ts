@@ -21,7 +21,7 @@ export async function previewManualApifyCollection(pool:Pool,input:{
    const token=decryptIntegrationCredential(credentials[0].credential_ciphertext);
    await Promise.all(actorDetails.map(async actor=>{
     const pricing=await fetchApifyActorPricing(actor.actorId,token);
-    if(pricing){actor.pricingModel=pricing.pricingModel;actor.minimumChargeUsd=pricing.minimalMaxTotalChargeUsd;actor.pricingCapCandidate=pricing.capEligible&&actor.adminMaxCostUsd!==null&&(pricing.minimalMaxTotalChargeUsd===null||pricing.minimalMaxTotalChargeUsd<=actor.adminMaxCostUsd);}
+    if(pricing){actor.pricingModel=pricing.pricingModel;actor.minimumChargeUsd=pricing.minimalMaxTotalChargeUsd;actor.pricingCapCandidate=pricing.capEligible&&actor.adminMaxCostUsd!==null&&pricing.minimalMaxTotalChargeUsd!==null&&pricing.minimalMaxTotalChargeUsd<=actor.adminMaxCostUsd;}
    }));
   }catch{/* Fail closed; no credentials or pricing details leave this server. */}
  }
