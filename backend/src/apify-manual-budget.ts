@@ -11,6 +11,7 @@ export function evaluateApifyManualBudget(input:{
  monthlyHeadroomUsd:number|null;adminMonthlyRemainingUsd:number|null;
  cashBalanceUsd?:number|null;
  billingMode?:'PREPAID'|'POSTPAID'|'UNKNOWN';
+ billingModeVerified?:boolean;
 }):{
  readyForConfirmation:boolean;maximumChargeUsd:number|null;
  blockers:string[];cashBalanceVerified:boolean;
@@ -33,6 +34,8 @@ export function evaluateApifyManualBudget(input:{
   Number.isFinite(input.cashBalanceUsd)&&input.cashBalanceUsd>=0;
  // For postpaid billing, a cash-credit balance is not a prerequisite;
  // verified provider and Admin spending ceilings remain mandatory.
+ if(input.billingMode==='POSTPAID'&&input.billingModeVerified!==true)
+  blockers.push('APIFY_BILLING_MODE_UNVERIFIED');
  if(input.billingMode!=='POSTPAID'&&!cashBalanceVerified)
   blockers.push('APIFY_CASH_BALANCE_UNVERIFIED');
  else if(input.billingMode!=='POSTPAID'&&cap!==null&&input.cashBalanceUsd!<cap)
