@@ -25,3 +25,9 @@ test('fractional cent cannot round a charge cap above reservation',()=>{
  assert.equal(buildApifyChargeCap({...small,reservedUsd:NaN}),null);
  assert.equal(buildApifyChargeCap({...small,reservedUsd:Infinity}),null);
 });
+
+test('provider charge cap uses saved ceiling for a changed Actor ID',()=>{
+ const configured={...base,actorId:'custom/tiktok-collector',configuredActorId:'custom/tiktok-collector',configuredMaxUsd:0.2,reservedUsd:0.2};
+ assert.deepEqual(buildApifyChargeCap(configured),{maxTotalChargeUsd:0.2});
+ assert.equal(buildApifyChargeCap({...configured,reservedUsd:0.3}),null);
+});
