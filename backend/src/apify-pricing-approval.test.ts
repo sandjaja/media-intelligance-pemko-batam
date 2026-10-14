@@ -20,3 +20,11 @@ test('standby hashtag actors require exact fresh verified maximum too',()=>{
   assert.equal(conservativeApifyRunEstimate(standbyId,{...approval,actorId:standbyId}),0.3);
  }
 });
+
+test('rejects future, malformed and non-finite pricing approvals',()=>{
+ assert.equal(conservativeApifyRunEstimate(actorId,{...approval,verifiedAt:new Date(Date.now()+60000).toISOString()}),null);
+ assert.equal(conservativeApifyRunEstimate(actorId,{...approval,verifiedAt:'not-a-date'}),null);
+ assert.equal(conservativeApifyRunEstimate(actorId,{...approval,maximumRunCostUsd:Infinity}),null);
+ assert.equal(conservativeApifyRunEstimate(actorId,{...approval,maximumRunCostUsd:NaN}),null);
+ assert.equal(conservativeApifyRunEstimate(actorId,{...approval,maximumRunCostUsd:0}),null);
+});
