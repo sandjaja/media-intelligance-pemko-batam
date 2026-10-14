@@ -46,6 +46,8 @@ export async function previewManualApifyCollection(pool:Pool,input:{
  if(actorDetails.some(c=>c.adminMaxCostUsd===null))executionBlockers.push('APIFY_ACTOR_LIMIT_UNAVAILABLE');
  if(actorDetails.some(c=>!c.pricingModel))executionBlockers.push('APIFY_ACTOR_PRICING_METADATA_UNAVAILABLE');
  if(actorDetails.some(c=>!c.pricingCapCandidate))executionBlockers.push('APIFY_ACTOR_PRICING_UNAVAILABLE_OR_UNSUPPORTED');
+ // The Actor metadata's minimalMaxTotalChargeUsd is a floor, not an
+ // upper-bound quote. Do not feed it into pricingApproval or maximumChargeUsd.
  // Quote uses only server-side verified inputs. Preview metadata is not an
  // approved upper bound and cannot establish provider-enforced billing caps.
  // Never accept charge approval or cap verification from this HTTP request.
