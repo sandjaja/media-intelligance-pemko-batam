@@ -36,6 +36,14 @@ export async function executeClaimedApifyRun(pool:Pool,input:{
  const claimed=await prepareAndClaimApifyRun(pool,input);
  if(!claimed.ready||!claimed.request)return{started:false,reason:claimed.reason};
  const {request}=claimed;
+ // A claimed reservation must never authorize a larger provider charge than the
+ // freshly approved estimate or the Admin limit. Fail closed without POST.
+ if(!Number.isFinite(request.query.maxTotalChargeUsd)||request.query.maxTotalChargeUsd<=0||
+    request.query.maxTotalChargeUsd>approvedMaximum||request.query.maxTotalChargeUsd>input.configuredMaxUsd){
+  await markApifyRunUnknown(pool,{reservationKey:input.reservationKey,claimId:input.claimId,
+   reason:'APIFY_CLAIMED_CAP_EXCEEDS_APPROVAL'});
+  return{started:false,reason:'APIFY_CLAIMED_CAP_EXCEEDS_APPROVAL'};
+ }
  const url=new URL('https://api.apify.com'+request.path);
  url.searchParams.set('maxTotalChargeUsd',String(request.query.maxTotalChargeUsd));
  let providerRunId:string|null=null;
