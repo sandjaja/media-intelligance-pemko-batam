@@ -18,10 +18,10 @@ export async function loadApifyAdminCollectorSettings(pool:Pool):Promise<ApifyCo
   tiktok_comments:'tiktokCommentsActor',instagram_comments:'instagramCommentsActor',
   tiktok_hashtag:'tiktokHashtagActor',instagram_hashtag:'instagramHashtagActor'
  } as const;
- const enabledKeys={tiktok_hashtag:'tiktokHashtagEnabled',instagram_hashtag:'instagramHashtagEnabled'} as const;
+ const enabledKeys={tiktok_posts:'tiktokPostsEnabled',instagram_posts:'instagramPostsEnabled',tiktok_comments:'tiktokCommentsEnabled',instagram_comments:'instagramCommentsEnabled',tiktok_hashtag:'tiktokHashtagEnabled',instagram_hashtag:'instagramHashtagEnabled'} as const;
  return [...APIFY_PRIMARY_COLLECTORS,...APIFY_STANDBY_COLLECTORS].map(kind=>{
   const actorId=settings[actorKeys[kind]];
-  const isStandby=kind==='tiktok_hashtag'||kind==='instagram_hashtag';
-  return{kind,actorId:typeof actorId==='string'?actorId.trim():'',enabled:isStandby?settings[enabledKeys[kind as keyof typeof enabledKeys]]===true:true};
+  const enabledKey=enabledKeys[kind];
+  return{kind,actorId:typeof actorId==='string'?actorId.trim():'',enabled:typeof settings[enabledKey]==='boolean'?settings[enabledKey]===true:!['tiktok_hashtag','instagram_hashtag'].includes(kind)};
  });
 }
