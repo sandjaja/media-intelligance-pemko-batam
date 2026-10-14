@@ -199,6 +199,26 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
     return reply.code(failed===accounts.length?422:failed?207:200).send({data:{accounts:accounts.length,succeeded,failed,results,clustering,durationMs:Date.now()-startedAt}});
   });
 
+  // Read-only provider cost history; independent of billable collection and app ledger.
+  app.get('/api/social/collection/apify/cost-history',{preHandler:[auth,requireWrite]},async(request,reply)=>{
+    const query=z.object({platform:z.enum(['tiktok','instagram'])}).strict().safeParse(request.query);
+    if(!query.success)return reply.code(400).send({error:'INVALID_APIFY_COST_HISTORY_QUERY'});
+    try{
+      const {decryptIntegrationCredential}=await import('./integration-credentials.js');
+      const {fetchApifyActorCostHistory}=await import('./apify-run-cost-history.js');
+      const {rows}=await pool.query(`SELECT c.credential_ciphertext FROM integration_credentials c
+        JOIN integration_providers p ON p.id=c.provider_id AND p.code='apify' AND p.active=true
+        JOIN organizations o ON o.id=c.organization_id AND o.active=true
+        WHERE c.enabled=true LIMIT 2`);
+      if(rows.length!==1||!rows[0]?.credential_ciphertext)return reply.code(503).send({error:'APIFY_CREDENTIAL_UNAVAILABLE'});
+      const token=decryptIntegrationCredential(rows[0].credential_ciphertext);
+      const actorId=query.data.platform==='tiktok'?'clockworks/tiktok-scraper':'apify/instagram-scraper';
+      const history=await fetchApifyActorCostHistory({token,actorId});
+      return reply.send({platform:query.data.platform,actorId,...history,source:'APIFY_PROVIDER',balanceVerified:false,
+        note:'Historical per-run costs are not proof of available cash balance or future price.'});
+    }catch{return reply.code(502).send({error:'APIFY_COST_HISTORY_UNAVAILABLE'});}
+  });
+
   app.post('/api/social/collection/run',{preHandler:[auth,requireWrite]},async(request,reply)=>{
     const ctx=request.socialIngestAuth!;
     // Reject client attempts to smuggle a paid-run authorization into this
