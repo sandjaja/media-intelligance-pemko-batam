@@ -17,5 +17,9 @@ export async function fetchApifyActorCostHistory(input:{token:string;actorId:str
  });
  const complete=samples.filter(s=>['SUCCEEDED','FAILED','TIMED-OUT','ABORTED'].includes(s.status)&&s.finishedAt!==null&&s.costUsd!==null);
  const averageCostUsd=complete.length?complete.reduce((sum,s)=>sum+s.costUsd!,0)/complete.length:null;
- const withItems=complete.filter(s=>s.status==='SUCCEEDED'&&s.itemCount!==null&&s.itemCount>0);\n const totalItems=withItems.reduce((sum,s)=>sum+s.itemCount!,0);\n const costPerItemUsd=totalItems>0?withItems.reduce((sum,s)=>sum+s.costUsd!,0)/totalItems:null;\n const estimatedCostsUsd=withItems.length>=3&&costPerItemUsd!==null?{'10':costPerItemUsd*10,'20':costPerItemUsd*20,'50':costPerItemUsd*50}:null;\n return{samples,averageCostUsd,costKnownCount:complete.length,partial:samples.some(s=>s.costUsd===null),costPerItemUsd,costPerItemSampleCount:withItems.length,estimatedCostsUsd};
+ const withItems=complete.filter(s=>s.status==='SUCCEEDED'&&s.itemCount!==null&&s.itemCount>0);
+ const totalItems=withItems.reduce((sum,s)=>sum+s.itemCount!,0);
+ const costPerItemUsd=totalItems>0?withItems.reduce((sum,s)=>sum+s.costUsd!,0)/totalItems:null;
+ const estimatedCostsUsd=withItems.length>=3&&costPerItemUsd!==null?{'10':costPerItemUsd*10,'20':costPerItemUsd*20,'50':costPerItemUsd*50}:null;
+ return{samples,averageCostUsd,costKnownCount:complete.length,partial:samples.some(s=>s.costUsd===null),costPerItemUsd,costPerItemSampleCount:withItems.length,estimatedCostsUsd};
 }
