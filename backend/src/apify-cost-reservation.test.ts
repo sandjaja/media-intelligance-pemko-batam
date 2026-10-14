@@ -47,3 +47,23 @@ test('invalid platform fails closed before connecting to ledger',async()=>{
  assert.equal(result.reason,'APIFY_INVALID_RESERVATION_INPUT');
  assert.equal(statements.length,0);
 });
+
+test('provider monthly headroom smaller than Admin budget blocks reservation',async()=>{
+ const {pool,statements}=mockPool({committed:0});
+ const result=await reserveApifyCost(pool,{...request,providerBalanceUsd:0.3});
+ assert.equal(result.reason,'APIFY_BUDGET_EXCEEDED');
+ assert.equal(result.remainingUsd,0.3);
+ assert.equal(statements.some(s=>s.includes('INSERT INTO apify_usage_ledger')),false);
+});
+test('exactly remaining monthly budget is reservable',async()=>{
+ const {pool}=mockPool({committed:3.5});
+ const result=await reserveApifyCost(pool,request);
+ assert.equal(result.reserved,true);
+ assert.equal(result.remainingUsd,0);
+});
+test('unknown run reservations count against monthly budget',async()=>{
+ const {pool,statements}=mockPool({committed:3.7});
+ const result=await reserveApifyCost(pool,request);
+ assert.equal(result.reserved,false);
+ assert.ok(statements.some(s=>s.includes("'UNKNOWN'")));
+});
