@@ -24,3 +24,11 @@ test('history ignores cost detail belonging to a different Actor',async()=>{
  assert.equal(result.estimatedCostsUsd,null);
  assert.equal(result.partial,true);
 });
+
+test('history reads dataset metadata when detailed run omits output count',async()=>{
+ const fetcher=(async(url:string)=>({ok:true,json:async()=>url.includes('/datasets/')?({data:{itemCount:10}}):url.includes('/actor-runs/')?({data:{id:'a',actId:'ACTOR123',status:'SUCCEEDED',usageTotalUsd:0.2,defaultDatasetId:'DATASET123'}}):url.includes('/runs')?({data:{items:[{id:'a',actId:'ACTOR123',status:'SUCCEEDED',finishedAt:'2026-10-15T00:00:00.000Z'}]}}):({data:{id:'ACTOR123'}})})) as unknown as typeof fetch;
+ const result=await fetchApifyActorCostHistory({token:'test-token',actorId:'clockworks/tiktok-scraper',fetcher});
+ assert.equal(result.samples[0].itemCount,10);
+ assert.equal(result.samples[0].costUsd,0.2);
+ assert.equal(result.estimatedCostsUsd,null);
+});
