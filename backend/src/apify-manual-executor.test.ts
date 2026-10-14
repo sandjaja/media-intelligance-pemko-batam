@@ -209,3 +209,26 @@ test('uncertain provider start and failed quarantine returns explicit non-retrya
  assert.equal(result.reason,'APIFY_START_UNKNOWN_LEDGER_UNAVAILABLE');
  assert.equal(calls,1);
 });
+
+test('repeated executor invocation with same reservation never sends second paid POST',async()=>{
+ let status:'RESERVED'|'RUNNING'='RESERVED';
+ const pool={query:async(q:string)=>{
+  if(q.startsWith('SELECT'))return{rows:[{actor_id:base.actorId,platform:'tiktok',status,reserved_usd:'0.500000'}]};
+  if(q.includes("status='RESERVED'")&&q.includes("status='RUNNING'")){
+   if(status!=='RESERVED')return{rows:[]};
+   status='RUNNING';
+   return{rows:[{reserved_usd:'0.500000'}]};
+  }
+  if(q.includes('SET run_id=$3'))return{rows:[{id:1}]};
+  throw Error('UNEXPECTED_SQL');
+ }} as unknown as Pool;
+ let posts=0;
+ const input={...base,explicitlyConfirmed:true,providerChargeCapVerified:true,
+  fetcher:async()=>{posts++;return{ok:true,json:async()=>({data:{id:'provider_run_once'}})} as Response}
+ };
+ const first=await executeClaimedApifyRun(pool,input);
+ const second=await executeClaimedApifyRun(pool,input);
+ assert.equal(first.started,true);
+ assert.equal(second.started,false);
+ assert.equal(posts,1);
+});
