@@ -47,3 +47,22 @@ test('read-only pricing preview does not require paid collector enabled flag',as
  assert.equal(result.billableRunStarted,false);
  assert.equal(result.ready,false);
 });
+
+test('manual preview never exposes a payment-ready quote or starts a paid Actor',async()=>{
+ const settings={tiktokActor:'clockworks/tiktok-scraper',tiktokCommentsActor:'clockworks/tiktok-comments-scraper'};
+ const pool={query:async(sql:string)=>sql.includes('integration_credentials')?{rows:[]}:{rows:[{settings}]}} as unknown as Pool;
+ const result=await previewManualApifyCollection(pool,{platform:'tiktok',requestedBy:'operator-1',maxVideos:50});
+ assert.equal(result.ready,false);
+ assert.equal(result.billableRunStarted,false);
+ assert.equal(result.requiresExplicitConfirmation,true);
+ assert.ok(result.executionBlockers.includes('APIFY_PRICING_NOT_VERIFIED'));
+ assert.ok(result.executionBlockers.includes('APIFY_CHARGE_CAP_NOT_VERIFIED'));
+ assert.ok(result.executionBlockers.includes('APIFY_MANUAL_EXECUTOR_NOT_CONNECTED'));
+ assert.ok(result.chargeQuotes.every(quote=>quote.readyForConfirmation===false));
+});
+test('manual preview rejects unsupported video limits before database access',async()=>{
+ let touched=false;
+ const pool={query:async()=>{touched=true;throw Error('UNEXPECTED_DATABASE_ACCESS')}} as unknown as Pool;
+ await assert.rejects(previewManualApifyCollection(pool,{platform:'tiktok',requestedBy:'operator-1',maxVideos:100 as never}),/APIFY_VIDEO_LIMIT_INVALID/);
+ assert.equal(touched,false);
+});
