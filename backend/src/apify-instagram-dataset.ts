@@ -1,5 +1,6 @@
 import type {Pool} from 'pg';
 import {verifyCompletedApifyRunDataset} from './apify-run-dataset-verification.js';
+import {resolveApifyActorInternalId} from './apify-actor-identity.js';
 import {fetchApifyTikTokDataset} from './apify-tiktok-dataset.js';
 import {normalizeApifyInstagramPosts} from './apify-instagram-post-normalizer.js';
 import {loadOrganizationMediaScope} from './organization-media-scope.js';
@@ -11,10 +12,11 @@ import {ingestSocialBatch} from './social-collector.js';
  * Never accept a dataset ID directly from an unauthenticated browser request.
  */
 export async function ingestCompletedApifyInstagramDataset(pool:Pool,input:{
- datasetId:string;token:string;confirmedRunId:string;expectedActorInternalId:string;fetcher?:typeof fetch;limit?:number
+ datasetId:string;token:string;confirmedRunId:string;fetcher?:typeof fetch;limit?:number
 }){
  if(!/^[a-zA-Z0-9_-]{5,160}$/.test(input.confirmedRunId))throw Error('APIFY_RUN_ID_INVALID');
- await verifyCompletedApifyRunDataset({runId:input.confirmedRunId,datasetId:input.datasetId,actorId:'apify/instagram-scraper',expectedActorInternalId:input.expectedActorInternalId,token:input.token,fetcher:input.fetcher});
+ const expectedActorInternalId=await resolveApifyActorInternalId({actorId:'apify/instagram-scraper',token:input.token,fetcher:input.fetcher});
+ await verifyCompletedApifyRunDataset({runId:input.confirmedRunId,datasetId:input.datasetId,actorId:'apify/instagram-scraper',expectedActorInternalId,token:input.token,fetcher:input.fetcher});
  const items=await fetchApifyTikTokDataset(input);
  const {candidates,rejected}=normalizeApifyInstagramPosts(items);
  const scope=await loadOrganizationMediaScope(pool);
