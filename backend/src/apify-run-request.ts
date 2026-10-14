@@ -9,12 +9,6 @@ export function prepareApifyRunRequest(input:{
  actorId:string;configuredActorId:string;configuredMaxUsd:number|null;
  reservedUsd:number|null;pricingVerified:boolean;collectorEnabled:boolean;
 }):{path:string;query:{maxTotalChargeUsd:number};method:'POST'}|null{
- const approved=new Set([
-  'clockworks/tiktok-scraper','apify/instagram-scraper',
-  'clockworks/tiktok-comments-scraper','apidojo/instagram-comments-scraper-api',
-  'clockworks/tiktok-hashtag-scraper','apify/instagram-hashtag-scraper'
- ]);
- if(!approved.has(input.actorId))return null;
  const cap=buildApifyChargeCap(input);
  if(!cap)return null;
  if(!/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+$/.test(input.actorId))return null;
