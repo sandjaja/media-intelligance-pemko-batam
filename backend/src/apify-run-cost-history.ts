@@ -38,6 +38,8 @@ export async function fetchApifyActorCostHistory(input:{token:string;actorId:str
  const averageCostUsd=complete.length?complete.reduce((sum,s)=>sum+s.costUsd!,0)/complete.length:null;
  const withItems=complete.filter(s=>s.status==='SUCCEEDED'&&s.itemCount!==null&&s.itemCount>0);
  const totalItems=withItems.reduce((sum,s)=>sum+s.itemCount!,0);
+ // An output count is not necessarily the number of billable events. This
+ // historical ratio is display-only and must never authorize a paid run.
  const costPerItemUsd=totalItems>0?withItems.reduce((sum,s)=>sum+s.costUsd!,0)/totalItems:null;
  const estimatedCostsUsd=withItems.length>=3&&costPerItemUsd!==null?{'10':costPerItemUsd*10,'20':costPerItemUsd*20,'50':costPerItemUsd*50}:null;
  return{samples,averageCostUsd,costKnownCount:complete.length,partial:samples.some(s=>s.status==='ACTOR_MISMATCH'||(s.runId&&s.finishedAt&&(s.costUsd===null||s.itemCount===null))),costPerItemUsd,costPerItemSampleCount:withItems.length,estimatedCostsUsd};
