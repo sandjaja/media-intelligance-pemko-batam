@@ -10,6 +10,8 @@ test('reads input schema keys without starting an Actor',async()=>{
  }) as typeof fetch;
  const result=await inspectApifyActorInputSchema({actorId,token:'fake-test-token',fetcher});
  assert.equal(result.verified,true);
+ assert.equal(result.propertyTypes.searchQueries,'array');
+ assert.equal(result.propertyTypes.resultsPerPage,'integer');
  assert.deepEqual(result.acceptedKeys,['searchQueries','resultsPerPage']);
  assert.equal(calls.length,1);
  assert.equal(calls[0].method,'GET');
@@ -19,6 +21,7 @@ test('fails closed for missing schema and missing token',async()=>{
  const fetcher=(async()=>new Response(JSON.stringify({data:{}}),{status:200})) as typeof fetch;
  const missing=await inspectApifyActorInputSchema({actorId,token:'test',fetcher});
  assert.equal(missing.verified,false);
+ assert.deepEqual(missing.propertyTypes,{});
  assert.equal(missing.reason,'APIFY_INPUT_SCHEMA_PROPERTIES_UNAVAILABLE');
  const noToken=await inspectApifyActorInputSchema({actorId,token:' ',fetcher});
  assert.equal(noToken.verified,false);
