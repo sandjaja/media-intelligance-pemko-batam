@@ -16,6 +16,8 @@ export function quoteApifyProviderCappedRun(input:{
 }{
  const blockers:string[]=[];
  const cap=conservativeApifyRunEstimate(input.actorId,input.pricingApproval);
+ if(input.actorId!=='clockworks/tiktok-scraper')
+  blockers.push('APIFY_MANUAL_COLLECTOR_NOT_ENABLED_FOR_ROLLOUT');
  if(!input.collectorEnabled||input.configuredActorId!==input.actorId)
   blockers.push('APIFY_ACTOR_DISABLED_OR_MISMATCHED');
  if(cap===null)blockers.push('APIFY_PRICING_APPROVAL_REQUIRED');
