@@ -15,7 +15,8 @@ export function previewGeographicActorInput(input:{actorId:string;plan:Geographi
  // cannot accidentally trigger an unrelated, billable nationwide search.
  const city=input.plan.city.normalize('NFKC').trim().toLocaleLowerCase('id');
  if(city.length<3||city.length>80)throw Error('APIFY_GEOGRAPHIC_CITY_INVALID');
- const searchTerms=input.plan.queries.slice(0,limit);
+ // Never propose more queries than the chosen total video count.
+ const searchTerms=input.plan.queries.slice(0,Math.min(limit,maxVideos));
  if(searchTerms.some(q=>typeof q!=='string'||q.length<3||q.length>100||
    !q.normalize('NFKC').toLocaleLowerCase('id').split(/\s+/).includes(city)))
   throw Error('APIFY_GEOGRAPHIC_QUERY_OUT_OF_SCOPE');
