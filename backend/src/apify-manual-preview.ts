@@ -99,7 +99,8 @@ export async function previewManualApifyCollection(pool:Pool,input:{
  const chargeQuotes=actorDetails.map(actor=>({kind:actor.kind,actorId:actor.actorId,
   ...buildApifyManualChargeQuote({actorId:actor.actorId,configuredActorId:actor.actorId,
    configuredMaxUsd:actor.adminMaxCostUsd,collectorEnabled:result.configured,
-   pricingApproval:null,providerChargeCapVerified:false,monthlyHeadroomUsd:null})}));
+   pricingApproval:null,providerChargeCapVerified:false,
+   monthlyHeadroomUsd:accountMonthlyHeadroomUsd,adminMonthlyRemainingUsd})}));
  // Neither verified Actor pricing nor provider-enforced caps are wired to the
  // manual endpoint yet. Do not advertise payment readiness based on Admin limits.
  executionBlockers.push('APIFY_PRICING_NOT_VERIFIED','APIFY_CHARGE_CAP_NOT_VERIFIED','APIFY_MANUAL_EXECUTOR_NOT_CONNECTED');
