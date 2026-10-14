@@ -5,7 +5,7 @@ const actorId='clockworks/tiktok-scraper';
 const base={actorId,configuredActorId:actorId,collectorEnabled:true,
  pricingApproval:{actorId,maximumRunCostUsd:0.5,verifiedAt:new Date().toISOString(),
  source:'actor-pricing-confirmed' as const,includesAllEventsAndOverheads:true},
- providerChargeCapVerified:true,monthlyHeadroomUsd:1,adminMonthlyRemainingUsd:1};
+ providerChargeCapVerified:true,monthlyHeadroomUsd:1,adminMonthlyRemainingUsd:1,billingMode:'PREPAID' as const,billingModeVerified:true};
 test('budget can be evaluated without a manually configured Actor cap',()=>{
  const result=evaluateApifyManualBudget(base);
  assert.equal(result.maximumChargeUsd,0.5);
@@ -54,6 +54,17 @@ test('unknown billing mode cannot be assumed postpaid',()=>{
 
 test('unverified postpaid flag cannot bypass cash balance checks',()=>{
  const result=evaluateApifyManualBudget({...base,billingMode:'POSTPAID',cashBalanceUsd:null});
+ assert.equal(result.readyForConfirmation,false);
+ assert.ok(result.blockers.includes('APIFY_BILLING_MODE_UNVERIFIED'));
+});
+
+test('unverified prepaid mode cannot authorize paid run even with sufficient cash',()=>{
+ const result=evaluateApifyManualBudget({...base,billingModeVerified:false,cashBalanceUsd:10});
+ assert.equal(result.readyForConfirmation,false);
+ assert.ok(result.blockers.includes('APIFY_BILLING_MODE_UNVERIFIED'));
+});
+test('unknown billing mode cannot authorize even with a reported cash balance',()=>{
+ const result=evaluateApifyManualBudget({...base,billingMode:'UNKNOWN',cashBalanceUsd:10});
  assert.equal(result.readyForConfirmation,false);
  assert.ok(result.blockers.includes('APIFY_BILLING_MODE_UNVERIFIED'));
 });
