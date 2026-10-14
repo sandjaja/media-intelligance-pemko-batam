@@ -28,3 +28,9 @@ test('rejects future, malformed and non-finite pricing approvals',()=>{
  assert.equal(conservativeApifyRunEstimate(actorId,{...approval,maximumRunCostUsd:NaN}),null);
  assert.equal(conservativeApifyRunEstimate(actorId,{...approval,maximumRunCostUsd:0}),null);
 });
+
+test('rejects fractional-cent approvals to prevent provider cap rounding ambiguity',()=>{
+ assert.equal(conservativeApifyRunEstimate(actorId,{...approval,maximumRunCostUsd:0.305}),null);
+ assert.equal(conservativeApifyRunEstimate(actorId,{...approval,maximumRunCostUsd:0.001}),null);
+ assert.equal(conservativeApifyRunEstimate(actorId,{...approval,maximumRunCostUsd:0.31}),0.31);
+});
