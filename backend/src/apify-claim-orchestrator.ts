@@ -22,7 +22,9 @@ export async function prepareAndClaimApifyRun(pool:Pool,input:{
  // If the ledger was altered between read and claim, fail closed and retain
  // reservation for manual reconciliation instead of risking an unbudgeted run.
  if(claimed.reservedUsd===null||
-    claimed.reservedUsd<prepared.request.query.maxTotalChargeUsd){
+    !Number.isFinite(claimed.reservedUsd)||
+    claimed.reservedUsd<prepared.request.query.maxTotalChargeUsd||
+    claimed.reservedUsd>input.configuredMaxUsd!){
   await markApifyRunUnknown(pool,{reservationKey:input.reservationKey,claimId:input.claimId,
    reason:'CLAIMED_RESERVATION_BELOW_APPROVED_CHARGE_CAP'});
   return{ready:false,reason:'APIFY_CLAIM_AMOUNT_MISMATCH'};
