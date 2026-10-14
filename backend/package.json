@@ -14,7 +14,7 @@
     "db:migrate": "tsx src/migrate.ts",
     "db:seed": "tsx src/seed.ts",
     "db:setup": "npm run db:migrate && npm run db:seed",
-    "test:apify-ledger-preview": "node --import tsx --test src/apify-cost-concurrency.integration.test.ts"
+    "test:apify-ledger-preview": "node --import tsx --test src/apify-cost-concurrency.integration.test.ts src/apify-unknown-reconciliation.integration.test.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
