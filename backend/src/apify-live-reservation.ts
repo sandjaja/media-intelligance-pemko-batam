@@ -18,6 +18,13 @@ export async function reserveApifyWithLiveLimits(pool:Pool,input:{
   return{reserved:false,reason:'APIFY_ESTIMATE_REQUIRED',remainingUsd:null};
  if(!input.credentialsVerified||!input.actorConfigured)
   return{reserved:false,reason:!input.credentialsVerified?'APIFY_CREDENTIAL_UNVERIFIED':'APIFY_ACTOR_NOT_CONFIGURED',remainingUsd:null};
+ // Reject unverified paid requests before reading credentials or calling Apify.
+ // This flag is only accepted from a trusted server-side verifier, never HTTP input.
+ if(input.providerChargeCapVerified!==true)
+  return{reserved:false,reason:'APIFY_CHARGE_CAP_NOT_VERIFIED',remainingUsd:null};
+ const approved=conservativeApifyRunEstimate(input.actorId,input.pricingApproval??null);
+ if(approved===null||Math.abs(approved-input.estimatedUsd)>0.000001)
+  return{reserved:false,reason:'APIFY_PRICING_APPROVAL_REQUIRED',remainingUsd:null};
  const configured=await loadApifyAdminCollectorSettings(pool);
  const selected=configured.find(c=>c.actorId===input.actorId);
  if(!selected||!selected.enabled)return{reserved:false,reason:'APIFY_ACTOR_DISABLED_OR_NOT_CONFIGURED',remainingUsd:null};
@@ -47,11 +54,6 @@ export async function reserveApifyWithLiveLimits(pool:Pool,input:{
  // Headroom is an account usage allowance, not prepaid cash. Only reserve
  // against it when a trusted server-side caller independently verified that
  // Apify enforces the per-run PAY_PER_EVENT charge cap.
- if(input.providerChargeCapVerified!==true)
-  return{reserved:false,reason:'APIFY_CHARGE_CAP_NOT_VERIFIED',remainingUsd:null};
- const approved=conservativeApifyRunEstimate(input.actorId,input.pricingApproval??null);
- if(approved===null||Math.abs(approved-input.estimatedUsd)>0.000001)
-  return{reserved:false,reason:'APIFY_PRICING_APPROVAL_REQUIRED',remainingUsd:null};
  return reserveApifyCost(pool,{
   reservationKey:input.reservationKey,actorId:input.actorId,platform:input.platform,
   estimatedUsd:approved,monthlyBudgetUsd:budget,providerBalanceUsd:headroom
