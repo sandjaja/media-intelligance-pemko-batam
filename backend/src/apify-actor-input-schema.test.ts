@@ -15,7 +15,7 @@ test('reads input schema keys without starting an Actor',async()=>{
  assert.deepEqual(result.acceptedKeys,['searchQueries','resultsPerPage']);
  assert.equal(calls.length,1);
  assert.equal(calls[0].method,'GET');
- assert.match(calls[0].url,/clockworks~tiktok-scraper\/builds\/default\/input-schema$/);
+ assert.match(calls[0].url,/clockworks~tiktok-scraper\/builds\/default$/);
 });
 test('fails closed for missing schema and missing token',async()=>{
  const fetcher=(async()=>new Response(JSON.stringify({data:{}}),{status:200})) as typeof fetch;
