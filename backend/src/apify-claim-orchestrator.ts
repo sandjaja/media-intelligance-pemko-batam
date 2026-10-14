@@ -19,11 +19,12 @@ export async function prepareAndClaimApifyRun(pool:Pool,input:{
  const claimed=await claimApifyReservation(pool,{...input,minimumReservedUsd:prepared.request.query.maxTotalChargeUsd});
  if(!claimed.claimed)return{ready:false,reason:claimed.reason};
  // The conditional claim wins exactly once; verify amount against prepared cap.
+ // Any amount drift between preparation and claim is suspicious. Fail closed.
  // If the ledger was altered between read and claim, fail closed and retain
  // reservation for manual reconciliation instead of risking an unbudgeted run.
  if(claimed.reservedUsd===null||
     !Number.isFinite(claimed.reservedUsd)||
-    claimed.reservedUsd<prepared.request.query.maxTotalChargeUsd||
+    claimed.reservedUsd!==prepared.request.query.maxTotalChargeUsd||
     input.configuredMaxUsd===null||
     claimed.reservedUsd>input.configuredMaxUsd){
   await markApifyRunUnknown(pool,{reservationKey:input.reservationKey,claimId:input.claimId,
