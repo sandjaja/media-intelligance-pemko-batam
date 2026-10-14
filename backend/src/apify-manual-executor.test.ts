@@ -63,3 +63,18 @@ test('a client confirmation and charge-cap flag cannot bypass missing server pri
  assert.equal(result.started,false);
  assert.equal(result.reason,'APIFY_PRICING_APPROVAL_REQUIRED');
 });
+
+test('expired pricing approval is rejected before database or network access',async()=>{
+ const result=await executeClaimedApifyRun(unreachablePool,{
+  ...base,explicitlyConfirmed:true,providerChargeCapVerified:true,
+  pricingApproval:{...base.pricingApproval,verifiedAt:'2020-01-01T00:00:00.000Z'}
+ });
+ assert.equal(result.reason,'APIFY_PRICING_APPROVAL_EXPIRED_OR_INVALID');
+});
+test('approved maximum above Admin ceiling is rejected before database access',async()=>{
+ const result=await executeClaimedApifyRun(unreachablePool,{
+  ...base,explicitlyConfirmed:true,providerChargeCapVerified:true,
+  pricingApproval:{...base.pricingApproval,maximumRunCostUsd:0.6}
+ });
+ assert.equal(result.reason,'APIFY_APPROVED_COST_EXCEEDS_ADMIN_LIMIT');
+});
