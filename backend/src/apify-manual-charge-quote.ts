@@ -11,6 +11,7 @@ export function buildApifyManualChargeQuote(input:{
  actorId:string;configuredActorId:string;configuredMaxUsd:number|null;
  collectorEnabled:boolean;pricingApproval:ApifyPricingApproval|null;
  providerChargeCapVerified:boolean;monthlyHeadroomUsd:number|null;
+ adminMonthlyRemainingUsd?:number|null;
 }):{
  readyForConfirmation:boolean;maximumChargeUsd:number|null;
  adminLimitUsd:number|null;monthlyHeadroomUsd:number|null;blockers:string[];
@@ -28,6 +29,9 @@ export function buildApifyManualChargeQuote(input:{
  const limit=input.configuredMaxUsd;
  if(limit===null||!Number.isFinite(limit)||limit<=0||estimate!==null&&estimate>limit)
   blockers.push('APIFY_ACTOR_LIMIT_EXCEEDED_OR_UNAVAILABLE');
+ const monthlyRemaining=input.adminMonthlyRemainingUsd;
+ if(monthlyRemaining!==undefined&&(monthlyRemaining===null||!Number.isFinite(monthlyRemaining)||monthlyRemaining<0||estimate!==null&&estimate>monthlyRemaining))
+  blockers.push('APIFY_ADMIN_MONTHLY_BUDGET_INSUFFICIENT_OR_UNAVAILABLE');
  const headroom=input.monthlyHeadroomUsd;
  if(headroom===null||!Number.isFinite(headroom)||headroom<0||estimate!==null&&estimate>headroom)
   blockers.push('APIFY_MONTHLY_HEADROOM_INSUFFICIENT_OR_UNAVAILABLE');
