@@ -14,7 +14,7 @@ test('no pricing, stale pricing or partial reservation fails closed',()=>{
  assert.equal(authorizePreparedApifyRun({...base,pricingApproval:{...base.pricingApproval,includesAllEventsAndOverheads:false}}),null);
 });
 
-test('larger reservation never raises provider cap above pricing approval',()=>{
+test('larger reservation than approved maximum is rejected',()=>{
  const request=authorizePreparedApifyRun({...base,reservedUsd:0.5,pricingApproval:{...base.pricingApproval,maximumRunCostUsd:0.3}});
- assert.equal(request?.query.maxTotalChargeUsd,0.3);
+ assert.equal(request,null);
 });
