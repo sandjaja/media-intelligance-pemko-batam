@@ -8,7 +8,7 @@ const unreachablePool={query:async()=>{throw new Error('DATABASE_MUST_NOT_BE_TOU
 const base={
  reservationKey:'test-reservation',actorId:'clockworks/tiktok-scraper',
  platform:'tiktok' as const,configuredActorId:'clockworks/tiktok-scraper',
- configuredMaxUsd:0.5,collectorEnabled:true,pricingApproval:null,
+ configuredMaxUsd:0.5,collectorEnabled:true,pricingApproval:{actorId:'clockworks/tiktok-scraper',maximumRunCostUsd:0.5,verifiedAt:new Date().toISOString(),source:'actor-pricing-confirmed' as const,includesAllEventsAndOverheads:true},
  claimId:'claim:test12345678',token:'secret',explicitlyConfirmed:false,
  actorInput:{hashtags:['batam']}
 };
@@ -54,4 +54,12 @@ test('executor rejects unverified provider charge cap before any ledger or netwo
  const result=await executeClaimedApifyRun(unreachablePool,{...base,explicitlyConfirmed:true});
  assert.equal(result.started,false);
  assert.equal(result.reason,'APIFY_CHARGE_CAP_NOT_VERIFIED');
+});
+
+test('a client confirmation and charge-cap flag cannot bypass missing server pricing approval',async()=>{
+ const result=await executeClaimedApifyRun(unreachablePool,{
+  ...base,explicitlyConfirmed:true,providerChargeCapVerified:true,pricingApproval:null
+ });
+ assert.equal(result.started,false);
+ assert.equal(result.reason,'APIFY_PRICING_APPROVAL_REQUIRED');
 });
