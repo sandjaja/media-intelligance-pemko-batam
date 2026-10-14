@@ -38,3 +38,10 @@ test('duplicate Actor IDs cannot bypass checkbox through another collector',asyn
  assert.equal(result.reason,'APIFY_ACTOR_ID_AMBIGUOUS');
  assert.equal(queries,1);
 });
+
+test('unavailable balance never reaches paid reservation',async()=>{
+ const pool={query:async(sql:string)=>sql.includes('SELECT s.settings\n')?{rows:[{settings:{tiktokActor:'clockworks/tiktok-scraper'}}]}:sql.includes('actorMaxCostUsd')?{rows:[{limits:{tiktok_posts:0.5}}]}:sql.includes('credential_ciphertext')?{rows:[]}:{rows:[{budget:'4'}]},connect:()=>{throw Error('reservation must not run')}} as unknown as Pool;
+ const result=await reserveApifyWithLiveLimits(pool,input);
+ assert.equal(result.reserved,false);
+ assert.equal(result.reason,'APIFY_ACCOUNT_LIMITS_UNAVAILABLE');
+});
