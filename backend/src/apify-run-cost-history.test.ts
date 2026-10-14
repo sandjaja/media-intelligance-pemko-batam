@@ -32,3 +32,16 @@ test('history reads dataset metadata when detailed run omits output count',async
  assert.equal(result.samples[0].costUsd,0.2);
  assert.equal(result.estimatedCostsUsd,null);
 });
+
+test('history never counts active runs as finalized spend',async()=>{
+ let detailRequests=0;
+ const fetcher=(async(url:string)=>({ok:true,json:async()=>{
+  if(url.includes('/actor-runs/')){detailRequests++;return{data:{id:'active',actId:'ACTOR123',status:'RUNNING',usageTotalUsd:0.5}};}
+  if(url.includes('/runs'))return{data:{items:[{id:'active',actId:'ACTOR123',status:'RUNNING',usageTotalUsd:0.5}]}};
+  return{data:{id:'ACTOR123'}};
+ }})) as unknown as typeof fetch;
+ const result=await fetchApifyActorCostHistory({token:'test-token',actorId:'clockworks/tiktok-scraper',fetcher});
+ assert.equal(detailRequests,0);
+ assert.equal(result.costKnownCount,0);
+ assert.equal(result.estimatedCostsUsd,null);
+});
