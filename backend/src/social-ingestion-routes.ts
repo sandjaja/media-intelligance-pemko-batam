@@ -299,7 +299,7 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
       await verifyCompletedApifyRunDataset({runId,datasetId,actorId,expectedActorInternalId,token});
       const items=platform==='tiktok'
         ?await (await import('./apify-tiktok-dataset.js')).fetchApifyTikTokDataset({datasetId,token})
-        :await (await import('./apify-instagram-dataset.js')).fetchApifyInstagramDataset({datasetId,token});
+        :await (await import('./apify-tiktok-dataset.js')).fetchApifyTikTokDataset({datasetId,token});
       const normalized=platform==='tiktok'
         ?(await import('./apify-tiktok-post-normalizer.js')).normalizeApifyTikTokPosts(items)
         :(await import('./apify-instagram-post-normalizer.js')).normalizeApifyInstagramPosts(items);
