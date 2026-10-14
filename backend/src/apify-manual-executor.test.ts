@@ -98,3 +98,11 @@ test('disabled collector fails before any ledger claim or paid request',async()=
  assert.equal(result.reason,'APIFY_COLLECTOR_DISABLED');
  assert.equal(networkCalled,false);
 });
+
+test('invalid claim identifier is rejected before database or provider access',async()=>{
+ const result=await executeClaimedApifyRun(unreachablePool,{
+  ...base,explicitlyConfirmed:true,providerChargeCapVerified:true,claimId:'claim:short'
+ });
+ assert.equal(result.started,false);
+ assert.equal(result.reason,'APIFY_CLAIM_ID_INVALID');
+});
