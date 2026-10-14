@@ -1,3 +1,4 @@
+import {isApifyPreviewTestConnection} from './apify-preview-test-guard.js';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {Pool} from 'pg';
@@ -9,7 +10,7 @@ import {reserveApifyCost} from './apify-cost-reservation.js';
  * production or unmarked connections. Uses unique keys and cleans its rows.
  */
 const url=process.env.APIFY_LEDGER_TEST_DATABASE_URL;
-const preview=process.env.APIFY_LEDGER_TEST_PREVIEW==='true';
+const preview=isApifyPreviewTestConnection({databaseUrl:url,expectedHost:process.env.APIFY_LEDGER_TEST_EXPECTED_HOST,previewFlag:process.env.APIFY_LEDGER_TEST_PREVIEW});
 test('concurrent reservations cannot exceed shared budget (Preview opt-in)',{skip:!url||!preview},async()=>{
  const pool=new Pool({connectionString:url,max:3});
  const prefix='apify-ci-concurrency-'+randomUUID();
