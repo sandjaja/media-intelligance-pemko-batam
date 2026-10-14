@@ -25,3 +25,10 @@ test('fails closed on missing token and provider error',async()=>{
  const fetchImpl=(async()=>({ok:false,status:429})) as unknown as typeof fetch;
  assert.equal((await fetchApifyRunStatus({...base,fetchImpl})).reason,'APIFY_RUN_LOOKUP_HTTP_429');
 });
+
+test('does not expose in-progress provider usage as final cost',async()=>{
+ const fetchImpl=(async()=>({ok:true,json:async()=>({data:{id:base.providerRunId,status:'RUNNING',usageTotalUsd:0.2}})})) as unknown as typeof fetch;
+ const result=await fetchApifyRunStatus({...base,fetchImpl});
+ assert.equal(result.actualUsd,null);
+ assert.equal(result.reason,'APIFY_RUN_COST_UNVERIFIED');
+});
