@@ -22,7 +22,7 @@ export async function fetchApifyActorCostHistory(input:{token:string;actorId:str
  // for a bounded sample before calculating any per-item estimate.
  const verifiedIds=new Set<string>();
  // Keep provider requests bounded: at most three detail reads concurrently.
- const candidates=samples.filter(s=>s.runId&&s.finishedAt).slice(0,10);
+ const candidates=samples.filter(s=>s.runId&&s.finishedAt&&['SUCCEEDED','FAILED','TIMED-OUT','ABORTED'].includes(s.status)).slice(0,10);
  for(let offset=0;offset<candidates.length;offset+=3){
  await Promise.all(candidates.slice(offset,offset+3).map(async sample=>{
   try{
