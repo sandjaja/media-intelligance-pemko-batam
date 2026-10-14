@@ -1,6 +1,8 @@
 import type {Pool} from 'pg';
 import {ingestSocialBatch} from './social-collector.js';
 import {normalizeApifyTikTokPosts} from './apify-tiktok-post-normalizer.js';
+import {loadOrganizationMediaScope} from './organization-media-scope.js';
+import {classifySocialOrganizationScope} from './social-organization-scope.js';
 
 type Fetcher=typeof fetch;
 export async function fetchApifyTikTokDataset(input:{datasetId:string;token:string;fetcher?:Fetcher;limit?:number}):Promise<unknown[]>{
@@ -27,6 +29,10 @@ export async function ingestCompletedApifyTikTokDataset(pool:Pool,input:{
  if(!/^[a-zA-Z0-9_-]{5,160}$/.test(input.confirmedRunId))throw Error('APIFY_RUN_ID_INVALID');
  const items=await fetchApifyTikTokDataset(input);
  const {candidates,rejected}=normalizeApifyTikTokPosts(items);
- const result=candidates.length?await ingestSocialBatch(pool,candidates,'apify-tiktok-posts'):{received:0,succeeded:0,failed:0,results:[]};
- return{datasetItems:items.length,rejected,...result};
+ const scope=await loadOrganizationMediaScope(pool);
+ if(!scope)throw Error('APIFY_ORGANIZATION_SCOPE_UNAVAILABLE');
+ const inScope=candidates.filter(candidate=>classifySocialOrganizationScope({title:candidate.title,content:candidate.content},scope).status!=='OUT_OF_SCOPE');
+ const outOfScope=candidates.length-inScope.length;
+ const result=inScope.length?await ingestSocialBatch(pool,inScope,'apify-tiktok-posts'):{received:0,succeeded:0,failed:0,results:[]};
+ return{datasetItems:items.length,rejected,outOfScope,...result};
 }
