@@ -6,7 +6,7 @@ const base={actorId,configuredActorId:actorId,configuredMaxUsd:0.5,
  collectorEnabled:true,pricingApproval:{actorId,maximumRunCostUsd:0.5,
  verifiedAt:new Date().toISOString(),source:'actor-pricing-confirmed' as const,
  includesAllEventsAndOverheads:true},
- providerChargeCapVerified:true,monthlyHeadroomUsd:1};
+ providerChargeCapVerified:true,monthlyHeadroomUsd:1,adminMonthlyRemainingUsd:1};
 test('read-only quote reports maximum charge without executing provider',()=>{
  const quote=buildApifyManualChargeQuote(base);
  assert.equal(quote.readyForConfirmation,true);
@@ -91,4 +91,10 @@ test('verified cheaper estimate cannot bypass full configured ceiling against pr
  const quote=buildApifyManualChargeQuote({...base,configuredMaxUsd:0.9,monthlyHeadroomUsd:0.6});
  assert.equal(quote.readyForConfirmation,false);
  assert.ok(quote.blockers.includes('APIFY_MONTHLY_HEADROOM_INSUFFICIENT_OR_UNAVAILABLE'));
+});
+
+test('missing Admin budget is never interpreted as permission to spend',()=>{
+ const quote=buildApifyManualChargeQuote({...base,adminMonthlyRemainingUsd:null});
+ assert.equal(quote.readyForConfirmation,false);
+ assert.ok(quote.blockers.includes('APIFY_ADMIN_MONTHLY_BUDGET_INSUFFICIENT_OR_UNAVAILABLE'));
 });
