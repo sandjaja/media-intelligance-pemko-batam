@@ -39,3 +39,24 @@ test('provider response exceeding explicit manual import cap is rejected',async(
   fetcher:async()=>({ok:true,json:async()=>Array.from({length:11},(_,i)=>({id:i}))} as Response)}),
   /APIFY_DATASET_SHAPE_INVALID/);
 });
+
+test('historical import fetch enforces every UI video selection before normalization',async()=>{
+ for(const limit of [10,20,50] as const){
+  let calls=0;
+  const items=await fetchApifyTikTokDataset({datasetId:'dataset_12345',token:'secret',limit:resolveApifyManualImportLimit(limit),
+   fetcher:async(url)=>{
+    calls++;
+    assert.equal(new URL(String(url)).searchParams.get('limit'),String(limit));
+    return{ok:true,json:async()=>Array.from({length:limit},(_,i)=>({id:String(i)}))} as Response;
+   }});
+  assert.equal(calls,1);
+  assert.equal(items.length,limit);
+ }
+});
+test('historical import rejects provider over-return at 20 and 50 before ingestion',async()=>{
+ for(const limit of [20,50] as const){
+  await assert.rejects(fetchApifyTikTokDataset({datasetId:'dataset_12345',token:'secret',limit,
+   fetcher:async()=>({ok:true,json:async()=>Array.from({length:limit+1},(_,i)=>({id:i}))} as Response)}),
+   /APIFY_DATASET_SHAPE_INVALID/);
+ }
+});
