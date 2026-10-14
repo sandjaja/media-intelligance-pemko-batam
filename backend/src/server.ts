@@ -335,11 +335,11 @@ app.post('/api/social/instagram/public-profile-smoke-test',{preHandler:[requireA
  * Read-only until a fully budget-capped executor is connected.
  */
 app.post('/api/social/apify/manual-preview',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
- const parsed=z.object({platform:z.enum(['tiktok','instagram'])}).strict().safeParse(request.body);
+ const parsed=z.object({platform:z.enum(['tiktok','instagram']),maxVideos:z.union([z.literal(10),z.literal(20),z.literal(50)]).optional()}).strict().safeParse(request.body);
  if(!parsed.success)return reply.code(400).send({error:'INVALID_APIFY_MANUAL_PLATFORM'});
  const requestedBy=String(request.user?.id??'');
  if(!requestedBy)return reply.code(401).send({error:'AUTH_REQUIRED'});
- const result=await previewManualApifyCollection(pool,{platform:parsed.data.platform,requestedBy});
+ const result=await previewManualApifyCollection(pool,{platform:parsed.data.platform,requestedBy,maxVideos:parsed.data.maxVideos});
  return{data:{...result,platform:parsed.data.platform,mode:'preview_only',billableRunStarted:false}};
 });
 app.post('/api/social/youtube/account-smoke-test',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{
