@@ -7,11 +7,15 @@ test('TikTok dry run uses Batam-scoped terms and never authorizes a paid run',()
  assert.deepEqual(result.searchTerms,['Batam','Sekupang Batam']);
  assert.equal(result.readyForPaidRun,false);
  assert.equal(result.schemaVerified,false);
+ assert.equal(result.proposedInput.searchSection,'/video');
+ assert.equal(result.proposedInput.resultsPerPage,5);
 });
 test('Instagram input proposal remains explicitly unverified',()=>{
  const result=previewGeographicActorInput({actorId:'apify/instagram-scraper',plan});
  assert.equal(result.readyForPaidRun,false);
- assert.ok(result.blockers.includes('APIFY_ACTOR_INPUT_SCHEMA_NOT_VERIFIED'));
+ assert.equal(result.proposedInput.search,'Batam');
+ assert.equal(result.proposedInput.searchType,'place');
+ assert.ok(result.blockers.includes('APIFY_ACTOR_INPUT_RUNTIME_NOT_VERIFIED'));
 });
 test('rejects unknown Actor and excessive query count',()=>{
  assert.throws(()=>previewGeographicActorInput({actorId:'unknown/actor',plan}),/APIFY_GEOGRAPHIC_ACTOR_NOT_SUPPORTED/);
