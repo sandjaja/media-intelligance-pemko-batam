@@ -10,7 +10,7 @@ const base={
  platform:'tiktok' as const,configuredActorId:'clockworks/tiktok-scraper',
  configuredMaxUsd:0.5,collectorEnabled:true,pricingApproval:{actorId:'clockworks/tiktok-scraper',maximumRunCostUsd:0.5,verifiedAt:new Date().toISOString(),source:'actor-pricing-confirmed' as const,includesAllEventsAndOverheads:true},
  claimId:'claim:test12345678',token:'secret',explicitlyConfirmed:false,
- actorInput:{hashtags:['batam']}
+ actorInput:{searchQueries:['Batam','Sekupang Batam'],searchSection:'/video',resultsPerPage:5,commentsPerPost:0,shouldDownloadVideos:false}
 };
 test('executor refuses execution without explicit confirmation',async()=>{
  let called=false;
@@ -251,4 +251,13 @@ test('provider HTTP error is treated as uncertain, not a safe retry',async()=>{
  assert.equal(result.reason,'APIFY_START_UNKNOWN_RECONCILIATION_REQUIRED');
  assert.equal(posts,1);
  assert.ok(sql.some(q=>q.includes("SET status='UNKNOWN'")));
+});
+
+test('executor rejects unscoped TikTok queries before claiming funds',async()=>{
+ const result=await executeClaimedApifyRun(unreachablePool,{
+  ...base,explicitlyConfirmed:true,providerChargeCapVerified:true,
+  actorInput:{...base.actorInput,searchQueries:['Jakarta']}
+ });
+ assert.equal(result.started,false);
+ assert.equal(result.reason,'APIFY_TIKTOK_GEOGRAPHIC_INPUT_NOT_VERIFIED');
 });
