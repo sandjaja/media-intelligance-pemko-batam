@@ -203,7 +203,7 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
     const ctx=request.socialIngestAuth!;
     // Reject client attempts to smuggle a paid-run authorization into this
     // preview endpoint. A future paid route must have separate server checks.
-    const selection=z.object({platform:z.enum(['semua','tiktok','instagram','youtube']).default('youtube')}).strict().safeParse(request.body??{});
+    const selection=z.object({platform:z.enum(['semua','tiktok','instagram','youtube','apify']).default('youtube')}).strict().safeParse(request.body??{});
     if(!selection.success)return reply.code(400).send({error:'INVALID_SOCIAL_COLLECTION_PLATFORM'});
     // Preserve the existing YouTube path; paid Apify platforms remain preview-only.
     const platform=selection.data.platform;
