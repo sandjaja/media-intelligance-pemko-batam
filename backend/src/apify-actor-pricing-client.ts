@@ -4,7 +4,16 @@ export function parseApifyActorPricing(payload:unknown):ApifyActorPricingSnapsho
  if(!payload||typeof payload!=='object')return null;
  const data=(payload as Record<string,unknown>).data;
  if(!data||typeof data!=='object'||Array.isArray(data))return null;
- const pricing=(data as Record<string,unknown>).pricingInfo;
+ const actor=data as Record<string,unknown>;
+ // GET /v2/acts/:actorId returns pricingInfos (historical records), not
+ // run-level pricingInfo. Only use records already effective at this instant.
+ const records=Array.isArray(actor.pricingInfos)?actor.pricingInfos:[];
+ const effective=records.filter((entry):entry is Record<string,unknown>=>{
+  if(!entry||typeof entry!=='object'||Array.isArray(entry))return false;
+  const started=(entry as Record<string,unknown>).startedAt;
+  return typeof started==='string'&&Number.isFinite(Date.parse(started))&&Date.parse(started)<=Date.now();
+ }).sort((a,b)=>Date.parse(b.startedAt as string)-Date.parse(a.startedAt as string));
+ const pricing=effective[0]??actor.currentPricingInfo;
  if(!pricing||typeof pricing!=='object'||Array.isArray(pricing))return null;
  const info=pricing as Record<string,unknown>;
  const model=info.pricingModel;
@@ -29,7 +38,7 @@ export async function inspectApifyActorPricing(actorId:string,apiKey:string,fetc
   if(snapshot)return{snapshot,reason:'OK'};
   // Report only fixed diagnostic categories. Never expose provider payload or token.
   const data=payload&&typeof payload==='object'?(payload as Record<string,unknown>).data:null;
-  const info=data&&typeof data==='object'&&!Array.isArray(data)?(data as Record<string,unknown>).pricingInfo:null;
+  const info=data&&typeof data==='object'&&!Array.isArray(data)?((data as Record<string,unknown>).pricingInfos??(data as Record<string,unknown>).currentPricingInfo):null;
   const metadataShape=!data||typeof data!=='object'||Array.isArray(data)?'NO_DATA':!info||typeof info!=='object'||Array.isArray(info)?'NO_PRICING_INFO':typeof (info as Record<string,unknown>).pricingModel!=='string'?'MISSING_PRICING_MODEL':'UNKNOWN_PRICING_MODEL';
   return{snapshot:null,reason:'UNSUPPORTED_METADATA',metadataShape};
  }catch{return{snapshot:null,reason:'NETWORK_UNAVAILABLE'}}finally{clearTimeout(timer)}
