@@ -18,3 +18,8 @@ test('geographic fallback retains city as first discovery query',()=>{
  assert.equal(plan.queries[0],'Batam');
  assert.ok(plan.queries.every(q=>q.toLowerCase().includes('batam')));
 });
+
+test('discovery query list never requires issue or master keywords',()=>{
+ const plan=buildGeographicSearchPlan({...scope,districts:[],villages:[],areaAliases:[]});
+ assert.deepEqual(plan.queries,['Batam']);
+});
