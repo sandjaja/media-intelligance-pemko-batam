@@ -41,3 +41,11 @@ test('executor keeps Instagram preview-only during TikTok rollout',async()=>{
  });
  assert.equal(result.reason,'APIFY_MANUAL_COLLECTOR_NOT_ENABLED_FOR_ROLLOUT');
 });
+
+test('executor rejects unapproved TikTok collector without touching database',async()=>{
+ const result=await executeClaimedApifyRun(unreachablePool,{
+  ...base,explicitlyConfirmed:true,actorId:'clockworks/tiktok-comments-scraper',configuredActorId:'clockworks/tiktok-comments-scraper'
+ });
+ assert.equal(result.started,false);
+ assert.equal(result.reason,'APIFY_MANUAL_COLLECTOR_NOT_ENABLED_FOR_ROLLOUT');
+});
