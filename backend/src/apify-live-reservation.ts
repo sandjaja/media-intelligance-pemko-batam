@@ -2,7 +2,6 @@ import type {Pool} from 'pg';
 import {loadApifyAdminBudget} from './apify-admin-budget.js';
 import {loadApifyAdminCollectorSettings} from './apify-admin-collector-settings.js';
 import {loadApifyAccountHeadroom} from './apify-account-headroom.js';
-import {preflightApifyReservation} from './apify-reservation-preflight.js';
 
 /** Combined fail-closed preflight. Account headroom is a usage-limit allowance,
  * not cash balance. Does not execute Actors. The caller must supply a
@@ -41,7 +40,8 @@ export async function reserveApifyWithLiveLimits(pool:Pool,input:{
  if(input.estimatedUsd>ceiling)return{reserved:false,reason:'APIFY_ACTOR_LIMIT_EXCEEDED',remainingUsd:null};
  const headroom=await loadApifyAccountHeadroom(pool,fetcher);
  if(headroom===null)return{reserved:false,reason:'APIFY_ACCOUNT_LIMITS_UNAVAILABLE',remainingUsd:null};
- return preflightApifyReservation(pool,{
-  ...input,adminMonthlyBudgetUsd:budget,providerBalanceUsd:headroom
- });
+ if(headroom<input.estimatedUsd)return{reserved:false,reason:'APIFY_MONTHLY_HEADROOM_INSUFFICIENT',remainingUsd:headroom};
+ // Monthly headroom does not prove actual spendable USD balance. Until a
+ // verified provider balance is available, never create a paid reservation.
+ return{reserved:false,reason:'APIFY_PROVIDER_BALANCE_UNAVAILABLE',remainingUsd:null};
 }
