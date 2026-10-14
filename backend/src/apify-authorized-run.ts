@@ -18,7 +18,7 @@ export function authorizePreparedApifyRun(input:{
  if(input.configuredMaxUsd===null||input.configuredMaxUsd<estimated)return null;
  return prepareApifyRunRequest({
   actorId:input.actorId,configuredActorId:input.configuredActorId,
-  configuredMaxUsd:input.configuredMaxUsd,reservedUsd:input.reservedUsd,
+  configuredMaxUsd:input.configuredMaxUsd,reservedUsd:Math.min(input.reservedUsd,estimated),
   collectorEnabled:input.collectorEnabled,pricingVerified:true
  });
 }
