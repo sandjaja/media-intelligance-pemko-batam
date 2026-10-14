@@ -15,7 +15,7 @@ export function previewGeographicActorInput(input:{actorId:string;plan:Geographi
  if(city.length<3||city.length>80)throw Error('APIFY_GEOGRAPHIC_CITY_INVALID');
  const searchTerms=input.plan.queries.slice(0,limit);
  if(searchTerms.some(q=>typeof q!=='string'||q.length<3||q.length>100||
-   !q.normalize('NFKC').toLocaleLowerCase('id').split(/\\s+/).includes(city)))
+   !q.normalize('NFKC').toLocaleLowerCase('id').split(/\s+/).includes(city)))
   throw Error('APIFY_GEOGRAPHIC_QUERY_OUT_OF_SCOPE');
  let proposedInput:Record<string,unknown>={};
  if(input.actorId==='clockworks/tiktok-scraper'){
