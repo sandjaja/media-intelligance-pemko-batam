@@ -14,11 +14,11 @@ export function authorizePreparedApifyRun(input:{
  const estimated=conservativeApifyRunEstimate(input.actorId,input.pricingApproval);
  if(estimated===null||input.reservedUsd===null||!Number.isFinite(input.reservedUsd))return null;
  // No partial reservations: the full conservative estimate must be covered.
- if(input.reservedUsd<estimated)return null;
+ if(input.reservedUsd!==estimated)return null;
  if(input.configuredMaxUsd===null||input.configuredMaxUsd<estimated)return null;
  return prepareApifyRunRequest({
   actorId:input.actorId,configuredActorId:input.configuredActorId,
-  configuredMaxUsd:input.configuredMaxUsd,reservedUsd:Math.min(input.reservedUsd,estimated),
+  configuredMaxUsd:input.configuredMaxUsd,reservedUsd:input.reservedUsd,
   collectorEnabled:input.collectorEnabled,pricingVerified:true
  });
 }
