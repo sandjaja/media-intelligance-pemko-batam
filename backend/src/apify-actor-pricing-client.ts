@@ -25,7 +25,7 @@ export function parseApifyActorPricing(payload:unknown):ApifyActorPricingSnapsho
  // trust an unverified currentPricingInfo fallback for paid-run metadata.
  // Multiple prices with the same effective timestamp are ambiguous; do not
  // choose one based on provider array ordering.
- if(effective.length>1&&effective[0].startedAt===effective[1].startedAt)return null;
+ if(effective.length>1&&Date.parse(effective[0].startedAt as string)===Date.parse(effective[1].startedAt as string))return null;
  const pricing=records.length?effective[0]:actor.currentPricingInfo;
  if(!pricing||typeof pricing!=='object'||Array.isArray(pricing))return null;
  const info=pricing as Record<string,unknown>;
