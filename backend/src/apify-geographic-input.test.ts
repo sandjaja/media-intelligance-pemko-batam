@@ -35,11 +35,18 @@ test('accepts city token in multiword scoped search query',()=>{
 test('video budgets are bounded in proposals and never approve paid execution',()=>{
  for(const maxVideos of [10,20,50]){
   const t=previewGeographicActorInput({actorId:'clockworks/tiktok-scraper',plan,maxQueries:3,maxVideos});
-  assert.equal(t.proposedInput.resultsPerPage,Math.ceil(maxVideos/3));
+  assert.equal(t.proposedInput.resultsPerPage,Math.floor(maxVideos/3));
   assert.equal(t.readyForPaidRun,false);
   const i=previewGeographicActorInput({actorId:'apify/instagram-scraper',plan,maxVideos});
   assert.equal(i.proposedInput.resultsLimit,maxVideos);
   assert.equal(i.readyForPaidRun,false);
  }
  assert.throws(()=>previewGeographicActorInput({actorId:'clockworks/tiktok-scraper',plan,maxVideos:100}),/APIFY_VIDEO_LIMIT_INVALID/);
+});
+
+test('TikTok proposed per-query results never intentionally exceed selected total',()=>{
+ for(const maxVideos of [10,20,50]){
+  const result=previewGeographicActorInput({actorId:'clockworks/tiktok-scraper',plan,maxQueries:3,maxVideos});
+  assert.ok((result.proposedInput.resultsPerPage as number)*result.searchTerms.length<=maxVideos);
+ }
 });
