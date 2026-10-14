@@ -23,3 +23,22 @@ test('quote fails closed for insufficient monthly headroom',()=>{
  assert.equal(quote.readyForConfirmation,false);
  assert.ok(quote.blockers.includes('APIFY_MONTHLY_HEADROOM_INSUFFICIENT_OR_UNAVAILABLE'));
 });
+
+test('Admin cap and available headroom cannot substitute for a verified maximum quote',()=>{
+ const quote=buildApifyManualChargeQuote({...base,pricingApproval:null});
+ assert.equal(quote.readyForConfirmation,false);
+ assert.equal(quote.maximumChargeUsd,null);
+ assert.ok(quote.blockers.includes('APIFY_PRICING_APPROVAL_REQUIRED'));
+});
+test('different Actor approval cannot authorize TikTok Posts',()=>{
+ const quote=buildApifyManualChargeQuote({...base,pricingApproval:{...base.pricingApproval,actorId:'clockworks/tiktok-comments-scraper'}});
+ assert.equal(quote.readyForConfirmation,false);
+ assert.equal(quote.maximumChargeUsd,null);
+});
+test('Instagram Actor remains outside initial paid rollout even with otherwise valid inputs',()=>{
+ const other='apify/instagram-scraper';
+ const quote=buildApifyManualChargeQuote({...base,actorId:other,configuredActorId:other,
+  pricingApproval:{...base.pricingApproval,actorId:other}});
+ assert.equal(quote.readyForConfirmation,false);
+ assert.ok(quote.blockers.includes('APIFY_MANUAL_COLLECTOR_NOT_ENABLED_FOR_ROLLOUT'));
+});
