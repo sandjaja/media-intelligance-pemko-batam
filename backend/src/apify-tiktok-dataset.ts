@@ -37,6 +37,8 @@ export async function ingestCompletedApifyTikTokDataset(pool:Pool,input:{
  // quarantined the reservation while provider verification was in flight.
  await verifyApifyLedgerRun(pool,{runId:input.confirmedRunId,actorId:'clockworks/tiktok-scraper',platform:'tiktok'});
  const items=await fetchApifyTikTokDataset(input);
+ // Verify authorization once more immediately before persisting candidates.
+ await verifyApifyLedgerRun(pool,{runId:input.confirmedRunId,actorId:'clockworks/tiktok-scraper',platform:'tiktok'});
  const {candidates,rejected}=normalizeApifyTikTokPosts(items);
  const scope=await loadOrganizationMediaScope(pool);
  if(!scope)throw Error('APIFY_ORGANIZATION_SCOPE_UNAVAILABLE');
