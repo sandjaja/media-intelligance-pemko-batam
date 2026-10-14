@@ -58,3 +58,12 @@ test('sufficient verified Admin monthly remaining budget alone cannot approve a 
  assert.equal(quote.readyForConfirmation,false);
  assert.ok(quote.blockers.includes('APIFY_CHARGE_CAP_NOT_VERIFIED'));
 });
+
+test('preview numbers do not authorize payment without independent price approval',()=>{
+ const quote=buildApifyManualChargeQuote({...base,pricingApproval:null,
+  providerChargeCapVerified:false,monthlyHeadroomUsd:4.59,adminMonthlyRemainingUsd:4});
+ assert.equal(quote.readyForConfirmation,false);
+ assert.equal(quote.maximumChargeUsd,null);
+ assert.ok(quote.blockers.includes('APIFY_PRICING_APPROVAL_REQUIRED'));
+ assert.ok(quote.blockers.includes('APIFY_CHARGE_CAP_NOT_VERIFIED'));
+});
