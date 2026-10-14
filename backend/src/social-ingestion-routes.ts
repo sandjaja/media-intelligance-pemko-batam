@@ -224,6 +224,47 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
     return reply.send({data:response});
   });
 
+  // Import an already completed, ledger-authorized Apify run. This endpoint
+  // never starts an Actor and never accepts a dataset ID or token from clients.
+  app.post('/api/social/collection/apify/import-completed',{preHandler:[auth,requireWrite]},async(request,reply)=>{
+    const ctx=request.socialIngestAuth!;
+    if(!ctx.roles.includes('super_admin'))return reply.code(403).send({error:'SUPER_ADMIN_REQUIRED'});
+    const parsed=z.object({platform:z.enum(['tiktok','instagram']),runId:z.string().regex(/^[a-zA-Z0-9_-]{5,160}$/)}).strict().safeParse(request.body);
+    if(!parsed.success)return reply.code(400).send({error:'INVALID_APIFY_IMPORT_REQUEST'});
+    const {platform,runId}=parsed.data;
+    const actorId=platform==='tiktok'?'clockworks/tiktok-scraper':'apify/instagram-scraper';
+    try{
+      const {verifyApifyLedgerRun}=await import('./apify-ledger-run-verification.js');
+      await verifyApifyLedgerRun(pool,{runId,actorId,platform});
+      const {decryptIntegrationCredential}=await import('./integration-credentials.js');
+      const credentials=await pool.query(`SELECT c.credential_ciphertext FROM integration_credentials c
+        JOIN integration_providers p ON p.id=c.provider_id AND p.code='apify' AND p.active=true
+        JOIN organizations o ON o.id=c.organization_id AND o.active=true
+        WHERE c.enabled=true LIMIT 2`);
+      if(credentials.rows.length!==1||!credentials.rows[0]?.credential_ciphertext)
+        return reply.code(503).send({error:'APIFY_CREDENTIAL_UNAVAILABLE'});
+      const token=decryptIntegrationCredential(credentials.rows[0].credential_ciphertext);
+      const response=await fetch('https://api.apify.com/v2/actor-runs/'+encodeURIComponent(runId),{
+        headers:{Authorization:'Bearer '+token,Accept:'application/json'},signal:AbortSignal.timeout(20000)});
+      if(!response.ok)return reply.code(502).send({error:'APIFY_RUN_LOOKUP_FAILED'});
+      const payload=await response.json() as {data?:{id?:unknown;status?:unknown;defaultDatasetId?:unknown}};
+      const run=payload?.data;
+      if(run?.id!==runId||run.status!=='SUCCEEDED'||typeof run.defaultDatasetId!=='string'||
+        !/^[a-zA-Z0-9_-]{5,160}$/.test(run.defaultDatasetId))
+        return reply.code(409).send({error:'APIFY_RUN_NOT_COMPLETED'});
+      const input={confirmedRunId:runId,datasetId:run.defaultDatasetId,token};
+      const result=platform==='tiktok'
+        ?await (await import('./apify-tiktok-dataset.js')).ingestCompletedApifyTikTokDataset(pool,input)
+        :await (await import('./apify-instagram-dataset.js')).ingestCompletedApifyInstagramDataset(pool,input);
+      await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'APIFY_COMPLETED_RUN_IMPORT',$2::jsonb)`,
+        [ctx.id,JSON.stringify({platform,runId,datasetItems:result.datasetItems,received:result.received,succeeded:result.succeeded,failed:result.failed})]);
+      return reply.send({data:{platform,runId,...result,billableRunStarted:false}});
+    }catch(error){
+      app.log.error({err:error,platform,runId},'Apify completed-run import failed');
+      return reply.code(422).send({error:'APIFY_COMPLETED_RUN_IMPORT_FAILED'});
+    }
+  });
+
   app.get('/api/social/ingestion/status',{preHandler:auth},async(request)=>{
     const ctx=request.socialIngestAuth!;
     const params:unknown[]=[];
