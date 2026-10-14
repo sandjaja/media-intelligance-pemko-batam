@@ -23,6 +23,16 @@ export async function fetchApifyTikTokDataset(input:{datasetId:string;token:stri
  return items;
 }
 
+/**
+ * Opt-in cap for newly initiated manual collections. Legacy completed-run
+ * imports keep their existing default (100) unless a limit is explicitly passed.
+ * This controls fetched/ingested items, not Apify billing or Actor output.
+ */
+export function resolveApifyManualImportLimit(requested:unknown):10|20|50{
+ if(requested!==10&&requested!==20&&requested!==50)throw Error('APIFY_MANUAL_IMPORT_LIMIT_INVALID');
+ return requested;
+}
+
 /** Only call after the run has completed successfully and its dataset belongs to
  * the confirmed run. Never import arbitrary dataset IDs from browser requests.
  */
