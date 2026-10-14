@@ -22,6 +22,8 @@ export function buildApifyManualChargeQuote(input:{
  if(input.actorId!=='clockworks/tiktok-scraper')
   blockers.push('APIFY_MANUAL_COLLECTOR_NOT_ENABLED_FOR_ROLLOUT');
  if(estimate===null)blockers.push('APIFY_PRICING_APPROVAL_REQUIRED');
+ // This flag must originate from trusted server verification. Never pass
+ // a browser-supplied value here or treat generic Actor metadata as proof.
  if(input.providerChargeCapVerified!==true)blockers.push('APIFY_CHARGE_CAP_NOT_VERIFIED');
  const limit=input.configuredMaxUsd;
  if(limit===null||!Number.isFinite(limit)||limit<=0||estimate!==null&&estimate>limit)
