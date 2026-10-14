@@ -15,14 +15,19 @@ export function parseApifyActorPricing(payload:unknown):ApifyActorPricingSnapsho
  // and even this does not prove a total bill cap including platform overhead.
  return{pricingModel:model,minimalMaxTotalChargeUsd:min,capEligible:model==='PAY_PER_EVENT'};
 }
-export async function fetchApifyActorPricing(actorId:string,apiKey:string,fetcher:typeof fetch=fetch):Promise<ApifyActorPricingSnapshot|null>{
- if(!/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+$/.test(actorId)||!apiKey.trim())return null;
+export type ApifyPricingLookup={snapshot:ApifyActorPricingSnapshot|null;reason:'OK'|'INVALID_ACTOR_OR_TOKEN'|'HTTP_UNAVAILABLE'|'UNSUPPORTED_METADATA'|'NETWORK_UNAVAILABLE'};
+export async function inspectApifyActorPricing(actorId:string,apiKey:string,fetcher:typeof fetch=fetch):Promise<ApifyPricingLookup>{
+ if(!/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+$/.test(actorId)||!apiKey.trim())return{snapshot:null,reason:'INVALID_ACTOR_OR_TOKEN'};
  const controller=new AbortController();const timer=setTimeout(()=>controller.abort(),10000);
  try{
   const response=await fetcher('https://api.apify.com/v2/acts/'+actorId.replace('/','~'),{
    method:'GET',headers:{Authorization:'Bearer '+apiKey,Accept:'application/json'},signal:controller.signal
   });
-  if(!response.ok)return null;
-  return parseApifyActorPricing(await response.json());
- }catch{return null}finally{clearTimeout(timer)}
+  if(!response.ok)return{snapshot:null,reason:'HTTP_UNAVAILABLE'};
+  const snapshot=parseApifyActorPricing(await response.json());
+  return{snapshot,reason:snapshot?'OK':'UNSUPPORTED_METADATA'};
+ }catch{return{snapshot:null,reason:'NETWORK_UNAVAILABLE'}}finally{clearTimeout(timer)}
+}
+export async function fetchApifyActorPricing(actorId:string,apiKey:string,fetcher:typeof fetch=fetch):Promise<ApifyActorPricingSnapshot|null>{
+ return (await inspectApifyActorPricing(actorId,apiKey,fetcher)).snapshot;
 }
