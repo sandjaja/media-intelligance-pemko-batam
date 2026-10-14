@@ -12,3 +12,9 @@ test('builds geographic discovery terms from tenant scope, not hardcoded locatio
 test('fails closed when city identity is unavailable',()=>{
  assert.throws(()=>buildGeographicSearchPlan({...scope,cityName:null}),/APIFY_CITY_SCOPE_UNAVAILABLE/);
 });
+
+test('geographic fallback retains city as first discovery query',()=>{
+ const plan=buildGeographicSearchPlan(scope);
+ assert.equal(plan.queries[0],'Batam');
+ assert.ok(plan.queries.every(q=>q.toLowerCase().includes('batam')));
+});
