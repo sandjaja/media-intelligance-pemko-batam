@@ -68,3 +68,10 @@ test('conflicting prices with identical effective timestamp are ambiguous',()=>{
   {pricingModel:'PAY_PER_EVENT',minimalMaxTotalChargeUsd:0.8,startedAt:'2024-01-01T00:00:00.000Z'}
  ]}}),null);
 });
+
+test('malformed historical price entry blocks otherwise valid price',()=>{
+ assert.equal(parseApifyActorPricing({data:{pricingInfos:[
+  {pricingModel:'PAY_PER_EVENT',minimalMaxTotalChargeUsd:0.5,startedAt:'2024-01-01T00:00:00.000Z'},
+  {pricingModel:'PAY_PER_EVENT',minimalMaxTotalChargeUsd:0.1,startedAt:'not-a-date'}
+ ]}}),null);
+});
