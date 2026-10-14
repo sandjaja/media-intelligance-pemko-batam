@@ -21,8 +21,10 @@ export async function fetchApifyActorCostHistory(input:{token:string;actorId:str
  // Actor run lists may omit detailed cost/output stats. Read completed run details
  // for a bounded sample before calculating any per-item estimate.
  const verifiedIds=new Set<string>();
+ // Keep provider requests bounded: at most three detail reads concurrently.
  const candidates=samples.filter(s=>s.runId&&s.finishedAt).slice(0,10);
- await Promise.all(candidates.map(async sample=>{
+ for(let offset=0;offset<candidates.length;offset+=3){
+ await Promise.all(candidates.slice(offset,offset+3).map(async sample=>{
   try{
    const detail=await fetcher('https://api.apify.com/v2/actor-runs/'+encodeURIComponent(sample.runId),{
     headers:{Authorization:'Bearer '+token,Accept:'application/json'},signal:AbortSignal.timeout(10000)});
@@ -47,6 +49,7 @@ export async function fetchApifyActorCostHistory(input:{token:string;actorId:str
    }
   }catch{/* Incomplete provider history must not fabricate cost. */}
  }));
+ }
  // Only detailed runs whose immutable Actor identity matches may contribute.
  // A missing detail response is not proof of ownership.
  const complete=samples.filter(s=>verifiedIds.has(s.runId)&&['SUCCEEDED','FAILED','TIMED-OUT','ABORTED'].includes(s.status)&&s.finishedAt!==null&&s.costUsd!==null);
