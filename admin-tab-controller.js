@@ -15,6 +15,12 @@ function activate(id,{persist=true}={}){
  panel.classList.remove('hidden');
  ws.querySelectorAll('[data-tab]').forEach(b=>{b.className=b.dataset.tab===id?ACTIVE:INACTIVE});
  if(persist)remember(id);
+ if(id==='integrations'){
+  const rows=document.getElementById('integrationRows');
+  if(typeof window.loadAdminIntegrations==='function'){
+   Promise.resolve().then(()=>window.loadAdminIntegrations()).catch(()=>{if(rows)rows.textContent='Gagal memuat integrasi. Muat ulang halaman atau periksa koneksi backend.'});
+  }else if(rows){rows.textContent='Modul Integrasi & API belum termuat. Muat ulang halaman; jika tetap kosong, hubungi administrator.';}
+ }
  return true;
 }
 function restore(){const id=remembered();return id&&activate(id,{persist:false})?true:activate('opd',{persist:false})}
