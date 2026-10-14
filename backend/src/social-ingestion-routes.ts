@@ -214,7 +214,7 @@ export async function registerSocialIngestionRoutes(app:FastifyInstance,pool:Poo
       }catch{return{platform:selected,ready:false,reason:'APIFY_PREVIEW_UNAVAILABLE',collectors:[] as string[]}}
     }));
     const response={...result,selection:platform,apify,billableRunStarted:false};
-    await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'SOCIAL_MANUAL_COLLECTION',$2::jsonb)`,[ctx.id,JSON.stringify({runId:result.runId??null,status:result.status??null,skipped:result.skipped??false,reason:result.reason??null})]);
+    await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'SOCIAL_MANUAL_COLLECTION',$2::jsonb)`,[ctx.id,JSON.stringify({selection:platform,runId:result.runId??null,status:result.status??null,skipped:result.skipped??false,reason:result.reason??null,apify:apify.map(item=>({platform:item.platform,ready:item.ready,reason:item.reason,collectors:item.collectors})),billableRunStarted:false})]);
     return reply.send({data:response});
   });
 
