@@ -50,6 +50,15 @@ test('Claude normalizes JSON and token usage without network', async () => {
   assert.equal(JSON.parse(String(request().init?.body)).max_tokens, AI_GATEWAY_MAX_OUTPUT_TOKENS);
 });
 
+test('provider adapter rejects oversized prompt without network access', async () => {
+  let called = false;
+  globalThis.fetch = async () => { called = true; throw new Error('UNEXPECTED_NETWORK'); };
+  await assert.rejects(invokeAiProvider({
+    provider: 'openai', model: 'test-model', apiKey: 'mock', prompt: 'x'.repeat(12001),
+  }), /AI_PROVIDER_INVALID_REQUEST/);
+  assert.equal(called, false);
+});
+
 test('Missing usage fails closed instead of logging zero', async () => {
   mockResponse({ candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }] });
   await assert.rejects(
