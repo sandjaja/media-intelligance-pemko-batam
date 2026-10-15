@@ -2,7 +2,7 @@ import { FastifyInstance, FastifyRequest } from 'fastify';
 import { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
-import { hasPermission, loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
+import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 
 declare module 'fastify' { interface FastifyRequest { aiAdminAuthz?: AuthorizationContext } }
 
@@ -15,7 +15,7 @@ export async function registerAiAdminRoutes(app:FastifyInstance,pool:Pool,jwtSec
       if(typeof d.sub!=='string')throw new Error('invalid');
       const c=await loadAuthorizationContext(pool,d.sub);
       if(!c?.active)return reply.code(401).send({error:'USER_INACTIVE_OR_MISSING'});
-      if(!hasPermission(c,'platform.admin')&&!hasPermission(c,'ai.manage')&&!c.roles.includes('super_admin'))return reply.code(403).send({error:'FORBIDDEN',permission:'ai.manage'});
+      if(!c.roles.includes('super_admin')&&c.legacyRole!=='admin')return reply.code(403).send({error:'FORBIDDEN',permission:'platform.admin'});
       request.aiAdminAuthz=c;
     }catch{if(reply.sent)return;return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'});}
   };
