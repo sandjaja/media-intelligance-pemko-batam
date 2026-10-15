@@ -18,7 +18,7 @@ const CONCEPTS:Record<string,string[]>={
 };
 const concepts=(v:any)=>{const t=norm(v);return Object.entries(CONCEPTS).filter(([,terms])=>terms.some(term=>t.includes(norm(term)))).map(([key])=>key)};
 
-export function matchOfficialResponseCoverage(angles:CoverageAngle[],owned:OwnedResponse[],pool?:Pool){
+export function matchOfficialResponseCoverage(angles:CoverageAngle[],owned:OwnedResponse[]){
  const official=owned.map(o=>{const raw=[o.title,o.content].filter(Boolean).join(' ');return{id:String(o.id),title:o.title??null,account:o.owned_account_name??null,text:tokens(raw),concepts:concepts(raw)}});
  const coverage=angles.map(angle=>{
   const anchors=angle.anchors?.length?[...new Set(angle.anchors)]:[...new Set(angle.evidence.flatMap(e=>tokens(e.title)))];
