@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
 import { calculateAiTokenCost, reserveAiBudget, settleAiBudgetWithUsage } from './ai-budget-reservation.js';
+import { calculateAiManualBalanceStatus } from './ai-manual-balance-status.js';
 
 function fakePool(options: { limit: number; spent: number; missingBudget?: boolean; missingSnapshot?: boolean; baseline?: number; failLog?: boolean }) {
   const statements: string[] = [];
@@ -95,4 +96,32 @@ test('failed usage log rolls back settlement', async () => {
   await assert.rejects(settleAiBudgetWithUsage(db.pool, { reservationId: '20', userId: 99, modelId: 4, inputTokens: 100, outputTokens: 50, latencyMs: 120 }), /MOCK_LOG_FAILURE/);
   assert.ok(db.statements.includes('ROLLBACK'));
   assert.equal(db.statements.includes('COMMIT'), false);
+});
+
+test('manual AI balance warning is inactive below 80 percent', () => {
+  const result = calculateAiManualBalanceStatus(100, 79.99, 0);
+  assert.equal(result.status, 'available');
+  assert.ok(Math.abs((result.remaining_budget_usd ?? 0) - 20.01) < 0.000001);
+});
+
+test('manual AI balance warns at exactly 80 percent without blocking', () => {
+  const result = calculateAiManualBalanceStatus(100, 80, 0);
+  assert.equal(result.status, 'near_limit');
+  assert.equal(result.usage_percent, 80);
+  assert.equal(result.remaining_budget_usd, 20);
+});
+
+test('manual AI balance warns after snapshot baseline only', () => {
+  const result = calculateAiManualBalanceStatus(100, 180, 100);
+  assert.equal(result.status, 'near_limit');
+  assert.equal(result.usage_percent, 80);
+});
+
+test('manual AI balance is exhausted at 100 percent and when zero', () => {
+  assert.equal(calculateAiManualBalanceStatus(100, 100, 0).status, 'exhausted');
+  assert.equal(calculateAiManualBalanceStatus(0, 0, 0).status, 'exhausted');
+});
+
+test('manual AI balance is unconfigured when snapshot missing', () => {
+  assert.equal(calculateAiManualBalanceStatus(null, 0, 0).status, 'not_configured');
 });
