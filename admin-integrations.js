@@ -23,7 +23,35 @@ document.addEventListener('click',async e=>{
  try{
   if(apifySave){const fields=['tiktokActor','instagramActor','tiktokCommentsActor','instagramCommentsActor','tiktokHashtagActor','instagramHashtagActor'];const nums=['monthlyBudgetUsd','maxTiktokPerRun','maxInstagramPerRun','maxCommentsPerPost','monthlyCommentsLimit'];const settings={};try{settings.actorAdapters=JSON.parse(document.querySelector('[data-apify-adapters]')?.value||'{}');}catch{throw new Error('Konfigurasi adaptor harus berupa JSON yang valid.');}for(const k of fields)settings[k]=document.querySelector('[data-apify-field="'+k+'"]')?.value?.trim()||'';for(const k of nums)settings[k]=Number(document.querySelector('[data-apify-field="'+k+'"]')?.value);for(const key of ['tiktokPostsEnabled','instagramPostsEnabled','tiktokCommentsEnabled','instagramCommentsEnabled','tiktokHashtagEnabled','instagramHashtagEnabled'])settings[key]=!!document.querySelector('[data-apify-toggle="'+key+'"]')?.checked;settings.actorMaxCostUsd={};for(const el of document.querySelectorAll('[data-apify-cost]')){const raw=el.value.trim();if(!raw)continue;const value=Number(raw);if(!Number.isFinite(value)||value<0.01||value>5)throw new Error('Batas biaya '+el.dataset.apifyCost+' harus $0,01–$5.');settings.actorMaxCostUsd[el.dataset.apifyCost]=value;}if(!['tiktokPostsEnabled','instagramPostsEnabled','tiktokCommentsEnabled','instagramCommentsEnabled','tiktokHashtagEnabled','instagramHashtagEnabled'].some(k=>settings[k]))throw new Error('Minimal satu Actor harus aktif.');await api('/api/admin/integrations/apify/settings',{method:'PUT',body:JSON.stringify(settings)});alert('Pengaturan Apify tersimpan. Actor yang dicentang akan dipakai pada penarikan berikutnya.');await load();return;}
   if(saveApp){const code=saveApp.dataset.saveApp;const appId=document.querySelector('[data-app-id="'+code+'"]')?.value?.trim();const appSecret=document.querySelector('[data-app-secret="'+code+'"]')?.value?.trim();if(!appId)throw new Error('App ID wajib diisi.');if(!appSecret)throw new Error('App Secret wajib diisi untuk menyimpan perubahan.');saveApp.disabled=true;await api('/api/admin/integrations/'+encodeURIComponent(code)+'/app-credentials',{method:'PUT',body:JSON.stringify({appId,appSecret})});alert('App ID dan App Secret '+code+' tersimpan dengan aman.');await load();}
-  if(save){const credential=prompt('Masukkan credential/API key. Nilai ini akan dikirim ke backend untuk dienkripsi dan tidak ditampilkan kembali.');if(!credential)return;await api('/api/admin/integrations/'+encodeURIComponent(save.dataset.save)+'/credential',{method:'PUT',body:JSON.stringify({credential,enabled:false})});await load();}
+  if(save){
+    const code=save.dataset.save, card=save.closest('article');
+    let panel=card.querySelector('[data-credential-editor]');
+    if(!panel){
+      panel=document.createElement('div');
+      panel.dataset.credentialEditor='1';
+      panel.className='rounded-xl border border-slate-700 p-3 space-y-2';
+      panel.innerHTML='<label class="block text-xs font-bold">API Key baru</label><div class="flex gap-2"><input type="password" autocomplete="new-password" data-key-input class="min-w-0 flex-1 rounded-lg border border-slate-700 px-3 py-2 text-sm" placeholder="Masukkan API key"><button type="button" data-key-eye class="rounded-lg border border-slate-700 px-3 py-2 text-xs" aria-label="Tampilkan API key">👁</button></div><button type="button" data-key-submit class="rounded-lg bg-cyan-500 px-3 py-2 text-xs font-bold text-slate-950">Simpan API Key</button>';
+      card.appendChild(panel);
+      const input=panel.querySelector('[data-key-input]');
+      panel.querySelector('[data-key-eye]').addEventListener('click',event=>{
+        const visible=input.type==='password';
+        input.type=visible?'text':'password';
+        event.currentTarget.setAttribute('aria-label',visible?'Sembunyikan API key':'Tampilkan API key');
+      });
+      panel.querySelector('[data-key-submit]').addEventListener('click',async event=>{
+        const credential=input.value.trim();
+        if(!credential){alert('API key wajib diisi.');return;}
+        event.currentTarget.disabled=true;
+        try{
+          await api('/api/admin/integrations/'+encodeURIComponent(code)+'/credential',{method:'PUT',body:JSON.stringify({credential,enabled:false})});
+          input.value='';
+          await load();
+        }catch(error){alert(error.message);event.currentTarget.disabled=false;}
+      });
+      input.focus();
+    }else{panel.querySelector('[data-key-input]').focus();}
+    return;
+  }
   if(test){test.disabled=true;await api('/api/admin/integrations/'+encodeURIComponent(test.dataset.test)+'/test',{method:'POST',body:JSON.stringify({})});alert('Koneksi berhasil. Credential provider valid dan dapat digunakan.');await load();}
   if(toggle){const code=toggle.dataset.toggle,enabling=toggle.dataset.enabled!=='1';if(enabling&&code==='apify'&&!confirm('Aktifkan Apify?\n\nAPI langsung Instagram, TikTok, Facebook, Threads, dan X akan dinonaktifkan otomatis. YouTube tetap aktif. Data yang sudah tersimpan tidak dihapus.\n\nLanjutkan?'))return;if(enabling&&['instagram','tiktok','facebook','threads','x'].includes(code)&&!confirm('Mengaktifkan API '+code+' akan menonaktifkan Apify untuk mencegah pengambilan ganda. YouTube tidak terpengaruh. Lanjutkan?'))return;toggle.disabled=true;await api('/api/admin/integrations/'+encodeURIComponent(code),{method:'PATCH',body:JSON.stringify({enabled:enabling})});await load();}
   if(threadsMatrix){const query=prompt('Keyword Threads untuk diagnostik TOP + RECENT:','Batam');if(!query)return;threadsMatrix.disabled=true;const result=await api('/api/social/threads/smoke-matrix',{method:'POST',body:JSON.stringify({query,limit:5})});const data=result.data||{};const lines=(data.tests||[]).map(t=>t.searchType+': HTTP '+t.httpStatus+' | data '+t.rawDataCount+' | paging '+(t.pagingPresent?'ya':'tidak')+(t.detail?' | '+t.detail:''));alert('Diagnostik Threads KEYWORD\nKeyword: '+(data.query||query)+'\n\n'+lines.join('\n'));await load();}
