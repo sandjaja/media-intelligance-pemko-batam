@@ -85,3 +85,49 @@ test('configured gateway rejects oversized prompt before database or provider ac
   }), /AI_GATEWAY_INVALID_REQUEST/);
   assert.equal(queried, false);
 });
+
+test('configured gateway refuses unknown model before credentials or provider execution', async () => {
+  const queries: string[] = [];
+  const pool = { query: async (sql: string) => {
+    queries.push(sql);
+    return { rows: [], rowCount: 0 };
+  } } as unknown as Pool;
+  await assert.rejects(executeConfiguredAi(pool, {
+    userId: 99, taskCode: 'strakom_analysis', provider: 'gemini',
+    modelCode: 'unconfigured-model', prompt: 'draft',
+  }), /AI_GATEWAY_ROUTE_NOT_CONFIGURED/);
+  assert.equal(queries.length, 1);
+});
+
+test('configured gateway fails closed if encrypted credential is absent', async () => {
+  const queries: string[] = [];
+  const pool = { query: async (sql: string) => {
+    queries.push(sql);
+    if (sql.includes('FROM ai_task_routes r')) {
+      return { rows: [{ task_id: 3, provider_id: 2, model_id: 4 }], rowCount: 1 };
+    }
+    if (sql.includes('FROM ai_provider_credentials')) return { rows: [], rowCount: 0 };
+    throw new Error('UNEXPECTED_QUERY');
+  } } as unknown as Pool;
+  await assert.rejects(executeConfiguredAi(pool, {
+    userId: 99, taskCode: 'strakom_analysis', provider: 'gemini',
+    modelCode: 'test-model', prompt: 'draft',
+  }), /AI_GATEWAY_CREDENTIAL_NOT_CONFIGURED/);
+  assert.equal(queries.length, 2);
+});
+
+test('configured gateway rejects corrupt encrypted credentials without exposing secrets', async () => {
+  const pool = { query: async (sql: string) => {
+    if (sql.includes('FROM ai_task_routes r')) {
+      return { rows: [{ task_id: 3, provider_id: 2, model_id: 4 }], rowCount: 1 };
+    }
+    if (sql.includes('FROM ai_provider_credentials')) {
+      return { rows: [{ credential_ciphertext: 'invalid-encrypted-value' }], rowCount: 1 };
+    }
+    throw new Error('UNEXPECTED_QUERY');
+  } } as unknown as Pool;
+  await assert.rejects(executeConfiguredAi(pool, {
+    userId: 99, taskCode: 'strakom_analysis', provider: 'gemini',
+    modelCode: 'test-model', prompt: 'draft',
+  }), /AI_GATEWAY_CREDENTIAL_UNAVAILABLE/);
+});
