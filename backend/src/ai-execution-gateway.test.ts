@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
-import { executeBudgetedAi } from './ai-execution-gateway.js';
+import { executeBudgetedAi, executeConfiguredAi } from './ai-execution-gateway.js';
 
 function gatewayPool(options: { route?: boolean; budget?: boolean; providerError?: boolean; logError?: boolean } = {}) {
   const statements: string[] = [];
@@ -74,4 +74,14 @@ test('usage log failure rolls back settlement instead of reporting success', asy
   await assert.rejects(executeBudgetedAi(db.pool, { ...base, invoke: db.invoke }), /MOCK_USAGE_LOG_FAILED/);
   assert.ok(db.statements.includes('ROLLBACK'));
   assert.equal(db.statements.includes('COMMIT'), true); // reservation committed; settlement rolled back
+});
+
+test('configured gateway rejects oversized prompt before database or provider access', async () => {
+  let queried = false;
+  const pool = { query: async () => { queried = true; throw new Error('UNEXPECTED_DB_ACCESS'); } } as unknown as Pool;
+  await assert.rejects(executeConfiguredAi(pool, {
+    userId: 99, taskCode: 'strakom_analysis', provider: 'gemini',
+    modelCode: 'test-model', prompt: 'x'.repeat(12001),
+  }), /AI_GATEWAY_INVALID_REQUEST/);
+  assert.equal(queried, false);
 });
