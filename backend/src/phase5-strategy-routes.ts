@@ -67,7 +67,9 @@ Output JSON:
 {"executiveSummary":"...","communicationObjectives":[],"targetAudiences":[],"keyMessages":[],"talkingPoints":[],"coordinationRequirements":[{"purpose":"...","informationNeeded":["..."],"parties":["..."],"publicationUse":"..."}],"expectedCommunicationOutcomes":[{"audience":"...","expectedUnderstanding":"...","expectedAction":"..."}],"channelStrategy":[],"timingStrategy":{},"spokespersonStrategy":[],"contentFormats":[],"communicationRisks":[],"successKpis":[],"productionRecommendations":[{"audience":"MASYARAKAT_UMUM","purpose":"EDUKASI_SOSIALISASI","tone":"INFORMATIF_KLARITATIF","format":"INFOGRAFIS","channels":["INSTAGRAM","FACEBOOK"],"priority":"UTAMA","reason":"..."}],"districtStrategies":[{"districtId":1,"evidenceContext":{},"localAudiences":[],"communicationFocus":[],"localMessages":[],"talkingPoints":[],"localChannels":[],"coordinationOpds":[],"timingStrategy":{},"successKpis":[],"fieldUpdateRequirements":[]}]}`)+ '\n\nDATA:\n'+JSON.stringify(input).slice(0,50000);
  if(selected.rows.length && selected.rows[0].provider_code!=='gemini') {
    // Paid executions must reserve budget and settle usage in the shared gateway.
-   // The gateway enforces its prompt-size limit before any provider request.
+   // Do not truncate strategy evidence silently: a shortened prompt could
+   // produce an apparently complete strategy from incomplete input.
+   if(prompt.length>12000)throw new Error('AI_STRATEGY_PROMPT_TOO_LARGE');
    const numericUserId=Number(userId);
    if(!Number.isSafeInteger(numericUserId)||numericUserId<=0)throw new Error('AI_GATEWAY_INVALID_CONTEXT');
    const result=await executeConfiguredAi(pool,{
