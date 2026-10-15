@@ -15,6 +15,6 @@ export async function loadGeminiConfig(pool: Pick<Pool, 'query'>): Promise<{ key
 
 export async function prepareGeminiRequest(pool: Pick<Pool, 'query'>): Promise<{ key: string; model: string }> {
   const config = await loadGeminiConfig(pool);
-  await reserveGeminiDailyRequest(pool, config.model);
+  await reserveGeminiDailyRequest(pool, config.model, 'issue_analysis');
   return config;
 }
