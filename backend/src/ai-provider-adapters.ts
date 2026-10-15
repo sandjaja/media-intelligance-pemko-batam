@@ -90,5 +90,6 @@ export async function invokeAiProvider(input: {
   if (!raw) throw new Error('AI_PROVIDER_EMPTY_RESPONSE');
   let data: unknown;
   try { data = JSON.parse(raw); } catch { throw new Error('AI_PROVIDER_INVALID_JSON'); }
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) throw new Error('AI_PROVIDER_INVALID_JSON_SHAPE');
   return { data, usage, latencyMs: Date.now() - started };
 }
