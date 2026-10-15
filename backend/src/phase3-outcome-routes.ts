@@ -150,8 +150,14 @@ Output JSON:
   const key=decryptIntegrationCredential(credentials.rows[0].credential_ciphertext);
   const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt},...mediaParts]}],generationConfig:{responseMimeType:'application/json'}})});
   if(!r.ok)throw new Error(`Gemini HTTP ${r.status}`);
-  const payload=await r.json() as any,raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');
-  return JSON.parse(raw);
+  const payload=await r.json() as any;
+  const candidate=payload.candidates?.[0];
+  if(payload.promptFeedback?.blockReason || !candidate || candidate.finishReason!=='STOP'){
+    throw new Error('GEMINI_ANALYSIS_RESPONSE_NOT_COMPLETE');
+  }
+  const raw=candidate.content?.parts?.map((x:any)=>x.text||'').join('');
+  if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');
+  try{return JSON.parse(raw);}catch{throw new Error('GEMINI_ANALYSIS_INVALID_JSON');}
 }
 
 async function analyzeMonitoringAgainstPublication(pool:Pool,input:any,userId:string){
@@ -221,8 +227,14 @@ HASILKAN JSON:
   const key=decryptIntegrationCredential(credentials.rows[0].credential_ciphertext);
   const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}})});
   if(!r.ok)throw new Error(`Gemini HTTP ${r.status}`);
-  const payload=await r.json() as any,raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');
-  return JSON.parse(raw);
+  const payload=await r.json() as any;
+  const candidate=payload.candidates?.[0];
+  if(payload.promptFeedback?.blockReason || !candidate || candidate.finishReason!=='STOP'){
+    throw new Error('GEMINI_ANALYSIS_RESPONSE_NOT_COMPLETE');
+  }
+  const raw=candidate.content?.parts?.map((x:any)=>x.text||'').join('');
+  if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');
+  try{return JSON.parse(raw);}catch{throw new Error('GEMINI_ANALYSIS_INVALID_JSON');}
 }
 
 export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
