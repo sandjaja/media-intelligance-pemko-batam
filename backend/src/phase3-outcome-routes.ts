@@ -67,7 +67,7 @@ function validatePublicationEvidenceMime(mimeType:unknown):string{
   return mime;
 }
 function validatePublicationEvidenceSignature(mime:string,buf:Buffer):void{
-  const isPdf=buf.subarray(0,5).toString('ascii')==='%PDF-';
+  const isPdf=buf.length>=5 && buf.subarray(0,5).toString('ascii')==='%PDF-' && buf.subarray(Math.max(0,buf.length-1024)).includes(Buffer.from('%%EOF'));
   const isPng=buf.length>=8 && buf.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
   const isJpeg=buf.length>=3 && buf[0]===255 && buf[1]===216 && buf[2]===255;
   const isWebp=buf.length>=12 && buf.subarray(0,4).toString('ascii')==='RIFF' && buf.subarray(8,12).toString('ascii')==='WEBP';
