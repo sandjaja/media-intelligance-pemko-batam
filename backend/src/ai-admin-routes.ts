@@ -53,6 +53,26 @@ export async function registerAiAdminRoutes(app:FastifyInstance,pool:Pool,jwtSec
       return{data:{provider:parsed.data,connected:response.ok,httpStatus:response.status}};
     }catch{return reply.code(502).send({error:'AI_CONNECTION_TEST_FAILED'});}
   });
+  app.get('/api/admin/ai/models/verify',{preHandler:guard},async(request,reply)=>{
+    const parsed=z.enum(['gemini','openai','anthropic']).safeParse((request.query as any)?.provider);
+    if(!parsed.success)return reply.code(400).send({error:'INVALID_AI_PROVIDER'});
+    const code=parsed.data;
+    const rows=(await pool.query('SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code=$1',[code])).rows;
+    if(!rows.length)return reply.code(409).send({error:'AI_CREDENTIAL_NOT_CONFIGURED'});
+    let key:string;
+    try{key=decryptIntegrationCredential(rows[0].credential_ciphertext);}catch{return reply.code(503).send({error:'AI_CREDENTIAL_DECRYPT_FAILED'});}
+    const endpoint=code==='gemini'?'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000':code==='openai'?'https://api.openai.com/v1/models':'https://api.anthropic.com/v1/models?limit=100';
+    const headers:Record<string,string>=code==='gemini'?{'x-goog-api-key':key}:code==='openai'?{Authorization:'Bearer '+key}:{'x-api-key':key,'anthropic-version':'2023-06-01'};
+    try{
+      const response=await fetch(endpoint,{headers,signal:AbortSignal.timeout(15000)});
+      if(!response.ok)return reply.code(502).send({error:'AI_MODEL_LIST_UNAVAILABLE',providerStatus:response.status});
+      const data:any=await response.json();
+      const ids=new Set((code==='gemini'?(data.models||[]).map((m:any)=>String(m.name||'').replace(/^models\\//,'')):(data.data||[]).map((m:any)=>String(m.id||''))).filter(Boolean));
+      const models=(await pool.query('SELECT m.id,m.code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code=$1 ORDER BY m.id',[code])).rows;
+      await audit(request,'AI_MODEL_LIST_VERIFIED',code);
+      return {data:{provider:code,models:models.map((m:any)=>({id:m.id,code:m.code,available:ids.has(m.code)})),partial:code==='anthropic'&&Boolean(data.has_more),count:ids.size}};
+    }catch{return reply.code(502).send({error:'AI_MODEL_LIST_REQUEST_FAILED'});}
+  });
   app.get('/api/admin/ai/providers',{preHandler:guard},async()=>({data:(await pool.query('SELECT id,code,name,base_url,enabled,secret_reference,created_at,updated_at FROM ai_providers ORDER BY name,id')).rows}));
   app.post('/api/admin/ai/providers',{preHandler:guard},async(request,reply)=>{
     const p=z.object({code:z.string().trim().min(2).max(80).regex(/^[A-Za-z0-9_-]+$/),name:z.string().trim().min(2).max(150),baseUrl:z.string().trim().max(500).optional().nullable(),enabled:z.boolean().default(true),secretReference:z.string().trim().max(200).optional().nullable()}).safeParse(request.body);
