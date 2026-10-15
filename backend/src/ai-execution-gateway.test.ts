@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
 import { executeBudgetedAi, executeConfiguredAi } from './ai-execution-gateway.js';
+import { invokeAiProvider } from './ai-provider-adapters.js';
 
 function gatewayPool(options: { route?: boolean; budget?: boolean; providerError?: boolean; logError?: boolean } = {}) {
   const statements: string[] = [];
@@ -130,4 +131,25 @@ test('configured gateway rejects corrupt encrypted credentials without exposing 
     userId: 99, taskCode: 'strakom_analysis', provider: 'gemini',
     modelCode: 'test-model', prompt: 'draft',
   }), /AI_GATEWAY_CREDENTIAL_UNAVAILABLE/);
+});
+
+test('truncated paid provider response retains reservation and does not mark usage success', async () => {
+  const db = gatewayPool();
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response(JSON.stringify({
+      status: 'incomplete',
+      output: [{ content: [{ type: 'output_text', text: '{"ok":true}' }] }],
+      usage: { input_tokens: 100, output_tokens: 50 },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+    await assert.rejects(executeBudgetedAi(db.pool, {
+      ...base,
+      invoke: () => invokeAiProvider({ provider: 'openai', model: 'mock-model', apiKey: 'mock', prompt: 'test' }),
+    }), /AI_PROVIDER_OUTPUT_TRUNCATED/);
+    assert.ok(db.statements.includes('COMMIT')); // reservation is committed
+    assert.equal(db.statements.some(s => s.includes('UPDATE ai_budget_reservations')), false);
+    assert.equal(db.statements.some(s => s.includes('INSERT INTO ai_usage_logs')), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
