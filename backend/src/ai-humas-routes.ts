@@ -40,6 +40,7 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
                 COUNT(*)::integer AS requests,
                 COALESCE(SUM(l.input_tokens), 0)::text AS input_tokens,
                 COALESCE(SUM(l.output_tokens), 0)::text AS output_tokens,
+                (COALESCE(SUM(l.input_tokens), 0)+COALESCE(SUM(l.output_tokens), 0))::text AS total_tokens,
                 COUNT(*) FILTER (WHERE l.status NOT IN ('success', 'ok'))::integer AS non_success_requests
            FROM ai_usage_logs l
            JOIN ai_tasks t ON t.id = l.task_id
