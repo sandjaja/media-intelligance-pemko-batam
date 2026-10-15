@@ -26,7 +26,93 @@ async function loadManualBalances(){
   const result=await response.json();if(!response.ok)throw Error(result.error||'HTTP '+response.status);
   root.innerHTML=(result.data||[]).map(p=>{
    const remaining=p.remaining_usd==null?'—':'$'+Number(p.remaining_usd).toFixed(4);
-   const balance=p.balance_usd==null?'Belum diinput':'$'+Number(p.balance_usd).toFixed(4);
+   const balance=p.balance_usd==null?'Belum diinput':'
+   return '<div class="rounded-lg border border-slate-700 p-3 space-y-2" data-manual-balance="'+esc(p.provider_code)+'"><div class="font-semibold">'+esc(names[p.provider_code]||p.provider_code)+'</div><div class="text-xs">Saldo saat input: '+balance+' · Sisa internal: '+remaining+lastReason+updated+'</div><label class="block text-xs">Saldo aktual USD<input data-balance-amount type="number" min="0" step="0.0001" value="'+(p.balance_usd==null?'':esc(p.balance_usd))+'" class="mt-1 w-full rounded border border-slate-600 p-2"></label><label class="block text-xs">Alasan pembaruan<input data-balance-reason maxlength="500" placeholder="Contoh: Top-up saldo provider" class="mt-1 w-full rounded border border-slate-600 p-2"></label><button type="button" data-balance-save class="rounded bg-cyan-700 px-3 py-2 text-xs font-bold">Simpan saldo</button></div>';
+  }).join('')||'Provider berbayar tidak ditemukan.';
+ }catch(error){root.textContent='Gagal memuat saldo manual: '+error.message;}
+}
+function setupManualBalances(){
+ const panel=document.getElementById('aiAdminPanel');if(!panel||document.getElementById('aiManualBalanceSection'))return;
+ const section=document.createElement('details');section.id='aiManualBalanceSection';section.className='border-t border-slate-700 pt-4 mt-4';
+ section.innerHTML='<summary class="cursor-pointer font-bold">Saldo Manual AI Berbayar</summary><p class="text-xs text-slate-400 mt-2">Masukkan saldo tersisa yang terlihat di akun provider. Saldo ini adalah input manual, bukan hasil API provider. Alasan minimal 5 karakter diperlukan sebagai jejak audit perubahan. Setelah disimpan, nilai saldo terakhir tetap tampil dan dapat dikoreksi.</p><div id="aiManualBalanceRows" class="grid gap-3 mt-3"></div>';
+ panel.appendChild(section);
+ section.addEventListener('toggle',()=>{if(section.open)loadManualBalances();});
+ section.addEventListener('click',async event=>{
+  const button=event.target.closest?.('[data-balance-save]');if(!button)return;
+  const row=button.closest('[data-manual-balance]');
+  const raw=row.querySelector('[data-balance-amount]').value;
+  const amount=Number(raw),reason=row.querySelector('[data-balance-reason]').value.trim();
+  if(!raw||!Number.isFinite(amount)||amount<0||reason.length<5){alert('Isi saldo valid dan alasan minimal 5 karakter.');return;}
+  if(!confirm('Ganti saldo acuan provider dengan angka ini?'))return;
+  button.disabled=true;
+  try{
+   const response=await fetch('/api/admin/ai/manual-balances',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({providerCode:row.dataset.manualBalance,balanceUsd:amount,reason})});
+   const result=await response.json();if(!response.ok)throw Error(result.error||'HTTP '+response.status);
+   await loadManualBalances();
+  }catch(error){alert('Gagal menyimpan saldo: '+error.message);}finally{button.disabled=false;}
+ });
+}
+async function loadReconciliation(){
+ const output=document.getElementById('aiReconciliationRows');if(!output)return;
+ output.textContent='Memuat rekonsiliasi...';
+ try{
+  const [pendingResponse,balanceResponse]=await Promise.all([
+   fetch('/api/admin/ai/budget/pending-reservations?minAgeMinutes=30&limit=100',{credentials:'include',cache:'no-store'}),
+   fetch('/api/admin/ai/manual-balances',{credentials:'include',cache:'no-store'})
+  ]);
+  if(!pendingResponse.ok||!balanceResponse.ok)throw Error('HTTP '+(!pendingResponse.ok?pendingResponse.status:balanceResponse.status));
+  const pending=await pendingResponse.json(),balances=await balanceResponse.json();
+  const rows=(pending.data||[]).filter(p=>['openai','anthropic','claude'].includes(String(p.provider_code||'').toLowerCase()));
+  const summary=document.getElementById('aiReconciliationBudgetSummary');
+  if(summary)summary.innerHTML='<div class="grid md:grid-cols-2 gap-3">'+(balances.data||[]).map(p=>{
+   return '<details class="rounded-xl border border-slate-700 p-3"><summary class="font-bold cursor-pointer">'+esc(names[p.provider_code]||p.provider_code)+'</summary><div class="mt-2 text-xs space-y-1"><div>Saldo saat input: '+(p.balance_usd==null?'Belum diinput':'$'+Number(p.balance_usd).toFixed(4))+'</div><div>Pemakaian sejak input: '+(p.used_since_update_usd==null?'—':'$'+Number(p.used_since_update_usd).toFixed(4))+'</div><div class="font-bold">Sisa internal: '+(p.remaining_usd==null?'—':'$'+Number(p.remaining_usd).toFixed(4))+'</div></div></details>';
+  }).join('')+'</div><p class="text-xs text-slate-400 mt-2">Saldo manual Admin; pemakaian berasal dari ledger aplikasi, bukan API tagihan provider.</p>';
+  output.innerHTML='<div class="overflow-x-auto"><table class="w-full text-xs"><thead><tr><th class="p-2 text-left">ID</th><th class="p-2 text-left">Provider</th><th class="p-2 text-left">Tugas</th><th class="p-2 text-right">USD</th></tr></thead><tbody>'+
+   (rows.map(p=>'<tr class="border-t border-slate-700"><td class="p-2">'+esc(p.reservation_id)+'</td><td class="p-2">'+esc(p.provider_code)+'</td><td class="p-2">'+esc(p.task_code)+'</td><td class="p-2 text-right">'+esc(p.reserved_usd)+'</td></tr>').join('')||'<tr><td colspan="4" class="p-4 text-center">Tidak ada reservasi tertunda.</td></tr>')+'</tbody></table></div>';
+ }catch(error){output.textContent='Gagal memuat rekonsiliasi: '+error.message;}
+}
+function setupReconciliation(){
+ const panel=document.getElementById('aiAdminPanel');if(!panel||document.getElementById('aiReconciliationPanel'))return;
+ const section=document.createElement('section');section.id='aiReconciliationPanel';section.className='border-t border-slate-700 pt-4 mt-4';
+ section.innerHTML='<button type="button" id="aiReconciliationToggle" aria-expanded="false" class="rounded-lg bg-slate-800 px-3 py-2 text-sm font-bold text-cyan-300">Rekonsiliasi AI ▾</button><div id="aiReconciliationContent" class="hidden mt-3 space-y-3"><p class="text-xs text-slate-400">Read-only: biaya yang belum terverifikasi tetap dicadangkan.</p><button type="button" id="aiReconciliationRefresh" class="rounded-lg border border-slate-600 px-3 py-2 text-xs">Muat ulang</button><div id="aiReconciliationBudgetSummary"></div><div id="aiReconciliationRows"></div></div>';
+ panel.appendChild(section);
+ section.querySelector('#aiReconciliationToggle').addEventListener('click',()=>{const content=section.querySelector('#aiReconciliationContent');const show=content.classList.contains('hidden');content.classList.toggle('hidden',!show);section.querySelector('#aiReconciliationToggle').setAttribute('aria-expanded',String(show));if(show)loadReconciliation();});
+ section.querySelector('#aiReconciliationRefresh').addEventListener('click',loadReconciliation);
+}
+async function loadGeminiQuotas(){
+ const root=document.getElementById('aiGeminiQuotaRows');if(!root)return;
+ root.textContent='Memuat pengaturan kuota...';
+ try{
+  const response=await fetch('/api/admin/ai/gemini-quotas',{credentials:'include'});
+  const data=await response.json();
+  if(!response.ok)throw Error(data.error||'Pengaturan kuota belum tersedia');
+  root.innerHTML=(data.data||[]).map(m=>'<div class="rounded-lg border border-slate-700 p-3 space-y-2" data-gemini-quota="'+Number(m.model_id)+'"><div class="text-sm font-bold">'+esc(m.model_name||m.model_code)+'</div><div class="text-xs text-slate-400">Reservasi hari ini (UTC): '+Number(m.reserved_today||0)+'</div><label class="text-xs">Batas permintaan per hari <input data-quota-limit type="number" min="1" max="100000" value="'+Number(m.max_requests??(String(m.model_code).includes('flash-lite')?50:20))+'" class="w-full rounded bg-slate-900 border border-slate-700 p-2"></label><label class="flex items-center gap-2 text-xs"><input data-quota-enabled type="checkbox" '+(m.enabled?'checked':'')+'>Aktifkan kuota</label><button type="button" data-quota-save class="rounded bg-cyan-700 px-3 py-2 text-xs font-bold">Simpan kuota</button></div>').join('')||'<p class="text-xs">Belum ada model Gemini.</p>';
+ }catch(err){root.textContent='Kuota belum tersedia: '+err.message;}
+}
+function setupGeminiQuotas(){
+ const panel=document.getElementById('aiAdminProviders')?.parentElement;if(!panel||document.getElementById('aiGeminiQuotaSection'))return;
+ const section=document.createElement('details');section.id='aiGeminiQuotaSection';section.className='mt-5 rounded-xl border border-slate-700 p-4 space-y-3';
+ section.innerHTML='<summary class="font-bold cursor-pointer">Kuota Harian Gemini</summary><p class="text-xs text-slate-400">Batasi permintaan Gemini per model. Saat kuota nonaktif, permintaan Gemini akan ditolak. Penghitungan menggunakan UTC.</p><button type="button" id="aiGeminiQuotaRefresh" class="rounded border border-slate-600 px-3 py-2 text-xs">Muat ulang kuota</button><div id="aiGeminiQuotaRows" class="grid gap-3"></div>';
+ panel.appendChild(section);
+ section.querySelector('#aiGeminiQuotaRefresh').addEventListener('click',loadGeminiQuotas);
+ section.addEventListener('click',async e=>{
+  const btn=e.target.closest?.('[data-quota-save]');if(!btn)return;
+  const row=btn.closest('[data-gemini-quota]'),modelId=Number(row.dataset.geminiQuota);
+  const limit=Number(row.querySelector('[data-quota-limit]').value),enabled=row.querySelector('[data-quota-enabled]').checked;
+  if(!Number.isInteger(limit)||limit<1||limit>100000){alert('Batas kuota harus 1–100000.');return;}
+  btn.disabled=true;
+  try{
+   const r=await fetch('/api/admin/ai/gemini-quotas/'+modelId,{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({max_requests:limit,enabled})});
+   const data=await r.json();if(!r.ok)throw Error(data.error||'Gagal menyimpan kuota');
+   await loadGeminiQuotas();
+  }catch(err){alert('Gagal menyimpan: '+err.message);}finally{btn.disabled=false;}
+ });
+ loadGeminiQuotas();
+}
+document.addEventListener('DOMContentLoaded',()=>{setupReconciliation();setupManualBalances();setupGeminiQuotas();load();});
+})();+Number(p.balance_usd).toFixed(4);
+   const lastReason=p.reason?' · Alasan terakhir: '+esc(p.reason):'';
+   const updated=p.created_at?' · Diperbarui: '+esc(new Date(p.created_at).toLocaleString('id-ID')):'';
    return '<div class="rounded-lg border border-slate-700 p-3 space-y-2" data-manual-balance="'+esc(p.provider_code)+'"><div class="font-semibold">'+esc(names[p.provider_code]||p.provider_code)+'</div><div class="text-xs">Saldo saat input: '+balance+' · Sisa internal: '+remaining+'</div><label class="block text-xs">Saldo aktual USD<input data-balance-amount type="number" min="0" step="0.0001" class="mt-1 w-full rounded border border-slate-600 p-2"></label><label class="block text-xs">Alasan pembaruan<input data-balance-reason maxlength="500" class="mt-1 w-full rounded border border-slate-600 p-2"></label><button type="button" data-balance-save class="rounded bg-cyan-700 px-3 py-2 text-xs font-bold">Simpan saldo</button></div>';
   }).join('')||'Provider berbayar tidak ditemukan.';
  }catch(error){root.textContent='Gagal memuat saldo manual: '+error.message;}
