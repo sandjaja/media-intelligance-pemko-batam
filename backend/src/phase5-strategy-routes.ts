@@ -3,6 +3,8 @@ import type { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { decryptIntegrationCredential } from './integration-credentials.js';
+import { executeConfiguredAi } from './ai-execution-gateway.js';
+import type { AiProvider } from './ai-provider-adapters.js';
 import { hasPermission, loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 
 declare module 'fastify' { interface FastifyRequest { phase5Auth?: AuthorizationContext } }
@@ -27,7 +29,7 @@ const reviewSchema=z.object({note:z.string().trim().max(4000).nullable().optiona
 const districtFields=z.object({
  evidenceContext:z.record(z.string(),z.any()).default({}),localAudiences:z.array(z.any()).default([]),communicationFocus:z.array(z.any()).default([]),localMessages:z.array(z.any()).default([]),talkingPoints:z.array(z.any()).default([]),localChannels:z.array(z.any()).default([]),coordinationOpds:z.array(z.any()).default([]),timingStrategy:z.record(z.string(),z.any()).default({}),successKpis:z.array(z.any()).default([]),fieldUpdateRequirements:z.array(z.any()).default([])
 });
-async function generateStrategyWithGemini(pool:Pool,input:any){
+async function generateStrategyWithGemini(pool:Pool,input:any,userId:string){
  // Respect the Humas model choice. Never silently execute Gemini if Humas selected a
  // different provider: paid providers require the separate budgeted gateway path.
  const selected=await pool.query(`SELECT p.code AS provider_code,m.code AS model_code,
@@ -36,17 +38,12 @@ async function generateStrategyWithGemini(pool:Pool,input:any){
    JOIN ai_models m ON m.id=s.model_id
    JOIN ai_providers p ON p.id=m.provider_id
    WHERE s.task_code='strakom_analysis' LIMIT 1`);
- if(selected.rows.length && selected.rows[0].provider_code!=='gemini')
-   throw new Error('AI_STRATEGY_PAID_MODEL_GATEWAY_NOT_READY');
  if(selected.rows.length && (!selected.rows[0].provider_enabled || !selected.rows[0].model_enabled))
    throw new Error('AI_STRATEGY_SELECTED_MODEL_DISABLED');
  const modelRows=selected.rows.length ? selected.rows :
    (await pool.query("SELECT m.code AS model_code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 1")).rows;
  const model=modelRows[0]?.model_code;
  if(!model)throw new Error('AI_STRATEGY_GEMINI_MODEL_NOT_CONFIGURED');
- const {rows}=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
- if(!rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
- const key=decryptIntegrationCredential(rows[0].credential_ciphertext);
  const promptRow=await pool.query("SELECT prompt_text FROM ai_humas_task_prompts WHERE task_code='strakom_analysis' LIMIT 1").catch(()=>({rows:[]}));
  const prompt=(promptRow.rows[0]?.prompt_text||`Anda adalah mesin strategi komunikasi Pemerintah Kota Batam. Susun DRAFT strategi komunikasi berbasis data yang diberikan. Jangan mengarang fakta. Bedakan pesan induk Pemko dan arahan kewilayahan. Arahan kecamatan hanya untuk kecamatan yang tercantum dalam input. Pesan lokal harus konsisten dengan pesan induk. Historical learning adalah pembelajaran, bukan fakta kondisi saat ini.
 
@@ -68,6 +65,21 @@ Jangan memasukkan kutipan, angka/statistik, dasar hukum, URL, nama pejabat, tang
 
 Output JSON:
 {"executiveSummary":"...","communicationObjectives":[],"targetAudiences":[],"keyMessages":[],"talkingPoints":[],"coordinationRequirements":[{"purpose":"...","informationNeeded":["..."],"parties":["..."],"publicationUse":"..."}],"expectedCommunicationOutcomes":[{"audience":"...","expectedUnderstanding":"...","expectedAction":"..."}],"channelStrategy":[],"timingStrategy":{},"spokespersonStrategy":[],"contentFormats":[],"communicationRisks":[],"successKpis":[],"productionRecommendations":[{"audience":"MASYARAKAT_UMUM","purpose":"EDUKASI_SOSIALISASI","tone":"INFORMATIF_KLARITATIF","format":"INFOGRAFIS","channels":["INSTAGRAM","FACEBOOK"],"priority":"UTAMA","reason":"..."}],"districtStrategies":[{"districtId":1,"evidenceContext":{},"localAudiences":[],"communicationFocus":[],"localMessages":[],"talkingPoints":[],"localChannels":[],"coordinationOpds":[],"timingStrategy":{},"successKpis":[],"fieldUpdateRequirements":[]}]}`)+ '\n\nDATA:\n'+JSON.stringify(input).slice(0,50000);
+ if(selected.rows.length && selected.rows[0].provider_code!=='gemini') {
+   // Paid executions must reserve budget and settle usage in the shared gateway.
+   // The gateway enforces its prompt-size limit before any provider request.
+   const numericUserId=Number(userId);
+   if(!Number.isSafeInteger(numericUserId)||numericUserId<=0)throw new Error('AI_GATEWAY_INVALID_CONTEXT');
+   const result=await executeConfiguredAi(pool,{
+     userId:numericUserId,taskCode:'strakom_analysis',
+     provider:selected.rows[0].provider_code as AiProvider,
+     modelCode:model,prompt
+   });
+   return result.data;
+ }
+ const {rows}=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
+ if(!rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
+ const key=decryptIntegrationCredential(rows[0].credential_ciphertext);
  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}})});
  if(!r.ok)throw new Error(`Gemini HTTP ${r.status}`);const payload=await r.json() as any,raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');return JSON.parse(raw);
 }
@@ -168,7 +180,7 @@ s.id strategy_id,s.version strategy_version,s.status strategy_status,s.is_curren
  app.post('/api/phase5/issues/:issueId/workflows/:workflowId/strategy/draft',{preHandler:auth},async(request,reply)=>{
   const p=paramsSchema.safeParse(request.params);if(!p.success)return reply.code(400).send({error:'INVALID_WORKFLOW'});const ctx=request.phase5Auth!;if(!requireManage(ctx))return reply.code(403).send({error:'FORBIDDEN'});const w=await workflow(p.data.issueId,p.data.workflowId);if(!w)return reply.code(404).send({error:'WORKFLOW_NOT_FOUND'});if(!['APPROVED','STRATEGY'].includes(String(w.workflow_status)))return reply.code(409).send({error:'STRATEGY_STAGE_NOT_AVAILABLE',status:w.workflow_status});const gap=(await pool.query('SELECT 1 FROM issue_communication_gap_snapshots WHERE workflow_id=$1',[w.id])).rows[0];if(!gap)return reply.code(409).send({error:'COMMUNICATION_GAP_REQUIRED'});const open=(await pool.query("SELECT * FROM communication_strategies WHERE workflow_id=$1 AND status IN ('DRAFT','IN_REVIEW') ORDER BY version DESC LIMIT 1",[w.id])).rows[0];if(open)return reply.code(409).send({error:'OPEN_STRATEGY_EXISTS',data:open});
   const version=Number((await pool.query('SELECT COALESCE(MAX(version),0)+1 v FROM communication_strategies WHERE workflow_id=$1',[w.id])).rows[0].v),input=await snapshot(w);
-  const generated=await generateStrategyWithGemini(pool,input);
+  const generated=await generateStrategyWithGemini(pool,input,ctx.id);
   const client=await pool.connect();try{await client.query('BEGIN');if(w.workflow_status==='APPROVED')await client.query("UPDATE issue_workflows SET workflow_status='STRATEGY',updated_by=$1,updated_at=NOW() WHERE id=$2",[ctx.id,w.id]);const row=(await client.query("INSERT INTO communication_strategies(workflow_id,issue_id,version,status,input_snapshot,executive_summary,communication_objectives,target_audiences,key_messages,talking_points,channel_strategy,timing_strategy,spokesperson_strategy,content_formats,communication_risks,coordination_requirements,expected_communication_outcomes,success_kpis,generated_by,generated_at,created_by,updated_by) VALUES($1,$2,$3,'DRAFT',$4::jsonb,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16::jsonb,$17::jsonb,$18,NOW(),$18,$18) RETURNING *",[w.id,w.issue_id,version,JSON.stringify(input),generated.executiveSummary||null,JSON.stringify(generated.communicationObjectives||[]),JSON.stringify(generated.targetAudiences||[]),JSON.stringify(generated.keyMessages||[]),JSON.stringify(generated.talkingPoints||[]),JSON.stringify(generated.channelStrategy||[]),JSON.stringify(generated.timingStrategy||{}),JSON.stringify(generated.spokespersonStrategy||[]),JSON.stringify(generated.contentFormats||[]),JSON.stringify(generated.communicationRisks||[]),JSON.stringify(generated.coordinationRequirements||[]),JSON.stringify(generated.expectedCommunicationOutcomes||[]),JSON.stringify(generated.successKpis||[]),ctx.id])).rows[0];
   // Production recommendations are intentionally stored inside input_snapshot metadata for now.
   // This avoids a schema migration while making newly generated Strakom Content-Studio-ready.
@@ -178,7 +190,7 @@ s.id strategy_id,s.version strategy_version,s.status strategy_status,s.is_curren
  app.post('/api/phase5/issues/:issueId/workflows/:workflowId/strategy/:version/regenerate',{preHandler:auth},async(request,reply)=>{
   const p=paramsSchema.extend({version:z.coerce.number().int().positive()}).safeParse(request.params);if(!p.success)return reply.code(400).send({error:'INVALID_STRATEGY'});const ctx=request.phase5Auth!;if(!requireManage(ctx))return reply.code(403).send({error:'FORBIDDEN'});
   const w=await workflow(p.data.issueId,p.data.workflowId);if(!w)return reply.code(404).send({error:'WORKFLOW_NOT_FOUND'});const current=(await pool.query("SELECT id,status FROM communication_strategies WHERE workflow_id=$1 AND issue_id=$2 AND version=$3",[p.data.workflowId,p.data.issueId,p.data.version])).rows[0];if(!current||current.status!=='DRAFT')return reply.code(409).send({error:'ONLY_DRAFT_STRATEGY_CAN_BE_REGENERATED'});
-  const input=await snapshot(w),generated=await generateStrategyWithGemini(pool,input),enriched={...input,productionRecommendations:Array.isArray(generated.productionRecommendations)?generated.productionRecommendations:[]};
+  const input=await snapshot(w),generated=await generateStrategyWithGemini(pool,input,ctx.id),enriched={...input,productionRecommendations:Array.isArray(generated.productionRecommendations)?generated.productionRecommendations:[]};
   const client=await pool.connect();try{await client.query('BEGIN');const row=(await client.query(`UPDATE communication_strategies SET input_snapshot=$1::jsonb,executive_summary=$2,communication_objectives=$3::jsonb,target_audiences=$4::jsonb,key_messages=$5::jsonb,talking_points=$6::jsonb,channel_strategy=$7::jsonb,timing_strategy=$8::jsonb,spokesperson_strategy=$9::jsonb,content_formats=$10::jsonb,communication_risks=$11::jsonb,coordination_requirements=$12::jsonb,expected_communication_outcomes=$13::jsonb,success_kpis=$14::jsonb,generated_by=$15,generated_at=NOW(),updated_by=$15,updated_at=NOW() WHERE id=$16 AND status='DRAFT' RETURNING *`,[JSON.stringify(enriched),generated.executiveSummary||null,JSON.stringify(generated.communicationObjectives||[]),JSON.stringify(generated.targetAudiences||[]),JSON.stringify(generated.keyMessages||[]),JSON.stringify(generated.talkingPoints||[]),JSON.stringify(generated.channelStrategy||[]),JSON.stringify(generated.timingStrategy||{}),JSON.stringify(generated.spokespersonStrategy||[]),JSON.stringify(generated.contentFormats||[]),JSON.stringify(generated.communicationRisks||[]),JSON.stringify(generated.coordinationRequirements||[]),JSON.stringify(generated.expectedCommunicationOutcomes||[]),JSON.stringify(generated.successKpis||[]),ctx.id,current.id])).rows[0];
   await client.query('DELETE FROM communication_strategy_districts WHERE strategy_id=$1',[current.id]);const allowed=new Set((input.districts||[]).map((d:any)=>Number(d.id)));for(const ds of (generated.districtStrategies||[])){const districtId=Number(ds.districtId);if(!allowed.has(districtId))continue;await client.query(`INSERT INTO communication_strategy_districts(strategy_id,workflow_id,district_id,evidence_context,local_audiences,communication_focus,local_messages,talking_points,local_channels,coordination_opds,timing_strategy,success_kpis,field_update_requirements) VALUES($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb)`,[current.id,w.id,districtId,JSON.stringify(ds.evidenceContext||{}),JSON.stringify(ds.localAudiences||[]),JSON.stringify(ds.communicationFocus||[]),JSON.stringify(ds.localMessages||[]),JSON.stringify(ds.talkingPoints||[]),JSON.stringify(ds.localChannels||[]),JSON.stringify(ds.coordinationOpds||[]),JSON.stringify(ds.timingStrategy||{}),JSON.stringify(ds.successKpis||[]),JSON.stringify(ds.fieldUpdateRequirements||[])]);}await client.query('COMMIT');return{data:row};}catch(e){await client.query('ROLLBACK');throw e}finally{client.release()}
  });
