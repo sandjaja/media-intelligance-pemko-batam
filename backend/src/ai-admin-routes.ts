@@ -57,6 +57,22 @@ export async function registerAiAdminRoutes(app:FastifyInstance,pool:Pool,jwtSec
     }catch{return reply.code(503).send({error:'AI_GEMINI_QUOTA_UNAVAILABLE'});}
   });
 
+  app.get('/api/admin/ai/gemini-feature-usage',{preHandler:guard},async(request,reply)=>{
+    const parsed=z.object({days:z.coerce.number().int().min(1).max(30).default(7)}).safeParse(request.query);
+    if(!parsed.success)return reply.code(400).send({error:'INVALID_DAYS'});
+    try{
+      const exists=await pool.query("SELECT to_regclass('public.ai_gemini_quota_feature_audit') IS NOT NULL AS available");
+      if(!exists.rows[0]?.available)return reply.code(503).send({error:'AI_GEMINI_FEATURE_AUDIT_MIGRATION_REQUIRED'});
+      const {rows}=await pool.query(`SELECT a.usage_date,m.code AS model_code,a.feature_code,COUNT(*)::int AS reserved_requests
+        FROM ai_gemini_quota_feature_audit a JOIN ai_models m ON m.id=a.model_id
+        JOIN ai_providers p ON p.id=m.provider_id
+        WHERE p.code='gemini' AND a.usage_date>=(now() AT TIME ZONE 'UTC')::date-($1::int-1)
+        GROUP BY a.usage_date,m.code,a.feature_code
+        ORDER BY a.usage_date DESC,reserved_requests DESC,m.code,a.feature_code`,[parsed.data.days]);
+      return {data:rows,timezone:'UTC',note:'Reservations by feature; does not imply provider completion or official Google quota.'};
+    }catch{return reply.code(503).send({error:'AI_GEMINI_FEATURE_AUDIT_UNAVAILABLE'});}
+  });
+
   app.put('/api/admin/ai/gemini-quotas/:modelId',{preHandler:guard},async(request,reply)=>{
     const id=z.coerce.number().int().positive().safeParse((request.params as any).modelId);
     const body=z.object({max_requests:z.number().int().min(1).max(100000),enabled:z.boolean()}).safeParse(request.body);
