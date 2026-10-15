@@ -20,7 +20,10 @@ export async function executeBudgetedAi<T>(pool: Pool, input: {
   invoke: () => Promise<{ data: T; usage: AiGatewayUsage; latencyMs?: number }>;
 }): Promise<AiGatewayResult<T>> {
   if (!Number.isSafeInteger(input.userId) || input.userId <= 0 ||
-      !Number.isSafeInteger(input.modelId) || input.modelId <= 0) {
+      !Number.isSafeInteger(input.taskId) || input.taskId <= 0 ||
+      !Number.isSafeInteger(input.providerId) || input.providerId <= 0 ||
+      !Number.isSafeInteger(input.modelId) || input.modelId <= 0 ||
+      !Number.isFinite(input.estimatedUsd) || input.estimatedUsd <= 0) {
     throw new Error('AI_GATEWAY_INVALID_CONTEXT');
   }
   // Validate task/provider/model linkage before committing a budget reservation.
