@@ -65,3 +65,12 @@ test('Invalid JSON is rejected', async () => {
     /AI_PROVIDER_INVALID_JSON/,
   );
 });
+
+test('Gemini thinking tokens count toward billable output usage', async () => {
+  mockResponse({
+    candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }],
+    usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 7, thoughtsTokenCount: 15 },
+  });
+  const result = await invokeAiProvider({ provider: 'gemini', model: 'test-model', apiKey: 'mock', prompt: 'hello' });
+  assert.deepEqual(result.usage, { inputTokens: 12, outputTokens: 22 });
+});
