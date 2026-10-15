@@ -4,7 +4,7 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 async function load(){
  const box=document.getElementById('integrationRows'); if(!box)return;
  box.innerHTML='<div class="text-sm text-slate-500">Memuat integrasi...</div>';
- try{const response=await api('/api/admin/integrations');const data=Array.isArray(response.data)?response.data:[];box.dataset.providerCodes=data.map(p=>p.code).join(',');box.innerHTML=data.map(p=>`
+ try{const response=await api('/api/admin/integrations');const data=(Array.isArray(response.data)?response.data:[]).filter(p=>['apify','youtube'].includes(String(p.code).toLowerCase()));box.dataset.providerCodes=data.map(p=>p.code).join(',');box.innerHTML=data.map(p=>`
  <article class="glass rounded-2xl p-5 space-y-3">
   <div class="flex justify-between gap-3"><div><div class="text-xs text-cyan-400 font-black">${esc(p.code).toUpperCase()}</div><h3 class="font-black">${esc(p.name)}</h3><p class="text-xs text-slate-500">${esc(p.auth_type)}</p></div>
   <span class="text-xs px-2 py-1 h-fit rounded-full bg-slate-800">${esc(p.last_status||'belum dikonfigurasi')}</span></div>
