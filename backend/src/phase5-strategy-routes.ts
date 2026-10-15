@@ -82,8 +82,8 @@ Output JSON:
  const {rows}=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
  if(!rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
  const key=decryptIntegrationCredential(rows[0].credential_ciphertext);
- const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}})});
- if(!r.ok)throw new Error(`Gemini HTTP ${r.status}`);const payload=await r.json() as any,raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');return JSON.parse(raw);
+ const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},signal:AbortSignal.timeout(30000),body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json',maxOutputTokens:4096}})});
+ if(!r.ok)throw new Error(r.status===429?'AI_GEMINI_QUOTA_EXCEEDED':`Gemini HTTP ${r.status}`);const payload=await r.json() as any;if(payload.promptFeedback?.blockReason||payload.candidates?.[0]?.finishReason==='SAFETY')throw new Error('AI_GEMINI_RESPONSE_BLOCKED');if(payload.candidates?.[0]?.finishReason!=='STOP')throw new Error('AI_GEMINI_RESPONSE_INCOMPLETE');const raw=payload.candidates[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');return JSON.parse(raw);
 }
 
 export async function registerPhase5StrategyRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
