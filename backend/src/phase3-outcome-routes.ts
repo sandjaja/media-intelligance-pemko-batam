@@ -105,7 +105,7 @@ HASILKAN:
 10. monitoringFocus: turunkan hanya hal yang memang perlu diamati SETELAH publikasi untuk mengetahui pickup/persistensi claim/sinyal baru/sentimen-risiko/amplifikasi. Gunakan evidence yang tersedia di sistem (ONLINE, PRINT, SOCIAL, OWNED), jangan mengandalkan komentar/share/engagement jika tidak tersedia.
 
 Output JSON:
-{"strategyEssence":{"summary":"...","essentialIntent":["..."],"priorityAudience":["..."],"coreMessage":["..."],"intendedApproach":"..."},"executionAssessment":{"status":"ALIGNED|PARTIAL|MISALIGNED|INSUFFICIENT_EVIDENCE","assessment":"..."},"achieved":["..."],"gaps":["..."],"communicationStyle":{"observed":"...","fitAssessment":"..."},"strengths":["..."],"audienceAndMessage":{"assessment":"...","potentialMisunderstanding":["..."]},"improvements":[{"priority":"HIGH|MEDIUM|LOW","recommendation":"...","reason":"..."}],"coordinationFollowUp":{"status":"NONE|NEEDS_CONFIRMATION|NEEDS_COORDINATION|FOLLOWUP_PUBLICATION","missingInformation":["..."],"parties":["..."],"recommendation":"...","reason":"..."},"monitoringFocus":[{"type":"MESSAGE_PICKUP|CLAIM_PERSISTENCE|NEW_CLAIM|SENTIMENT_RISK|OFFICIAL_AMPLIFICATION","target":"...","rationale":"...","expectedSignal":"...","sourceTypes":["ONLINE","PRINT","SOCIAL","OWNED"]}]}`)+'\n\nDATA:\n'+JSON.stringify(input).slice(0,50000);
+{"strategyEssence":{"summary":"...","essentialIntent":["..."],"priorityAudience":["..."],"coreMessage":["..."],"intendedApproach":"..."},"executionAssessment":{"status":"ALIGNED|PARTIAL|MISALIGNED|INSUFFICIENT_EVIDENCE","assessment":"..."},"achieved":["..."],"gaps":["..."],"communicationStyle":{"observed":"...","fitAssessment":"..."},"strengths":["..."],"audienceAndMessage":{"assessment":"...","potentialMisunderstanding":["..."]},"improvements":[{"priority":"HIGH|MEDIUM|LOW","recommendation":"...","reason":"..."}],"coordinationFollowUp":{"status":"NONE|NEEDS_CONFIRMATION|NEEDS_COORDINATION|FOLLOWUP_PUBLICATION","missingInformation":["..."],"parties":["..."],"recommendation":"...","reason":"..."},"monitoringFocus":[{"type":"MESSAGE_PICKUP|CLAIM_PERSISTENCE|NEW_CLAIM|SENTIMENT_RISK|OFFICIAL_AMPLIFICATION","target":"...","rationale":"...","expectedSignal":"...","sourceTypes":["ONLINE","PRINT","SOCIAL","OWNED"]}]}`)+'\n\nDATA:\n'+JSON.stringify(input);
   if(selection && selection.provider_code!=='gemini'){
     // The text gateway cannot read attached image/PDF parts. Never drop evidence.
     if(mediaParts.length)throw new Error('AI_PUBLICATION_MULTIMODAL_PAID_GATEWAY_NOT_READY');
@@ -178,7 +178,7 @@ HASILKAN JSON:
 "opdAnticipation":[{"opd":"nama dari context","anticipation":"...","reason":"..."}],
 "districtAnticipation":[{"district":"nama dari context","anticipation":"...","reason":"..."}],
 "nextCommunication":{"action":"NO_FURTHER_ACTION|KEEP_WATCHING|REINFORCE_MESSAGE|ADDITIONAL_CLARIFICATION|FOLLOWUP_PUBLICATION|NEXT_CYCLE_REVIEW","priority":"HIGH|MEDIUM|LOW","recommendation":"...","reason":"..."},
-"watchNext":["..."],"remainingGap":["..."],"newSignals":["..."]}.`)+'\n\nDATA:\n'+JSON.stringify(input).slice(0,50000);
+"watchNext":["..."],"remainingGap":["..."],"newSignals":["..."]}.`)+'\n\nDATA:\n'+JSON.stringify(input);
   if(selection && selection.provider_code!=='gemini') {
     if(prompt.length>12000)throw new Error('AI_MONITORING_PROMPT_TOO_LARGE');
     const numericUserId=Number(userId);
