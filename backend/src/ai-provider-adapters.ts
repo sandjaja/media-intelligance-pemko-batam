@@ -40,7 +40,7 @@ export async function invokeAiProvider(input: {
   } else if (input.provider === 'anthropic') {
     url = 'https://api.anthropic.com/v1/messages';
     headers = { 'content-type': 'application/json', 'x-api-key': input.apiKey, 'anthropic-version': '2023-06-01' };
-    body = { model: input.model, max_tokens: 4096, messages: [{ role: 'user', content: input.prompt + '\\nRespond with valid JSON only.' }] };
+    body = { model: input.model, max_tokens: 4096, messages: [{ role: 'user', content: input.prompt + '\nRespond with valid JSON only.' }] };
   } else {
     throw new Error('AI_PROVIDER_UNSUPPORTED');
   }
