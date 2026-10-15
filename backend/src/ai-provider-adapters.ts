@@ -55,6 +55,7 @@ export async function invokeAiProvider(input: {
   let inputTokens: unknown;
   let outputTokens: unknown;
   if (input.provider === 'gemini') {
+    if (payload.candidates?.[0]?.finishReason === 'MAX_TOKENS') throw new Error('AI_PROVIDER_OUTPUT_TRUNCATED');
     raw = payload.candidates?.[0]?.content?.parts?.map((part: any) => part.text ?? '').join('');
     inputTokens = payload.usageMetadata?.promptTokenCount;
     // Gemini may bill thinking tokens in addition to visible candidate tokens.
@@ -64,12 +65,14 @@ export async function invokeAiProvider(input: {
       ? 0 : tokenCount(payload.usageMetadata.thoughtsTokenCount);
     outputTokens = visibleTokens + thinkingTokens;
   } else if (input.provider === 'openai') {
+    if (payload.status === 'incomplete') throw new Error('AI_PROVIDER_OUTPUT_TRUNCATED');
     raw = payload.output?.flatMap((item: any) => item.content ?? [])
       .filter((part: any) => part.type === 'output_text')
       .map((part: any) => part.text ?? '').join('');
     inputTokens = payload.usage?.input_tokens;
     outputTokens = payload.usage?.output_tokens;
   } else {
+    if (payload.stop_reason === 'max_tokens') throw new Error('AI_PROVIDER_OUTPUT_TRUNCATED');
     raw = payload.content?.filter((part: any) => part.type === 'text')
       .map((part: any) => part.text ?? '').join('');
     inputTokens = payload.usage?.input_tokens;
