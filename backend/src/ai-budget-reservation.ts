@@ -122,3 +122,64 @@ export function calculateAiTokenCost(
   // Database ledger has six decimal places; round up to avoid understating spend.
   return Math.ceil(cost * 1_000_000 - 1e-9) / 1_000_000;
 }
+
+export async function settleAiBudgetWithUsage(pool: Pool, input: {
+  reservationId: string;
+  userId: number;
+  modelId: number;
+  inputTokens: number;
+  outputTokens: number;
+  latencyMs?: number;
+}): Promise<{ actualUsd: number }> {
+  if (!/^\d+$/.test(input.reservationId) ||
+      !Number.isSafeInteger(input.userId) || input.userId <= 0 ||
+      !Number.isSafeInteger(input.modelId) || input.modelId <= 0 ||
+      ![input.inputTokens, input.outputTokens].every(v => Number.isSafeInteger(v) && v >= 0) ||
+      (input.latencyMs !== undefined && (!Number.isSafeInteger(input.latencyMs) || input.latencyMs < 0))) {
+    throw new Error('AI_USAGE_INVALID');
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const reservation = await client.query(
+      `SELECT r.task_id, r.status, b.provider_id
+         FROM ai_budget_reservations r
+         JOIN ai_provider_budgets b ON b.id=r.budget_id
+        WHERE r.id=$1`, [input.reservationId],
+    );
+    if (!reservation.rowCount || reservation.rows[0].status !== 'reserved') {
+      throw new Error('AI_RESERVATION_NOT_PENDING');
+    }
+    const providerId = reservation.rows[0].provider_id;
+    await client.query('SELECT id FROM ai_providers WHERE id=$1 FOR UPDATE', [providerId]);
+    const priceRows = await client.query(
+      `SELECT pr.input_usd_per_million, pr.output_usd_per_million
+         FROM ai_model_prices pr JOIN ai_models m ON m.id=pr.model_id
+        WHERE pr.model_id=$1 AND m.provider_id=$2 AND pr.effective_from<=NOW()
+        ORDER BY pr.effective_from DESC LIMIT 1`, [input.modelId, providerId],
+    );
+    if (!priceRows.rowCount) throw new Error('AI_MODEL_PRICE_NOT_CONFIGURED');
+    const actualUsd = calculateAiTokenCost(input.inputTokens, input.outputTokens, {
+      inputUsdPerMillion: Number(priceRows.rows[0].input_usd_per_million),
+      outputUsdPerMillion: Number(priceRows.rows[0].output_usd_per_million),
+    });
+    const updated = await client.query(
+      `UPDATE ai_budget_reservations SET status='settled', settled_usd=$2
+        WHERE id=$1 AND status='reserved' RETURNING id`, [input.reservationId, actualUsd],
+    );
+    if (!updated.rowCount) throw new Error('AI_RESERVATION_NOT_PENDING');
+    await client.query(
+      `INSERT INTO ai_usage_logs(task_id,provider_id,model_id,user_id,status,latency_ms,input_tokens,output_tokens)
+       VALUES($1,$2,$3,$4,'success',$5,$6,$7)`,
+      [reservation.rows[0].task_id, providerId, input.modelId, input.userId,
+       input.latencyMs ?? null, input.inputTokens, input.outputTokens],
+    );
+    await client.query('COMMIT');
+    return { actualUsd };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
