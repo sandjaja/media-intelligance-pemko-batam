@@ -22,27 +22,54 @@ async function loadManualBalances(){
  const root=document.getElementById('aiManualBalanceRows');if(!root)return;
  root.textContent='Memuat saldo manual...';
  try{
-  const r=await fetch('/api/admin/ai/manual-balances',{credentials:'include',cache:'no-store'});
-  const j=await r.json();if(!r.ok)throw Error(j.error||'HTTP '+r.status);
-  root.innerHTML=(j.data||[]).map(b=>'<div class="rounded-lg border border-slate-700 p-3 space-y-2" data-manual-balance="'+esc(b.provider_code)+'"><div class="font-semibold">'+esc(names[b.provider_code]||b.provider_code)+'</div><div class="text-xs">Saldo terakhir: '+(b.balance_usd==null?'Belum diinput':'
+  const response=await fetch('/api/admin/ai/manual-balances',{credentials:'include',cache:'no-store'});
+  const result=await response.json();if(!response.ok)throw Error(result.error||'HTTP '+response.status);
+  root.innerHTML=(result.data||[]).map(p=>{
+   const remaining=p.remaining_usd==null?'—':'$'+Number(p.remaining_usd).toFixed(4);
+   const balance=p.balance_usd==null?'Belum diinput':'$'+Number(p.balance_usd).toFixed(4);
+   return '<div class="rounded-lg border border-slate-700 p-3 space-y-2" data-manual-balance="'+esc(p.provider_code)+'"><div class="font-semibold">'+esc(names[p.provider_code]||p.provider_code)+'</div><div class="text-xs">Saldo saat input: '+balance+' · Sisa internal: '+remaining+'</div><label class="block text-xs">Saldo aktual USD<input data-balance-amount type="number" min="0" step="0.0001" class="mt-1 w-full rounded border border-slate-600 p-2"></label><label class="block text-xs">Alasan pembaruan<input data-balance-reason maxlength="500" class="mt-1 w-full rounded border border-slate-600 p-2"></label><button type="button" data-balance-save class="rounded bg-cyan-700 px-3 py-2 text-xs font-bold">Simpan saldo</button></div>';
+  }).join('')||'Provider berbayar tidak ditemukan.';
+ }catch(error){root.textContent='Gagal memuat saldo manual: '+error.message;}
+}
+function setupManualBalances(){
+ const panel=document.getElementById('aiAdminPanel');if(!panel||document.getElementById('aiManualBalanceSection'))return;
+ const section=document.createElement('details');section.id='aiManualBalanceSection';section.className='border-t border-slate-700 pt-4 mt-4';
+ section.innerHTML='<summary class="cursor-pointer font-bold">Saldo Manual AI Berbayar</summary><p class="text-xs text-slate-400 mt-2">Masukkan saldo tersisa yang terlihat di akun provider. Saldo ini adalah input manual, bukan hasil API provider.</p><div id="aiManualBalanceRows" class="grid gap-3 mt-3"></div>';
+ panel.appendChild(section);
+ section.addEventListener('toggle',()=>{if(section.open)loadManualBalances();});
+ section.addEventListener('click',async event=>{
+  const button=event.target.closest?.('[data-balance-save]');if(!button)return;
+  const row=button.closest('[data-manual-balance]');
+  const raw=row.querySelector('[data-balance-amount]').value;
+  const amount=Number(raw),reason=row.querySelector('[data-balance-reason]').value.trim();
+  if(!raw||!Number.isFinite(amount)||amount<0||reason.length<5){alert('Isi saldo valid dan alasan minimal 5 karakter.');return;}
+  if(!confirm('Ganti saldo acuan provider dengan angka ini?'))return;
+  button.disabled=true;
+  try{
+   const response=await fetch('/api/admin/ai/manual-balances',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({providerCode:row.dataset.manualBalance,balanceUsd:amount,reason})});
+   const result=await response.json();if(!response.ok)throw Error(result.error||'HTTP '+response.status);
+   await loadManualBalances();
+  }catch(error){alert('Gagal menyimpan saldo: '+error.message);}finally{button.disabled=false;}
+ });
+}
+async function loadReconciliation(){
  const output=document.getElementById('aiReconciliationRows');if(!output)return;
- output.textContent='Memuat reservasi tertunda...';
+ output.textContent='Memuat rekonsiliasi...';
  try{
-  const response=await fetch('/api/admin/ai/budget/pending-reservations?minAgeMinutes=30&limit=100',{credentials:'include',cache:'no-store'});
-  if(!response.ok)throw Error('HTTP '+response.status);
-  const json=await response.json();const rows=Array.isArray(json.data)?json.data:[];
-  const br=await fetch('/api/admin/ai/manual-balances',{credentials:'include',cache:'no-store'});
-  if(!br.ok)throw Error('Saldo manual belum tersedia (HTTP '+br.status+')');
-  const bj=await br.json();const budgets=Array.isArray(bj.data)?bj.data:[];
+  const [pendingResponse,balanceResponse]=await Promise.all([
+   fetch('/api/admin/ai/budget/pending-reservations?minAgeMinutes=30&limit=100',{credentials:'include',cache:'no-store'}),
+   fetch('/api/admin/ai/manual-balances',{credentials:'include',cache:'no-store'})
+  ]);
+  if(!pendingResponse.ok||!balanceResponse.ok)throw Error('HTTP '+(!pendingResponse.ok?pendingResponse.status:balanceResponse.status));
+  const pending=await pendingResponse.json(),balances=await balanceResponse.json();
+  const rows=(pending.data||[]).filter(p=>['openai','anthropic','claude'].includes(String(p.provider_code||'').toLowerCase()));
   const summary=document.getElementById('aiReconciliationBudgetSummary');
-  if(summary)summary.innerHTML='<div class="grid md:grid-cols-2 gap-3">'+budgets.map(b=>{
-   const available=b.remaining_usd==null?null:Number(b.remaining_usd);
-   const used=b.used_since_update_usd==null?null:Number(b.used_since_update_usd);
-   return '<details class="rounded-xl border border-slate-700 p-3"><summary class="font-bold cursor-pointer">'+esc(names[b.provider_code]||b.provider_code)+'</summary><div class="mt-2 space-y-1"><div class="text-xs text-slate-400">'+(available==null?'Saldo belum diinput':'Saldo manual tercatat')+'</div><div class="text-sm">Saldo saat input: '+(b.balance_usd==null?'—':'$'+Number(b.balance_usd).toFixed(4))+'</div><div class="text-sm">Pemakaian sejak input: '+(used==null?'—':'$'+used.toFixed(4))+'</div><div class="text-sm font-bold">Sisa internal: '+(available==null?'—':'$'+available.toFixed(4))+'</div></div></details>';
-  }).join('')+'</div><p class="text-xs text-slate-400 mt-2">Saldo berasal dari input manual Admin. Pemakaian dan reservasi berasal dari ledger aplikasi, bukan laporan tagihan provider.</p>';
-  output.innerHTML='<div class="overflow-x-auto"><table class="w-full text-xs"><thead><tr><th class="p-2 text-left">ID</th><th class="p-2 text-left">Provider</th><th class="p-2 text-left">Tugas</th><th class="p-2 text-right">Estimasi USD</th><th class="p-2 text-right">Usia (menit)</th></tr></thead><tbody>'+
-   (paidRows.map(r=>'<tr class="border-t border-slate-700"><td class="p-2">'+esc(r.reservation_id)+'</td><td class="p-2">'+esc(r.provider_code)+'</td><td class="p-2">'+esc(r.task_code)+'</td><td class="p-2 text-right">'+esc(r.reserved_usd)+'</td><td class="p-2 text-right">'+esc(Math.floor(Number(r.age_minutes)||0))+'</td></tr>').join('')||'<tr><td colspan="5" class="p-4 text-center text-slate-400">Tidak ada reservasi tertunda lebih dari 30 menit.</td></tr>')+'</tbody></table></div>';
- }catch(error){output.textContent='Gagal memuat data rekonsiliasi: '+error.message;}
+  if(summary)summary.innerHTML='<div class="grid md:grid-cols-2 gap-3">'+(balances.data||[]).map(p=>{
+   return '<details class="rounded-xl border border-slate-700 p-3"><summary class="font-bold cursor-pointer">'+esc(names[p.provider_code]||p.provider_code)+'</summary><div class="mt-2 text-xs space-y-1"><div>Saldo saat input: '+(p.balance_usd==null?'Belum diinput':'$'+Number(p.balance_usd).toFixed(4))+'</div><div>Pemakaian sejak input: '+(p.used_since_update_usd==null?'—':'$'+Number(p.used_since_update_usd).toFixed(4))+'</div><div class="font-bold">Sisa internal: '+(p.remaining_usd==null?'—':'$'+Number(p.remaining_usd).toFixed(4))+'</div></div></details>';
+  }).join('')+'</div><p class="text-xs text-slate-400 mt-2">Saldo manual Admin; pemakaian berasal dari ledger aplikasi, bukan API tagihan provider.</p>';
+  output.innerHTML='<div class="overflow-x-auto"><table class="w-full text-xs"><thead><tr><th class="p-2 text-left">ID</th><th class="p-2 text-left">Provider</th><th class="p-2 text-left">Tugas</th><th class="p-2 text-right">USD</th></tr></thead><tbody>'+
+   (rows.map(p=>'<tr class="border-t border-slate-700"><td class="p-2">'+esc(p.reservation_id)+'</td><td class="p-2">'+esc(p.provider_code)+'</td><td class="p-2">'+esc(p.task_code)+'</td><td class="p-2 text-right">'+esc(p.reserved_usd)+'</td></tr>').join('')||'<tr><td colspan="4" class="p-4 text-center">Tidak ada reservasi tertunda.</td></tr>')+'</tbody></table></div>';
+ }catch(error){output.textContent='Gagal memuat rekonsiliasi: '+error.message;}
 }
 function setupReconciliation(){
  const panel=document.getElementById('aiAdminPanel');if(!panel||document.getElementById('aiReconciliationPanel'))return;
@@ -221,5 +248,5 @@ function setupGeminiQuotas(){
  });
  loadGeminiQuotas();
 }
-document.addEventListener('DOMContentLoaded',()=>{setupReconciliation();setupGeminiQuotas();load();});
+document.addEventListener('DOMContentLoaded',()=>{setupReconciliation();setupManualBalances();setupGeminiQuotas();load();});
 })();
