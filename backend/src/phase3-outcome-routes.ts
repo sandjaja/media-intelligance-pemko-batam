@@ -59,6 +59,13 @@ async function resolveHumasAiSelection(pool:Pool,taskCode:'publication_analysis'
   if(row && (!row.provider_enabled||!row.model_enabled))throw new Error('AI_HUMAS_SELECTED_MODEL_DISABLED');
   return row as {provider_code:string;model_code:string}|undefined;
 }
+function validatePublicationEvidenceMime(mimeType:unknown):string{
+  const mime=String(mimeType||'').toLowerCase().trim();
+  if(mime!=='application/pdf' && mime!=='image/png' && mime!=='image/jpeg' && mime!=='image/webp'){
+    throw new Error('PUBLICATION_EVIDENCE_UNSUPPORTED_MIME');
+  }
+  return mime;
+}
 async function readPublicationEvidenceLimited(stream:ReadableStream<Uint8Array>):Promise<Buffer>{
   const chunks:Buffer[]=[];
   let total=0;
@@ -345,7 +352,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
       for(const e of evidence){
         if(e.evidence_type==='WEBSITE'&&e.url){const article=await fetchWebsitePublication(String(e.url));materials.push({id:e.id,type:'WEBSITE',channel:e.channel,url:e.url,caption:e.caption,title:article.title,text:article.text});continue}
         const files=(await pool.query('SELECT id,storage_key,file_name,mime_type,file_order FROM issue_publication_evidence_files WHERE evidence_id=$1 ORDER BY file_order,id',[e.id])).rows;const fileMeta:any[]=[];
-        for(const file of files){const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');const buf=await readPublicationEvidenceLimited(result.stream as ReadableStream<Uint8Array>);mediaParts.push({inlineData:{mimeType:file.mime_type,data:buf.toString('base64')}});fileMeta.push({id:file.id,file_name:file.file_name,mime_type:file.mime_type,file_order:file.file_order});}
+        for(const file of files){const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');const buf=await readPublicationEvidenceLimited(result.stream as ReadableStream<Uint8Array>);mediaParts.push({inlineData:{mimeType:validatePublicationEvidenceMime(file.mime_type),data:buf.toString('base64')}});fileMeta.push({id:file.id,file_name:file.file_name,mime_type:file.mime_type,file_order:file.file_order});}
         materials.push({id:e.id,type:e.evidence_type,channel:e.channel,caption:e.caption,files:fileMeta});
       }
       const existing=(await pool.query('SELECT result,source,gap_analyzed_at,analyzed_at FROM issue_publication_analysis_snapshots WHERE workflow_id=$1',[w.id])).rows[0]||null;
@@ -433,7 +440,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
           for(const file of files){
             const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');
             const buf=await readPublicationEvidenceLimited(result.stream as ReadableStream<Uint8Array>);
-            mediaParts.push({inlineData:{mimeType:file.mime_type,data:buf.toString('base64')}});
+            mediaParts.push({inlineData:{mimeType:validatePublicationEvidenceMime(file.mime_type),data:buf.toString('base64')}});
             fileMeta.push({id:file.id,file_name:file.file_name,mime_type:file.mime_type,file_order:file.file_order});
           }
           materials.push({id:e.id,type:e.evidence_type,channel:e.channel,caption:e.caption,files:fileMeta});
@@ -490,7 +497,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
           for(const file of files){
             const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');
             const buf=await readPublicationEvidenceLimited(result.stream as ReadableStream<Uint8Array>);
-            mediaParts.push({inlineData:{mimeType:file.mime_type,data:buf.toString('base64')}});
+            mediaParts.push({inlineData:{mimeType:validatePublicationEvidenceMime(file.mime_type),data:buf.toString('base64')}});
             fileMeta.push({id:file.id,file_name:file.file_name,mime_type:file.mime_type,file_order:file.file_order});
           }
           materials.push({id:e.id,type:e.evidence_type,channel:e.channel,caption:e.caption,files:fileMeta});
