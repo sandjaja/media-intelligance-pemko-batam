@@ -57,7 +57,7 @@ async function loadGeminiQuotas(){
  }catch(err){root.textContent='Kuota belum tersedia: '+err.message;}
 }
 function setupGeminiQuotas(){
- const panel=document.getElementById('aiPanel');if(!panel||document.getElementById('aiGeminiQuotaSection'))return;
+ const panel=document.getElementById('aiAdminProviders')?.parentElement;if(!panel||document.getElementById('aiGeminiQuotaSection'))return;
  const section=document.createElement('section');section.id='aiGeminiQuotaSection';section.className='mt-5 rounded-xl border border-slate-700 p-4 space-y-3';
  section.innerHTML='<h3 class="font-bold">Kuota Harian Gemini</h3><p class="text-xs text-slate-400">Batasi permintaan Gemini per model. Saat kuota nonaktif, permintaan Gemini akan ditolak. Penghitungan menggunakan UTC.</p><button type="button" id="aiGeminiQuotaRefresh" class="rounded border border-slate-600 px-3 py-2 text-xs">Muat ulang kuota</button><div id="aiGeminiQuotaRows" class="grid gap-3"></div>';
  panel.appendChild(section);
