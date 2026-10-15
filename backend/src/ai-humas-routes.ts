@@ -30,6 +30,38 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
     }
   };
 
+  app.get('/api/humas/ai/usage-summary', { preHandler: guard }, async (_request, reply) => {
+    try {
+      const { rows } = await pool.query(
+        `SELECT t.code AS task_code, p.code AS provider_code, m.code AS model_code,
+                COUNT(*)::integer AS requests,
+                COALESCE(SUM(l.input_tokens), 0)::text AS input_tokens,
+                COALESCE(SUM(l.output_tokens), 0)::text AS output_tokens,
+                COUNT(*) FILTER (WHERE l.status NOT IN ('success', 'ok'))::integer AS non_success_requests
+           FROM ai_usage_logs l
+           JOIN ai_tasks t ON t.id = l.task_id
+           LEFT JOIN ai_providers p ON p.id = l.provider_id
+           LEFT JOIN ai_models m ON m.id = l.model_id
+          WHERE t.code = ANY($1::text[])
+            AND l.created_at >= date_trunc('month', now())
+          GROUP BY t.code, p.code, m.code
+          ORDER BY t.code, p.code, m.code`,
+        [HUMAS_AI_TASKS],
+      );
+      // The schema currently has no provider balance or budget ledger.
+      // Explicitly return null rather than fabricating remaining tokens or credit.
+      return {
+        period: 'current_month',
+        data: rows,
+        remaining_tokens: null,
+        remaining_budget: null,
+        balance_status: 'not_configured',
+      };
+    } catch {
+      return reply.code(503).send({ error: 'AI_USAGE_UNAVAILABLE' });
+    }
+  });
+
   app.get('/api/humas/ai/available-models', { preHandler: guard }, async (_request, reply) => {
     try {
       const { rows } = await pool.query(
