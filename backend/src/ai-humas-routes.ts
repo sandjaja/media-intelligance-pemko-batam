@@ -184,6 +184,42 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
     }
   });
 
+  // Configuration only. Runtime paid execution must still pass gateway budget reservation.
+  app.get('/api/humas/ai/model-selections', { preHandler: guard }, async (_request, reply) => {
+    try {
+      const { rows } = await pool.query(`SELECT s.task_code, p.code AS provider_code, m.code AS model_code, s.updated_at
+        FROM ai_humas_model_selections s JOIN ai_models m ON m.id=s.model_id
+        JOIN ai_providers p ON p.id=m.provider_id
+        WHERE s.task_code = ANY($1::text[]) ORDER BY s.task_code`, [HUMAS_AI_TASKS]);
+      return { data: rows, execution_ready: false };
+    } catch { return reply.code(503).send({ error: 'AI_MODEL_SELECTION_STORAGE_UNAVAILABLE' }); }
+  });
+
+  app.put('/api/humas/ai/model-selections/:taskCode', { preHandler: guard }, async (request, reply) => {
+    const taskCode = (request.params as { taskCode?: string }).taskCode;
+    const body = request.body as { providerCode?: unknown; modelCode?: unknown } | null;
+    if (!taskCode || !(HUMAS_AI_TASKS as readonly string[]).includes(taskCode) ||
+      typeof body?.providerCode !== 'string' || typeof body?.modelCode !== 'string' ||
+      body.providerCode.length > 60 || body.modelCode.length > 120) {
+      return reply.code(400).send({ error: 'AI_MODEL_SELECTION_INVALID' });
+    }
+    try {
+      const token = request.cookies.access_token;
+      if (!token) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+      const payload = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
+      if (typeof payload.sub !== 'string') return reply.code(401).send({ error: 'INVALID_ACCESS_TOKEN' });
+      const selected = await pool.query(`SELECT m.id FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id
+        WHERE p.code=$1 AND m.code=$2 AND p.enabled=TRUE AND m.enabled=TRUE LIMIT 1`,
+        [body.providerCode,body.modelCode]);
+      if (!selected.rows[0]) return reply.code(409).send({ error: 'AI_MODEL_NOT_ENABLED' });
+      const { rows } = await pool.query(`INSERT INTO ai_humas_model_selections(task_code,model_id,updated_by)
+        VALUES($1,$2,$3) ON CONFLICT(task_code) DO UPDATE SET model_id=EXCLUDED.model_id,
+        updated_by=EXCLUDED.updated_by,updated_at=now() RETURNING task_code,updated_at`,
+        [taskCode,selected.rows[0].id,payload.sub]);
+      return { data: { ...rows[0], provider_code:body.providerCode,model_code:body.modelCode }, execution_ready:false };
+    } catch { return reply.code(503).send({ error: 'AI_MODEL_SELECTION_SAVE_FAILED' }); }
+  });
+
   app.get('/api/humas/ai/available-models', { preHandler: guard }, async (_request, reply) => {
     try {
       const { rows } = await pool.query(
