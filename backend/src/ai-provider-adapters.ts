@@ -78,6 +78,7 @@ export async function invokeAiProvider(input: {
   } else {
     if (payload.stop_reason === 'max_tokens') throw new Error('AI_PROVIDER_OUTPUT_TRUNCATED');
     if (payload.stop_reason === 'refusal') throw new Error('AI_PROVIDER_OUTPUT_BLOCKED');
+    if (payload.stop_reason && payload.stop_reason !== 'end_turn' && payload.stop_reason !== 'stop_sequence') throw new Error('AI_PROVIDER_OUTPUT_BLOCKED');
     raw = payload.content?.filter((part: any) => part.type === 'text')
       .map((part: any) => part.text ?? '').join('');
     inputTokens = payload.usage?.input_tokens;
