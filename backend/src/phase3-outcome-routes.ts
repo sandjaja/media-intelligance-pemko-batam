@@ -445,7 +445,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
     const print=(await pool.query(`SELECT pa.id,pa.title,pe.edition_date published_at,pa.body_text content FROM issue_print_articles ipa JOIN print_articles pa ON pa.id=ipa.print_article_id JOIN print_editions pe ON pe.id=pa.edition_id WHERE ipa.issue_id=$1 AND ipa.linkage_status='linked' AND pe.edition_date >= $2::date AND pe.edition_date <= $3::date ORDER BY pe.edition_date ASC,pa.id ASC`,[issueId,period.started_at,end])).rows;
     const social=(await pool.query(`SELECT sm.id,sm.title,sm.published_at,sm.source_kind FROM social_mention_issues smi JOIN social_mentions sm ON sm.id=smi.mention_id WHERE smi.issue_id=$1 AND sm.published_at >= $2 AND sm.published_at <= $3 ORDER BY sm.published_at ASC`,[issueId,period.started_at,end])).rows;
     const externalSocial=social.filter((x:any)=>x.source_kind==='external'),owned=social.filter((x:any)=>x.source_kind==='owned'),external=[...online.map((x:any)=>({...x,source:'online'})),...print.map((x:any)=>({...x,source:'print'})),...externalSocial.map((x:any)=>({...x,source:'social'}))];
-    const angleResult=await extractDynamicIssueClaims(external),coverageResult=await matchDynamicOfficialResponseCoverage(angleResult.angles,owned);
+    const angleResult=await extractDynamicIssueClaims(external,{},pool),coverageResult=await matchDynamicOfficialResponseCoverage(angleResult.angles,owned,pool);
     let publicationAnalysis:any=null,focusAssessment:any=null;
     if(external.length+owned.length===0){
       focusAssessment={
@@ -514,7 +514,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
     const print=(await pool.query(`SELECT pa.id,pa.title,pe.edition_date published_at,pa.body_text content FROM issue_print_articles ipa JOIN print_articles pa ON pa.id=ipa.print_article_id JOIN print_editions pe ON pe.id=pa.edition_id WHERE ipa.issue_id=$1 AND ipa.linkage_status='linked' AND pe.edition_date >= $2::date AND pe.edition_date <= $3::date ORDER BY pe.edition_date ASC,pa.id ASC`,[issueId,period.started_at,end])).rows;
     const social=(await pool.query(`SELECT sm.id,sm.title,sm.published_at,sm.source_kind FROM social_mention_issues smi JOIN social_mentions sm ON sm.id=smi.mention_id WHERE smi.issue_id=$1 AND sm.published_at >= $2 AND sm.published_at <= $3 ORDER BY sm.published_at ASC`,[issueId,period.started_at,end])).rows;
     const externalSocial=social.filter((x:any)=>x.source_kind==='external'),owned=social.filter((x:any)=>x.source_kind==='owned'),external=[...online.map((x:any)=>({...x,source:'online'})),...print.map((x:any)=>({...x,source:'print'})),...externalSocial.map((x:any)=>({...x,source:'social'}))];
-    const angleResult=await extractDynamicIssueClaims(external),coverageResult=await matchDynamicOfficialResponseCoverage(angleResult.angles,owned);
+    const angleResult=await extractDynamicIssueClaims(external,{},pool),coverageResult=await matchDynamicOfficialResponseCoverage(angleResult.angles,owned,pool);
     let publicationAnalysis:any=null,focusAssessment:any=null;
     try{
       const publicationEvidence=(await pool.query(`SELECT e.* FROM issue_publication_evidence e WHERE e.workflow_id=$1 ORDER BY e.is_primary DESC,e.created_at,e.id`,[w.id])).rows;
