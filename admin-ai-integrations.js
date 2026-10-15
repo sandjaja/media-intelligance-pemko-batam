@@ -26,7 +26,9 @@ async function loadManualBalances(){
   const result=await response.json();if(!response.ok)throw Error(result.error||'HTTP '+response.status);
   root.innerHTML=(result.data||[]).map(p=>{
    const remaining=p.remaining_usd==null?'—':'$'+Number(p.remaining_usd).toFixed(4);
-   const balance=p.balance_usd==null?'Belum diinput':'
+   const balance=p.balance_usd==null?'Belum diinput':'$'+Number(p.balance_usd).toFixed(4);
+   const lastReason=p.reason?' · Alasan terakhir: '+esc(p.reason):'';
+   const updated=p.created_at?' · Diperbarui: '+esc(new Date(p.created_at).toLocaleString('id-ID')):'';
    return '<div class="rounded-lg border border-slate-700 p-3 space-y-2" data-manual-balance="'+esc(p.provider_code)+'"><div class="font-semibold">'+esc(names[p.provider_code]||p.provider_code)+'</div><div class="text-xs">Saldo saat input: '+balance+' · Sisa internal: '+remaining+lastReason+updated+'</div><label class="block text-xs">Saldo aktual USD<input data-balance-amount type="number" min="0" step="0.0001" value="'+(p.balance_usd==null?'':esc(p.balance_usd))+'" class="mt-1 w-full rounded border border-slate-600 p-2"></label><label class="block text-xs">Alasan pembaruan<input data-balance-reason maxlength="500" placeholder="Contoh: Top-up saldo provider" class="mt-1 w-full rounded border border-slate-600 p-2"></label><button type="button" data-balance-save class="rounded bg-cyan-700 px-3 py-2 text-xs font-bold">Simpan saldo</button></div>';
   }).join('')||'Provider berbayar tidak ditemukan.';
  }catch(error){root.textContent='Gagal memuat saldo manual: '+error.message;}
