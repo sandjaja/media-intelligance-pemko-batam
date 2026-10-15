@@ -52,6 +52,23 @@ test('gateway reserves before invoking and logs token usage on success', async (
   assert.equal(db.calls(), 1);
 });
 
+test('gateway rejects invalid task, provider and estimate before database access', async () => {
+  let queried = false;
+  const pool = { query: async () => { queried = true; throw new Error('UNEXPECTED_DB_ACCESS'); } } as unknown as Pool;
+  for (const invalid of [
+    { taskId: 0 },
+    { providerId: 0 },
+    { estimatedUsd: 0 },
+    { estimatedUsd: Number.NaN },
+  ]) {
+    await assert.rejects(executeBudgetedAi(pool, {
+      ...base, ...invalid,
+      invoke: async () => { throw new Error('UNEXPECTED_PROVIDER_CALL'); },
+    }), /AI_GATEWAY_INVALID_CONTEXT/);
+  }
+  assert.equal(queried, false);
+});
+
 test('gateway does not call provider for an unconfigured route', async () => {
   const db = gatewayPool({ route: false });
   await assert.rejects(executeBudgetedAi(db.pool, { ...base, invoke: db.invoke }), /AI_GATEWAY_ROUTE_NOT_CONFIGURED/);
