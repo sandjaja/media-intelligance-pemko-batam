@@ -77,6 +77,16 @@ test('usage log failure rolls back settlement instead of reporting success', asy
   assert.equal(db.statements.includes('COMMIT'), true); // reservation committed; settlement rolled back
 });
 
+test('configured gateway rejects invalid user before reading routes or credentials', async () => {
+  let queried = false;
+  const pool = { query: async () => { queried = true; throw new Error('UNEXPECTED_DB_ACCESS'); } } as unknown as Pool;
+  await assert.rejects(executeConfiguredAi(pool, {
+    userId: 0, taskCode: 'strakom_analysis', provider: 'openai',
+    modelCode: 'test-model', prompt: 'draft',
+  }), /AI_GATEWAY_INVALID_REQUEST/);
+  assert.equal(queried, false);
+});
+
 test('configured gateway rejects oversized prompt before database or provider access', async () => {
   let queried = false;
   const pool = { query: async () => { queried = true; throw new Error('UNEXPECTED_DB_ACCESS'); } } as unknown as Pool;
