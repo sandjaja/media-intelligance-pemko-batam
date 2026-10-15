@@ -30,8 +30,11 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
     }
   };
 
-  app.get('/api/humas/ai/usage-summary', { preHandler: guard }, async (_request, reply) => {
+  app.get('/api/humas/ai/usage-summary', { preHandler: guard }, async (request, reply) => {
     try {
+      const token=request.cookies.access_token;
+      const payload=jwt.verify(token,jwtSecret) as jwt.JwtPayload;
+      if(typeof payload.sub!=='string')return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'});
       const { rows } = await pool.query(
         `SELECT t.code AS task_code, p.code AS provider_code, m.code AS model_code,
                 COUNT(*)::integer AS requests,
@@ -44,11 +47,12 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
            LEFT JOIN ai_models m ON m.id = l.model_id
           WHERE t.code = ANY($1::text[])
             AND l.created_at >= date_trunc('month', now())
+            AND l.user_id = $2
           GROUP BY t.code, p.code, m.code
           ORDER BY t.code, p.code, m.code`,
-        [HUMAS_AI_TASKS],
+        [HUMAS_AI_TASKS,payload.sub],
       );
-      // The schema currently has no provider balance or budget ledger.
+      // Remaining credit cannot be inferred from usage totals.
       // Explicitly return null rather than fabricating remaining tokens or credit.
       return {
         period: 'current_month',
