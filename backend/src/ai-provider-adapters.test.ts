@@ -133,6 +133,15 @@ test('OpenAI incomplete response is rejected even if parseable', async () => {
   await assert.rejects(invokeAiProvider({ provider: 'openai', model: 'test-model', apiKey: 'mock', prompt: 'hello' }), /AI_PROVIDER_OUTPUT_TRUNCATED/);
 });
 
+test('Claude unexpected stop reason is rejected even if parseable', async () => {
+  mockResponse({
+    stop_reason: 'tool_use',
+    content: [{ type: 'text', text: '{"ok":true}' }],
+    usage: { input_tokens: 12, output_tokens: 7 },
+  });
+  await assert.rejects(invokeAiProvider({ provider: 'anthropic', model: 'test-model', apiKey: 'mock', prompt: 'hello' }), /AI_PROVIDER_OUTPUT_BLOCKED/);
+});
+
 test('Claude max token stop is rejected even if parseable', async () => {
   mockResponse({
     stop_reason: 'max_tokens',
