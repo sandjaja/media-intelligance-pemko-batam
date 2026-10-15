@@ -30,6 +30,25 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
     }
   };
 
+  // Humas may monitor quotas, but only Super Admin may change their limits.
+  app.get('/api/humas/ai/gemini-quotas', { preHandler: guard }, async (_request, reply) => {
+    try {
+      const exists = await pool.query("SELECT to_regclass('public.ai_free_tier_daily_limits') IS NOT NULL AS available");
+      if (!exists.rows[0]?.available) return reply.code(503).send({ error: 'AI_GEMINI_QUOTA_MIGRATION_REQUIRED' });
+      const { rows } = await pool.query(`SELECT m.code AS model_code,m.name AS model_name,
+        l.max_requests,COALESCE(l.enabled,FALSE) AS enabled,
+        COALESCE(u.reserved_requests,0)::int AS reserved_today
+        FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id
+        LEFT JOIN ai_free_tier_daily_limits l ON l.model_id=m.id
+        LEFT JOIN ai_free_tier_daily_usage u ON u.model_id=m.id
+          AND u.usage_date=(now() AT TIME ZONE 'UTC')::date
+        WHERE p.code='gemini' ORDER BY m.code`);
+      return { data: rows, timezone: 'UTC', read_only: true };
+    } catch {
+      return reply.code(503).send({ error: 'AI_GEMINI_QUOTA_UNAVAILABLE' });
+    }
+  });
+
   // Editable only for the five explicitly agreed Humas analysis tasks.
   // No runtime AI call reads these settings until each legacy prompt is migrated.
   app.get('/api/humas/ai/prompts', { preHandler: guard }, async (_request, reply) => {
