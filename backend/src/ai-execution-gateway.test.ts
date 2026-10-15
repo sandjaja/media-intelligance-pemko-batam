@@ -14,6 +14,7 @@ function gatewayPool(options: { route?: boolean; budget?: boolean; providerError
       return options.route === false ? { rows: [], rowCount: 0 } : { rows: [{ id: 4 }], rowCount: 1 };
     }
     if (sql.includes('SELECT id FROM ai_providers WHERE')) return { rows: [{ id: 2 }], rowCount: 1 };
+    if (sql.includes('FROM ai_provider_balance_snapshots')) return { rows: [{ balance_usd: 1, committed_baseline_usd: 0 }], rowCount: 1 };
     if (sql.includes('FROM ai_provider_budgets')) {
       return options.budget === false ? { rows: [], rowCount: 0 } : { rows: [{ id: 5, limit_usd: 1 }], rowCount: 1 };
     }
