@@ -1,3 +1,4 @@
+import { reserveGeminiDailyRequest } from './ai-gemini-quota-reservation.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
 import { decryptIntegrationCredential } from './integration-credentials.js';
@@ -151,6 +152,7 @@ Output JSON:
   const credentials=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
   if(!credentials.rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
   const key=decryptIntegrationCredential(credentials.rows[0].credential_ciphertext);
+  await reserveGeminiDailyRequest(pool,model);
   const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt},...mediaParts]}],generationConfig:{responseMimeType:'application/json'}})});
   if(!r.ok)throw new Error(`Gemini HTTP ${r.status}`);
   const payload=await r.json() as any;
@@ -232,6 +234,7 @@ HASILKAN JSON:
   const credentials=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
   if(!credentials.rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
   const key=decryptIntegrationCredential(credentials.rows[0].credential_ciphertext);
+  await reserveGeminiDailyRequest(pool,model);
   const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}})});
   if(!r.ok)throw new Error(`Gemini HTTP ${r.status}`);
   const payload=await r.json() as any;
