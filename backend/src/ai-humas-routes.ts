@@ -252,11 +252,36 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
         WHERE p.code=$1 AND m.code=$2 AND m.enabled=TRUE LIMIT 1`,
         [body.providerCode,body.modelCode]);
       if (!selected.rows[0]) return reply.code(409).send({ error: 'AI_MODEL_NOT_ENABLED' });
+      // Server-side paid-model guard: UI checks alone can be bypassed.
+      // This checks internal budgets only; the execution gateway separately
+      // reserves estimated cost atomically before any paid provider request.
+      let budgetWarning: string | null = null;
+      if (['openai','anthropic','claude'].includes(body.providerCode.toLowerCase())) {
+        const budgets = await pool.query(`SELECT b.id,b.limit_usd,
+          COALESCE((SELECT SUM(CASE WHEN r.status='settled' THEN r.settled_usd
+            WHEN r.status='reserved' THEN r.reserved_usd ELSE 0 END)
+            FROM ai_budget_reservations r WHERE r.budget_id=b.id),0) AS committed_usd
+          FROM ai_providers p LEFT JOIN LATERAL (
+            SELECT id,limit_usd FROM ai_provider_budgets
+            WHERE provider_id=p.id AND enabled=TRUE
+              AND CURRENT_DATE>=period_start AND CURRENT_DATE<period_end
+            ORDER BY period_start DESC LIMIT 2
+          ) b ON TRUE WHERE p.code=$1`,[body.providerCode]);
+        if (budgets.rows.length!==1 || budgets.rows[0].id==null)
+          return reply.code(409).send({error:'AI_BUDGET_NOT_CONFIGURED'});
+        const limit=Number(budgets.rows[0].limit_usd);
+        const committed=Number(budgets.rows[0].committed_usd);
+        if (!Number.isFinite(limit)||limit<=0||!Number.isFinite(committed)||committed<0)
+          return reply.code(409).send({error:'AI_BUDGET_UNAVAILABLE'});
+        const remaining=limit-committed;
+        if (remaining<=0)return reply.code(409).send({error:'AI_BUDGET_EXCEEDED'});
+        if (committed/limit>=0.8)budgetWarning='AI_BUDGET_NEAR_LIMIT';
+      }
       const { rows } = await pool.query(`INSERT INTO ai_humas_model_selections(task_code,model_id,updated_by)
         VALUES($1,$2,$3) ON CONFLICT(task_code) DO UPDATE SET model_id=EXCLUDED.model_id,
         updated_by=EXCLUDED.updated_by,updated_at=now() RETURNING task_code,updated_at`,
         [taskCode,selected.rows[0].id,payload.sub]);
-      return { data: { ...rows[0], provider_code:body.providerCode,model_code:body.modelCode }, execution_ready:false };
+      return { data: { ...rows[0], provider_code:body.providerCode,model_code:body.modelCode }, execution_ready:false, warning:budgetWarning };
     } catch { return reply.code(503).send({ error: 'AI_MODEL_SELECTION_SAVE_FAILED' }); }
   });
 
