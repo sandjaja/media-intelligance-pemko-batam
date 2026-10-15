@@ -87,6 +87,22 @@ test('Invalid JSON is rejected', async () => {
   );
 });
 
+test('JSON primitive is rejected as an analysis result', async () => {
+  mockResponse({ output: [{ content: [{ type: 'output_text', text: '42' }] }], usage: { input_tokens: 5, output_tokens: 2 } });
+  await assert.rejects(
+    invokeAiProvider({ provider: 'openai', model: 'test-model', apiKey: 'mock', prompt: 'hello' }),
+    /AI_PROVIDER_INVALID_JSON_SHAPE/,
+  );
+});
+
+test('JSON array is rejected as an analysis result', async () => {
+  mockResponse({ content: [{ type: 'text', text: '[{"ok":true}]' }], usage: { input_tokens: 5, output_tokens: 6 } });
+  await assert.rejects(
+    invokeAiProvider({ provider: 'anthropic', model: 'test-model', apiKey: 'mock', prompt: 'hello' }),
+    /AI_PROVIDER_INVALID_JSON_SHAPE/,
+  );
+});
+
 test('Gemini thinking tokens count toward billable output usage', async () => {
   mockResponse({
     candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }],
