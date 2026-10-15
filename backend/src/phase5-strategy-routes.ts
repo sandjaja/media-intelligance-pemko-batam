@@ -37,7 +37,8 @@ export async function reserveGeminiDailyQuota(pool:Pick<Pool,'query'>,model:stri
    JOIN ai_models m ON m.id=l.model_id
    JOIN ai_providers p ON p.id=m.provider_id
    WHERE p.code='gemini' AND m.code=$1`,[model]);
- if(!configured.rows[0]?.enabled)return;
+ if(!configured.rows.length)return;
+ if(!configured.rows[0].enabled)return;
  const reserved=await pool.query(`INSERT INTO ai_free_tier_daily_usage(model_id,usage_date,reserved_requests)
    SELECT l.model_id,(now() AT TIME ZONE 'UTC')::date,1
    FROM ai_free_tier_daily_limits l
