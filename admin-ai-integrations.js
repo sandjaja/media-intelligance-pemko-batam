@@ -25,6 +25,15 @@ async function loadReconciliation(){
   const response=await fetch('/api/admin/ai/budget/pending-reservations?minAgeMinutes=30&limit=100',{credentials:'include',cache:'no-store'});
   if(!response.ok)throw Error('HTTP '+response.status);
   const json=await response.json();const rows=Array.isArray(json.data)?json.data:[];
+  const br=await fetch('/api/admin/ai/budgets',{credentials:'include',cache:'no-store'});
+  if(!br.ok)throw Error('HTTP '+br.status);
+  const bj=await br.json();const budgets=Array.isArray(bj.data)?bj.data:[];
+  const summary=document.getElementById('aiReconciliationBudgetSummary');
+  if(summary)summary.innerHTML='<div class="grid md:grid-cols-3 gap-3">'+budgets.map(b=>{
+   const limit=Number(b.limit_usd||0),spent=Number(b.spent_usd||0),pending=Number(b.pending_usd||0);
+   const active=b.budget_id!=null&&b.enabled===true;
+   return '<article class="rounded-xl border border-slate-700 p-3 space-y-1"><div class="font-bold">'+esc(b.provider_name||b.provider_code)+'</div><div class="text-xs text-slate-400">'+(active?'Anggaran aktif':'Anggaran belum aktif')+'</div><div class="text-sm">Batas: $'+esc(limit.toFixed(4))+'</div><div class="text-sm">Biaya tercatat: $'+esc(spent.toFixed(4))+'</div><div class="text-sm">Reservasi tertunda: $'+esc(pending.toFixed(4))+'</div><div class="text-sm font-bold">Sisa tersedia: '+(active?'$'+esc(Math.max(0,limit-spent-pending).toFixed(4)):'—')+'</div></article>';
+  }).join('')+'</div><p class="text-xs text-slate-400 mt-2">Biaya tercatat berasal dari ledger aplikasi, bukan tagihan provider yang sudah diverifikasi.</p>';
   output.innerHTML='<div class="overflow-x-auto"><table class="w-full text-xs"><thead><tr><th class="p-2 text-left">ID</th><th class="p-2 text-left">Provider</th><th class="p-2 text-left">Tugas</th><th class="p-2 text-right">Estimasi USD</th><th class="p-2 text-right">Usia (menit)</th></tr></thead><tbody>'+
    (rows.map(r=>'<tr class="border-t border-slate-700"><td class="p-2">'+esc(r.reservation_id)+'</td><td class="p-2">'+esc(r.provider_code)+'</td><td class="p-2">'+esc(r.task_code)+'</td><td class="p-2 text-right">'+esc(r.reserved_usd)+'</td><td class="p-2 text-right">'+esc(Math.floor(Number(r.age_minutes)||0))+'</td></tr>').join('')||'<tr><td colspan="5" class="p-4 text-center text-slate-400">Tidak ada reservasi tertunda lebih dari 30 menit.</td></tr>')+'</tbody></table></div>';
  }catch(error){output.textContent='Gagal memuat data rekonsiliasi: '+error.message;}
@@ -32,7 +41,7 @@ async function loadReconciliation(){
 function setupReconciliation(){
  const panel=document.getElementById('aiAdminPanel');if(!panel||document.getElementById('aiReconciliationPanel'))return;
  const section=document.createElement('section');section.id='aiReconciliationPanel';section.className='border-t border-slate-700 pt-4 mt-4';
- section.innerHTML='<button type="button" id="aiReconciliationToggle" aria-expanded="false" class="rounded-lg bg-slate-800 px-3 py-2 text-sm font-bold text-cyan-300">Rekonsiliasi AI ▾</button><div id="aiReconciliationContent" class="hidden mt-3 space-y-3"><p class="text-xs text-slate-400">Read-only: biaya yang belum terverifikasi tetap dicadangkan.</p><button type="button" id="aiReconciliationRefresh" class="rounded-lg border border-slate-600 px-3 py-2 text-xs">Muat ulang</button><div id="aiReconciliationRows"></div></div>';
+ section.innerHTML='<button type="button" id="aiReconciliationToggle" aria-expanded="false" class="rounded-lg bg-slate-800 px-3 py-2 text-sm font-bold text-cyan-300">Rekonsiliasi AI ▾</button><div id="aiReconciliationContent" class="hidden mt-3 space-y-3"><p class="text-xs text-slate-400">Read-only: biaya yang belum terverifikasi tetap dicadangkan.</p><button type="button" id="aiReconciliationRefresh" class="rounded-lg border border-slate-600 px-3 py-2 text-xs">Muat ulang</button><div id="aiReconciliationBudgetSummary"></div><div id="aiReconciliationRows"></div></div>';
  panel.appendChild(section);
  section.querySelector('#aiReconciliationToggle').addEventListener('click',()=>{const content=section.querySelector('#aiReconciliationContent');const show=content.classList.contains('hidden');content.classList.toggle('hidden',!show);section.querySelector('#aiReconciliationToggle').setAttribute('aria-expanded',String(show));if(show)loadReconciliation();});
  section.querySelector('#aiReconciliationRefresh').addEventListener('click',loadReconciliation);
