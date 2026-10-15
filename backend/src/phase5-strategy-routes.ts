@@ -28,9 +28,6 @@ const districtFields=z.object({
  evidenceContext:z.record(z.string(),z.any()).default({}),localAudiences:z.array(z.any()).default([]),communicationFocus:z.array(z.any()).default([]),localMessages:z.array(z.any()).default([]),talkingPoints:z.array(z.any()).default([]),localChannels:z.array(z.any()).default([]),coordinationOpds:z.array(z.any()).default([]),timingStrategy:z.record(z.string(),z.any()).default({}),successKpis:z.array(z.any()).default([]),fieldUpdateRequirements:z.array(z.any()).default([])
 });
 async function generateStrategyWithGemini(pool:Pool,input:any){
- const {rows}=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
- if(!rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
- const key=decryptIntegrationCredential(rows[0].credential_ciphertext);
  // Respect the Humas model choice. Never silently execute Gemini if Humas selected a
  // different provider: paid providers require the separate budgeted gateway path.
  const selected=await pool.query(`SELECT p.code AS provider_code,m.code AS model_code,
@@ -47,6 +44,9 @@ async function generateStrategyWithGemini(pool:Pool,input:any){
    (await pool.query("SELECT m.code AS model_code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 1")).rows;
  const model=modelRows[0]?.model_code;
  if(!model)throw new Error('AI_STRATEGY_GEMINI_MODEL_NOT_CONFIGURED');
+ const {rows}=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
+ if(!rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
+ const key=decryptIntegrationCredential(rows[0].credential_ciphertext);
  const promptRow=await pool.query("SELECT prompt_text FROM ai_humas_task_prompts WHERE task_code='strakom_analysis' LIMIT 1").catch(()=>({rows:[]}));
  const prompt=(promptRow.rows[0]?.prompt_text||`Anda adalah mesin strategi komunikasi Pemerintah Kota Batam. Susun DRAFT strategi komunikasi berbasis data yang diberikan. Jangan mengarang fakta. Bedakan pesan induk Pemko dan arahan kewilayahan. Arahan kecamatan hanya untuk kecamatan yang tercantum dalam input. Pesan lokal harus konsisten dengan pesan induk. Historical learning adalah pembelajaran, bukan fakta kondisi saat ini.
 
