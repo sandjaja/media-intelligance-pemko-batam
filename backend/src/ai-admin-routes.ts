@@ -67,7 +67,7 @@ export async function registerAiAdminRoutes(app:FastifyInstance,pool:Pool,jwtSec
       const response=await fetch(endpoint,{headers,signal:AbortSignal.timeout(15000)});
       if(!response.ok)return reply.code(502).send({error:'AI_MODEL_LIST_UNAVAILABLE',providerStatus:response.status});
       const data:any=await response.json();
-      const ids=new Set((code==='gemini'?(data.models||[]).map((m:any)=>String(m.name||'').replace(/^models\\//,'')):(data.data||[]).map((m:any)=>String(m.id||''))).filter(Boolean));
+      const ids=new Set<string>((code==='gemini'?(data.models||[]).map((m:any)=>String(m.name||'').replace('models/','')):(data.data||[]).map((m:any)=>String(m.id||''))).filter(Boolean));
       const models=(await pool.query('SELECT m.id,m.code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code=$1 ORDER BY m.id',[code])).rows;
       await audit(request,'AI_MODEL_LIST_VERIFIED',code);
       return {data:{provider:code,models:models.map((m:any)=>({id:m.id,code:m.code,available:ids.has(m.code)})),partial:code==='anthropic'&&Boolean(data.has_more),count:ids.size}};
