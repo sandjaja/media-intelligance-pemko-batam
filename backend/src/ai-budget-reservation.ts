@@ -46,3 +46,45 @@ export async function reserveAiBudget(pool: Pool, input: {
     client.release();
   }
 }
+
+// Finalize only after a provider response supplies actual usage and the price
+// calculation is available. Never silently cap actual charges at the estimate.
+export async function settleAiBudget(pool: Pool, reservationId: string, actualUsd: number): Promise<void> {
+  if (!/^\\d+$/.test(reservationId) || !Number.isFinite(actualUsd) || actualUsd < 0) {
+    throw new Error('AI_BUDGET_INVALID_SETTLEMENT');
+  }
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const lookup = await client.query(
+      'SELECT b.provider_id FROM ai_budget_reservations r JOIN ai_provider_budgets b ON b.id=r.budget_id WHERE r.id=$1',
+      [reservationId],
+    );
+    if (!lookup.rowCount) throw new Error('AI_RESERVATION_NOT_FOUND');
+    await client.query('SELECT id FROM ai_providers WHERE id=$1 FOR UPDATE', [lookup.rows[0].provider_id]);
+    const updated = await client.query(
+      `UPDATE ai_budget_reservations SET status='settled', settled_usd=$2
+        WHERE id=$1 AND status='reserved' RETURNING id`,
+      [reservationId, actualUsd],
+    );
+    if (!updated.rowCount) throw new Error('AI_RESERVATION_NOT_PENDING');
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+// Release only when the provider did not execute the request. A timeout or
+// unknown response must be reconciled, not assumed to have cost zero.
+export async function releaseAiBudget(pool: Pool, reservationId: string): Promise<void> {
+  if (!/^\\d+$/.test(reservationId)) throw new Error('AI_BUDGET_INVALID_RESERVATION');
+  const result = await pool.query(
+    `UPDATE ai_budget_reservations SET status='released'
+      WHERE id=$1 AND status='reserved' RETURNING id`,
+    [reservationId],
+  );
+  if (!result.rowCount) throw new Error('AI_RESERVATION_NOT_PENDING');
+}
