@@ -1,6 +1,7 @@
 // Provider adapters return one normalized JSON payload and token accounting.
 // API keys are supplied server-side by the caller; never expose them to clients.
 export type AiProvider = 'gemini' | 'openai' | 'anthropic';
+export const AI_GATEWAY_MAX_OUTPUT_TOKENS = 4096;
 export type AiProviderResponse = {
   data: unknown;
   usage: { inputTokens: number; outputTokens: number };
@@ -32,15 +33,15 @@ export async function invokeAiProvider(input: {
   if (input.provider === 'gemini') {
     url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(input.model)}:generateContent`;
     headers = { 'content-type': 'application/json', 'x-goog-api-key': input.apiKey };
-    body = { contents: [{ parts: [{ text: input.prompt }] }], generationConfig: { responseMimeType: 'application/json' } };
+    body = { contents: [{ parts: [{ text: input.prompt }] }], generationConfig: { responseMimeType: 'application/json', maxOutputTokens: AI_GATEWAY_MAX_OUTPUT_TOKENS } };
   } else if (input.provider === 'openai') {
     url = 'https://api.openai.com/v1/responses';
     headers = { 'content-type': 'application/json', authorization: `Bearer ${input.apiKey}` };
-    body = { model: input.model, input: input.prompt, text: { format: { type: 'json_object' } } };
+    body = { model: input.model, input: input.prompt, max_output_tokens: AI_GATEWAY_MAX_OUTPUT_TOKENS, text: { format: { type: 'json_object' } } };
   } else if (input.provider === 'anthropic') {
     url = 'https://api.anthropic.com/v1/messages';
     headers = { 'content-type': 'application/json', 'x-api-key': input.apiKey, 'anthropic-version': '2023-06-01' };
-    body = { model: input.model, max_tokens: 4096, messages: [{ role: 'user', content: input.prompt + '\nRespond with valid JSON only.' }] };
+    body = { model: input.model, max_tokens: AI_GATEWAY_MAX_OUTPUT_TOKENS, messages: [{ role: 'user', content: input.prompt + '\nRespond with valid JSON only.' }] };
   } else {
     throw new Error('AI_PROVIDER_UNSUPPORTED');
   }
