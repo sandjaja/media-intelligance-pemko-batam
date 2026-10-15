@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import { randomUUID } from 'node:crypto';
 import { reserveAiBudget, settleAiBudgetWithUsage } from './ai-budget-reservation.js';
+import { invokeAiProvider, type AiProvider } from './ai-provider-adapters.js';
 
 export type AiGatewayUsage = { inputTokens: number; outputTokens: number };
 export type AiGatewayResult<T> = { data: T; usage: AiGatewayUsage; actualUsd: number };
@@ -49,4 +50,44 @@ export async function executeBudgetedAi<T>(pool: Pool, input: {
     latencyMs: result.latencyMs,
   });
   return { data: result.data, usage: result.usage, actualUsd };
+}
+
+export async function executeConfiguredAi(pool: Pool, input: {
+  userId: number;
+  taskCode: string;
+  provider: AiProvider;
+  modelCode: string;
+  prompt: string;
+  estimatedUsd: number;
+  apiKey: string;
+}): Promise<AiGatewayResult<unknown>> {
+  if (!input.taskCode || !input.modelCode || !input.prompt || !input.apiKey) {
+    throw new Error('AI_GATEWAY_INVALID_REQUEST');
+  }
+  const { rows } = await pool.query(
+    `SELECT t.id AS task_id, p.id AS provider_id, m.id AS model_id
+       FROM ai_task_routes r
+       JOIN ai_tasks t ON t.id=r.task_id
+       JOIN ai_providers p ON p.id=r.provider_id
+       JOIN ai_models m ON m.id=r.model_id AND m.provider_id=p.id
+      WHERE t.code=$1 AND p.code=$2 AND m.code=$3
+        AND t.enabled=TRUE AND p.enabled=TRUE AND m.enabled=TRUE AND r.enabled=TRUE
+      ORDER BY r.priority LIMIT 1`,
+    [input.taskCode, input.provider, input.modelCode],
+  );
+  if (!rows.length) throw new Error('AI_GATEWAY_ROUTE_NOT_CONFIGURED');
+  const route = rows[0];
+  return executeBudgetedAi(pool, {
+    userId: input.userId,
+    taskId: Number(route.task_id),
+    providerId: Number(route.provider_id),
+    modelId: Number(route.model_id),
+    estimatedUsd: input.estimatedUsd,
+    invoke: () => invokeAiProvider({
+      provider: input.provider,
+      model: input.modelCode,
+      apiKey: input.apiKey,
+      prompt: input.prompt,
+    }),
+  });
 }
