@@ -31,7 +31,21 @@ export async function reserveAiBudget(pool: Pool, input: {
       `SELECT COALESCE(SUM(CASE WHEN status='settled' THEN settled_usd
                                   WHEN status='reserved' THEN reserved_usd ELSE 0 END),0) AS usd
          FROM ai_budget_reservations WHERE budget_id=$1`, [budget.id]);
-    const remaining = Number(budget.limit_usd) - Number(spent.rows[0].usd);
+    // The latest manually entered balance is authoritative for paid execution.
+    // The baseline prevents pre-snapshot usage from being charged twice.
+    const snapshot = await client.query(
+      'SELECT balance_usd,committed_baseline_usd FROM ai_provider_balance_snapshots WHERE provider_id=$1 ORDER BY id DESC LIMIT 1',
+      [input.providerId],
+    );
+    if (snapshot.rows.length !== 1) throw new Error('AI_MANUAL_BALANCE_NOT_CONFIGURED');
+    const allCommitted = await client.query(
+      `SELECT COALESCE(SUM(CASE WHEN r.status='settled' THEN r.settled_usd
+        WHEN r.status='reserved' THEN r.reserved_usd ELSE 0 END),0) AS usd
+        FROM ai_budget_reservations r JOIN ai_provider_budgets b ON b.id=r.budget_id
+        WHERE b.provider_id=$1`, [input.providerId],
+    );
+    const remaining = Number(snapshot.rows[0].balance_usd) -
+      Math.max(0,Number(allCommitted.rows[0].usd)-Number(snapshot.rows[0].committed_baseline_usd));
     if (!Number.isFinite(remaining) || remaining < input.estimatedUsd) throw new Error('AI_BUDGET_EXCEEDED');
     const inserted = await client.query(
       `INSERT INTO ai_budget_reservations(budget_id,task_id,request_key,reserved_usd,status)
