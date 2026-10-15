@@ -50,7 +50,7 @@ export async function reserveAiBudget(pool: Pool, input: {
 // Finalize only after a provider response supplies actual usage and the price
 // calculation is available. Never silently cap actual charges at the estimate.
 export async function settleAiBudget(pool: Pool, reservationId: string, actualUsd: number): Promise<void> {
-  if (!/^\\d+$/.test(reservationId) || !Number.isFinite(actualUsd) || actualUsd < 0) {
+  if (!/^\d+$/.test(reservationId) || !Number.isFinite(actualUsd) || actualUsd < 0) {
     throw new Error('AI_BUDGET_INVALID_SETTLEMENT');
   }
   const client = await pool.connect();
@@ -80,7 +80,7 @@ export async function settleAiBudget(pool: Pool, reservationId: string, actualUs
 // Release only when the provider did not execute the request. A timeout or
 // unknown response must be reconciled, not assumed to have cost zero.
 export async function releaseAiBudget(pool: Pool, reservationId: string): Promise<void> {
-  if (!/^\\d+$/.test(reservationId)) throw new Error('AI_BUDGET_INVALID_RESERVATION');
+  if (!/^\d+$/.test(reservationId)) throw new Error('AI_BUDGET_INVALID_RESERVATION');
   const result = await pool.query(
     `UPDATE ai_budget_reservations SET status='released'
       WHERE id=$1 AND status='reserved' RETURNING id`,
