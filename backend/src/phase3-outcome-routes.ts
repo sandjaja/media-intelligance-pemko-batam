@@ -75,13 +75,13 @@ function validatePublicationEvidenceSignature(mime:string,buf:Buffer):void{
     throw new Error('PUBLICATION_EVIDENCE_CONTENT_MISMATCH');
   }
 }
-async function readPublicationEvidenceLimited(stream:ReadableStream<Uint8Array>):Promise<Buffer>{
+async function readPublicationEvidenceLimited(stream:ReadableStream<Uint8Array>,maxBytes=8_000_000):Promise<Buffer>{
   const chunks:Buffer[]=[];
   let total=0;
   for await(const chunk of Readable.fromWeb(stream as any)){
     const bytes=Buffer.isBuffer(chunk)?chunk:Buffer.from(chunk);
     total+=bytes.length;
-    if(total>8_000_000)throw new Error('PUBLICATION_EVIDENCE_TOO_LARGE');
+    if(total>maxBytes)throw new Error(maxBytes<8_000_000?'PUBLICATION_EVIDENCE_TOTAL_TOO_LARGE':'PUBLICATION_EVIDENCE_TOO_LARGE');
     chunks.push(bytes);
   }
   return Buffer.concat(chunks,total);
@@ -381,7 +381,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
       for(const e of evidence){
         if(e.evidence_type==='WEBSITE'&&e.url){const article=await fetchWebsitePublication(String(e.url));materials.push({id:e.id,type:'WEBSITE',channel:e.channel,url:e.url,caption:e.caption,title:article.title,text:article.text});continue}
         const files=(await pool.query('SELECT id,storage_key,file_name,mime_type,file_order FROM issue_publication_evidence_files WHERE evidence_id=$1 ORDER BY file_order,id',[e.id])).rows;const fileMeta:any[]=[];
-        for(const file of files){const mime=validatePublicationEvidenceMime(file.mime_type);const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');const buf=await readPublicationEvidenceLimited(result.stream as ReadableStream<Uint8Array>);validatePublicationEvidenceSignature(mime,buf);evidenceBytes+=buf.length;if(evidenceBytes>16_000_000)throw new Error('PUBLICATION_EVIDENCE_TOTAL_TOO_LARGE');mediaParts.push({inlineData:{mimeType:mime,data:buf.toString('base64')}});fileMeta.push({id:file.id,file_name:file.file_name,mime_type:file.mime_type,file_order:file.file_order});}
+        for(const file of files){const mime=validatePublicationEvidenceMime(file.mime_type);const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');const buf=await readPublicationEvidenceLimited(result.stream as ReadableStream<Uint8Array>,Math.min(8_000_000,16_000_000-evidenceBytes));validatePublicationEvidenceSignature(mime,buf);evidenceBytes+=buf.length;if(evidenceBytes>16_000_000)throw new Error('PUBLICATION_EVIDENCE_TOTAL_TOO_LARGE');mediaParts.push({inlineData:{mimeType:mime,data:buf.toString('base64')}});fileMeta.push({id:file.id,file_name:file.file_name,mime_type:file.mime_type,file_order:file.file_order});}
         materials.push({id:e.id,type:e.evidence_type,channel:e.channel,caption:e.caption,files:fileMeta});
       }
       const existing=(await pool.query('SELECT result,source,gap_analyzed_at,analyzed_at FROM issue_publication_analysis_snapshots WHERE workflow_id=$1',[w.id])).rows[0]||null;
@@ -468,7 +468,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
           const fileMeta:any[]=[];
           for(const file of files){
             const mime=validatePublicationEvidenceMime(file.mime_type);
-            const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');const buf=await readPublicationEvidenceLimited(result.stream as ReadableStream<Uint8Array>);validatePublicationEvidenceSignature(mime,buf);evidenceBytes+=buf.length;if(evidenceBytes>16_000_000)throw new Error('PUBLICATION_EVIDENCE_TOTAL_TOO_LARGE');
+            const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');const buf=await readPublicationEvidenceLimited(result.stream as ReadableStream<Uint8Array>,Math.min(8_000_000,16_000_000-evidenceBytes));validatePublicationEvidenceSignature(mime,buf);evidenceBytes+=buf.length;if(evidenceBytes>16_000_000)throw new Error('PUBLICATION_EVIDENCE_TOTAL_TOO_LARGE');
             mediaParts.push({inlineData:{mimeType:mime,data:buf.toString('base64')}});
             fileMeta.push({id:file.id,file_name:file.file_name,mime_type:file.mime_type,file_order:file.file_order});
           }
@@ -525,7 +525,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
           const fileMeta:any[]=[];
           for(const file of files){
             const mime=validatePublicationEvidenceMime(file.mime_type);
-            const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');const buf=await readPublicationEvidenceLimited(result.stream as ReadableStream<Uint8Array>);validatePublicationEvidenceSignature(mime,buf);evidenceBytes+=buf.length;if(evidenceBytes>16_000_000)throw new Error('PUBLICATION_EVIDENCE_TOTAL_TOO_LARGE');
+            const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');const buf=await readPublicationEvidenceLimited(result.stream as ReadableStream<Uint8Array>,Math.min(8_000_000,16_000_000-evidenceBytes));validatePublicationEvidenceSignature(mime,buf);evidenceBytes+=buf.length;if(evidenceBytes>16_000_000)throw new Error('PUBLICATION_EVIDENCE_TOTAL_TOO_LARGE');
             mediaParts.push({inlineData:{mimeType:mime,data:buf.toString('base64')}});
             fileMeta.push({id:file.id,file_name:file.file_name,mime_type:file.mime_type,file_order:file.file_order});
           }
