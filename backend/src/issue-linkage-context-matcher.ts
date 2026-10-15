@@ -1,13 +1,15 @@
+import type { Pool } from 'pg';
+import { prepareGeminiRequest } from './ai-gemini-config.js';
 export type LinkageContextEvidence={sourceType:string;id:number;title?:string|null;summary?:string|null;occurredAt?:string|null;opdName?:string|null;accountName?:string|null};
 export type LinkageContextResult={mode:'ai-context'|'deterministic-fallback';fallbackReason:string|null;groups:Array<{groupId:string;label:string;reason:string;evidenceRefs:string[]}>};
 
 const ref=(e:LinkageContextEvidence)=>`${e.sourceType}:${e.id}`;
 const fallback=(evidence:LinkageContextEvidence[],reason:string):LinkageContextResult=>({mode:'deterministic-fallback',fallbackReason:reason,groups:[{groupId:'deterministic',label:'Kelompok deterministik',reason:'Gemini tidak digunakan; pertahankan grouping deterministik.',evidenceRefs:evidence.map(ref)}]});
 
-export async function matchIssueLinkageContext(issue:{issueId:number;title?:string|null},primaryKeyword:string|null,evidence:LinkageContextEvidence[]):Promise<LinkageContextResult>{
+export async function matchIssueLinkageContext(issue:{issueId:number;title?:string|null},primaryKeyword:string|null,evidence:LinkageContextEvidence[],pool?:Pool):Promise<LinkageContextResult>{
  if(evidence.length<2)return fallback(evidence,'INSUFFICIENT_EVIDENCE');
- const key=process.env.GEMINI_API_KEY;if(!key)return fallback(evidence,'GEMINI_API_KEY_MISSING');
- const model=process.env.GEMINI_MODEL||'gemini-3.5-flash-lite';
+ if(!pool)return fallback(evidence,'GEMINI_DATABASE_POOL_MISSING');
+ let key:string,model:string;try{({key,model}=await prepareGeminiRequest(pool));}catch{return fallback(evidence,'GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}
  const source=evidence.slice(0,40).map(e=>({evidenceRef:ref(e),source:e.sourceType,title:String(e.title||'').slice(0,500),summary:String(e.summary||'').slice(0,1800),occurredAt:e.occurredAt||null,opd:e.opdName||null,account:e.accountName||null}));
  try{
   const prompt=`Anda adalah pemeriksa konteks untuk Issue Linkage media pemerintah. Semua berita di bawah sudah lolos grouping deterministik dan direkomendasikan ke Existing Issue yang sama. Tugas Anda HANYA memeriksa apakah mereka membahas KASUS/PERISTIWA yang sama.
