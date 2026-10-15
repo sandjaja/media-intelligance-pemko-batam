@@ -1,3 +1,4 @@
+import {parseApifyActorReference,resolveApifyActorReference,matchingActorAdapter,normalizeApifyActorSettings} from './apify-actor-reference.js';
 import {actorAdapterSchema,validateActorAdapter} from './apify-actor-adapter.js';
 import 'dotenv/config';
 import Fastify, { FastifyReply, FastifyRequest } from 'fastify';
@@ -97,7 +98,35 @@ app.put('/api/admin/integrations/:code/settings',{preHandler:[requireAuth,requir
  await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'INTEGRATION_SETTINGS_UPDATED',$2::jsonb)`,[request.user?.id,JSON.stringify({provider:provider.code,organizationId:orgs[0].id,settings})]);
  return{data:rows[0]};
 });
+async function apifyActorConfiguration(){
+ const rows=(await pool.query(`SELECT s.settings,c.credential_ciphertext,c.expires_at FROM organizations o
+ JOIN integration_providers p ON p.code='apify' AND p.active=true
+ LEFT JOIN integration_settings s ON s.organization_id=o.id AND s.provider_id=p.id
+ LEFT JOIN integration_credentials c ON c.organization_id=o.id AND c.provider_id=p.id
+ WHERE o.active=true LIMIT 2`)).rows;
+ if(rows.length!==1)throw Error('Organisasi Apify belum dapat ditentukan.');
+ return rows[0];
+}
+function actorMetadataToken(config:any){
+ if(!config.credential_ciphertext||config.expires_at&&new Date(config.expires_at)<=new Date())throw Error('Simpan API token Apify yang masih berlaku terlebih dahulu.');
+ try{return decryptIntegrationCredential(config.credential_ciphertext);}catch{throw Error('API token Apify belum dapat dibaca. Simpan kembali token Anda.');}
+}
+app.post('/api/admin/integrations/apify/actor/resolve',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
+ const body=z.object({reference:z.string().trim().min(1).max(1000),kind:z.enum(['tiktok_posts','instagram_posts','tiktok_comments','instagram_comments','tiktok_hashtag','instagram_hashtag'])}).strict().safeParse(request.body);
+ if(!body.success)return reply.code(400).send({error:'Link dan jenis Actor tidak valid.'});
+ try{parseApifyActorReference(body.data.reference);}catch(e){return reply.code(400).send({error:(e as Error).message});}
+ try{
+  const config=await apifyActorConfiguration();
+  const actor=await resolveApifyActorReference(body.data.reference,actorMetadataToken(config));
+  try{matchingActorAdapter(body.data.kind,actor.actorId,config.settings?.actorAdapters||{});}
+  catch(e){return{data:{...actor,compatible:false,message:(e as Error).message}};}
+  return{data:{...actor,compatible:true,message:'Actor dikenali dan konfigurasi tersedia. Klik Simpan untuk menggunakan.'}};
+ }catch(e){return reply.code(400).send({error:(e as Error).message});}
+});
 app.put('/api/admin/integrations/apify/settings',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
+ let normalized:Record<string,any>;
+ try{const config=await apifyActorConfiguration();const raw=z.record(z.string(),z.unknown()).parse(request.body);normalized=await normalizeApifyActorSettings(raw,config.settings||{},async()=>actorMetadataToken(config));}
+ catch(e){return reply.code(400).send({error:e instanceof z.ZodError?'Pengaturan Apify tidak valid.':(e as Error).message});}
  const actor=z.string().trim().max(160).refine(v=>!v||/^[a-zA-Z0-9_-]+[\\/~][a-zA-Z0-9_.-]+$/.test(v));
  const body=z.object({
   tiktokActor:actor,instagramActor:actor,tiktokCommentsActor:actor,instagramCommentsActor:actor,
@@ -112,7 +141,7 @@ app.put('/api/admin/integrations/apify/settings',{preHandler:[requireAuth,requir
   maxInstagramPerRun:z.number().int().min(0).max(100).default(10),
   maxCommentsPerPost:z.number().int().min(0).max(50).default(10),
   monthlyCommentsLimit:z.number().int().min(0).max(10000).default(1000)
- }).strict().safeParse(request.body);
+ }).strict().safeParse(normalized);
  if(!body.success)return reply.code(400).send({error:'INVALID_APIFY_SETTINGS'});
  const config=body.data;
  const enabledCollectors=[
