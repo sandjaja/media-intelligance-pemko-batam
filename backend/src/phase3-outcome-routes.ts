@@ -71,7 +71,7 @@ function validatePublicationEvidenceSignature(mime:string,buf:Buffer):void{
   const isPdf=buf.length>=5 && buf.subarray(0,5).toString('ascii')==='%PDF-' && /%%EOF(?:\s|$)/.test(pdfTail);
   const isPng=buf.length>=8 && buf.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
   const isJpeg=buf.length>=3 && buf[0]===255 && buf[1]===216 && buf[2]===255;
-  const isWebp=buf.length>=12 && buf.subarray(0,4).toString('ascii')==='RIFF' && buf.subarray(8,12).toString('ascii')==='WEBP';
+  const isWebp=buf.length>=12 && buf.subarray(0,4).toString('ascii')==='RIFF' && buf.subarray(8,12).toString('ascii')==='WEBP' && buf.readUInt32LE(4)+8===buf.length;
   if(!((mime==='application/pdf'&&isPdf)||(mime==='image/png'&&isPng)||(mime==='image/jpeg'&&isJpeg)||(mime==='image/webp'&&isWebp))){
     throw new Error('PUBLICATION_EVIDENCE_CONTENT_MISMATCH');
   }
