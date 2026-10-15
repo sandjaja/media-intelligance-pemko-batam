@@ -44,11 +44,27 @@ async function fetchWebsitePublication(rawUrl:string){
     return cleanPublicationHtml((await r.text()).slice(0,2_000_000));
   }finally{clearTimeout(timer)}
 }
+async function assertHumasGeminiSelection(pool:Pool,taskCode:'publication_analysis'|'monitoring_analysis'){
+  // Existing publication/monitoring paths support Gemini only. Fail closed for
+  // selected paid models until their evidence-aware gateway path is connected.
+  const selected=await pool.query(`SELECT p.code AS provider_code,p.enabled AS provider_enabled,
+      m.enabled AS model_enabled,m.code AS model_code
+    FROM ai_humas_model_selections s
+    JOIN ai_models m ON m.id=s.model_id
+    JOIN ai_providers p ON p.id=m.provider_id
+    WHERE s.task_code=$1 LIMIT 1`,[taskCode]);
+  const row=selected.rows[0];
+  if(row && row.provider_code!=='gemini')throw new Error('AI_HUMAS_PAID_GATEWAY_NOT_READY');
+  if(row && (!row.provider_enabled||!row.model_enabled))throw new Error('AI_HUMAS_SELECTED_MODEL_DISABLED');
+  return row?.model_code as string|undefined;
+}
 async function analyzePublicationPackage(pool:Pool,input:any,mediaParts:any[]=[]){
+  const selectedModel=await assertHumasGeminiSelection(pool,'publication_analysis');
   const credentials=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
   if(!credentials.rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
   const key=decryptIntegrationCredential(credentials.rows[0].credential_ciphertext);
-  const models=await pool.query("SELECT m.code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 1");
+  const models=selectedModel ? {rows:[{code:selectedModel}]} :
+    await pool.query("SELECT m.code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 1");
   if(!models.rows[0])throw new Error('GEMINI_DATABASE_MODEL_MISSING');
   const model=models.rows[0].code;
   const promptRows=await pool.query("SELECT prompt_text FROM ai_humas_task_prompts WHERE task_code='publication_analysis' LIMIT 1").catch(()=>({rows:[]}));
@@ -98,10 +114,12 @@ Output JSON:
 }
 
 async function analyzeMonitoringAgainstPublication(pool:Pool,input:any){
+  const selectedModel=await assertHumasGeminiSelection(pool,'monitoring_analysis');
   const credentials=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
   if(!credentials.rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
   const key=decryptIntegrationCredential(credentials.rows[0].credential_ciphertext);
-  const models=await pool.query("SELECT m.code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 1");
+  const models=selectedModel ? {rows:[{code:selectedModel}]} :
+    await pool.query("SELECT m.code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 1");
   if(!models.rows[0])throw new Error('GEMINI_DATABASE_MODEL_MISSING');
   const model=models.rows[0].code;
   const promptRows=await pool.query("SELECT prompt_text FROM ai_humas_task_prompts WHERE task_code='monitoring_analysis' LIMIT 1").catch(()=>({rows:[]}));
