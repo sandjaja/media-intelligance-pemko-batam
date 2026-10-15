@@ -193,35 +193,29 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
 
   app.get('/api/humas/ai/budget-status', { preHandler: guard }, async (_request, reply) => {
     try {
-      const { rows } = await pool.query(
-        `SELECT p.code AS provider_code, b.id AS budget_id, b.limit_usd,
-                COALESCE((SELECT SUM(CASE WHEN r.status='settled' THEN r.settled_usd
-                                          WHEN r.status='reserved' THEN r.reserved_usd ELSE 0 END)
-                          FROM ai_budget_reservations r WHERE r.budget_id=b.id),0) AS committed_usd
-           FROM ai_providers p
-           LEFT JOIN LATERAL (
-             SELECT id, limit_usd FROM ai_provider_budgets
-              WHERE provider_id=p.id AND enabled=TRUE
-                AND CURRENT_DATE>=period_start AND CURRENT_DATE<period_end
-              ORDER BY period_start DESC LIMIT 1
-           ) b ON TRUE
-          WHERE LOWER(p.code) IN ('openai','anthropic','claude')`,
-      );
-      return { data: rows.map(row => {
-        const limit = row.budget_id == null ? null : Number(row.limit_usd);
-        const committed = row.budget_id == null ? null : Number(row.committed_usd);
-        const remaining = limit == null || committed == null ? null : Math.max(0, limit-committed);
-        const ratio = limit != null && limit > 0 && committed != null ? committed/limit : null;
-        return {
-          provider_code: row.provider_code,
-          status: limit == null ? 'not_configured' : !Number.isFinite(limit) || !Number.isFinite(committed) ? 'unavailable' : remaining === 0 ? 'exhausted' : ratio != null && ratio >= 0.8 ? 'near_limit' : 'available',
-          remaining_budget_usd: remaining,
-          warning: limit == null || remaining === 0 ? 'Anggaran AI tidak mencukupi. Silakan hubungi Admin untuk top up atau penyesuaian batas anggaran.' : ratio != null && ratio >= 0.8 ? 'Anggaran AI mendekati batas. Hubungi Admin sebelum menggunakan model berbayar.' : null,
-        };
-      }), notice: 'Status berdasarkan anggaran internal, bukan saldo kredit provider.' };
-    } catch {
-      return reply.code(503).send({ error: 'AI_BUDGET_STATUS_UNAVAILABLE' });
-    }
+      const { rows } = await pool.query(`SELECT p.code AS provider_code,
+        s.balance_usd,s.committed_baseline_usd,
+        COALESCE((SELECT SUM(CASE WHEN r.status='settled' THEN r.settled_usd
+          WHEN r.status='reserved' THEN r.reserved_usd ELSE 0 END)
+          FROM ai_budget_reservations r JOIN ai_provider_budgets b ON b.id=r.budget_id
+          WHERE b.provider_id=p.id),0) AS committed_usd
+        FROM ai_providers p LEFT JOIN LATERAL
+          (SELECT balance_usd,committed_baseline_usd FROM ai_provider_balance_snapshots
+           WHERE provider_id=p.id ORDER BY id DESC LIMIT 1) s ON TRUE
+        WHERE LOWER(p.code) IN ('openai','anthropic','claude')`);
+      return {data:rows.map(row=>{
+        const balance=row.balance_usd==null?null:Number(row.balance_usd);
+        const committed=Number(row.committed_usd),baseline=Number(row.committed_baseline_usd||0);
+        const valid=balance!=null&&Number.isFinite(balance)&&balance>=0&&Number.isFinite(committed)&&Number.isFinite(baseline);
+        const used=valid?Math.max(0,committed-baseline):null;
+        const remaining=valid?Math.max(0,balance-used!):null;
+        const ratio=valid&&balance>0?used!/balance:null;
+        const status=!valid?'not_configured':remaining===0?'exhausted':ratio!=null&&ratio>=0.8?'near_limit':'available';
+        return {provider_code:row.provider_code,status,remaining_budget_usd:remaining,
+          warning:status==='near_limit'?'Saldo AI berbayar telah digunakan 80% atau lebih. Hubungi Admin.':
+            status==='available'?null:'Saldo AI berbayar tidak tersedia atau habis. Hubungi Admin.'};
+      }),notice:'Saldo internal berdasarkan input manual Admin, bukan saldo API provider.'};
+    }catch{return reply.code(503).send({error:'AI_BUDGET_STATUS_UNAVAILABLE'});}
   });
 
   // Configuration only. Runtime paid execution must still pass gateway budget reservation.
@@ -257,25 +251,22 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
       // reserves estimated cost atomically before any paid provider request.
       let budgetWarning: string | null = null;
       if (['openai','anthropic','claude'].includes(body.providerCode.toLowerCase())) {
-        const budgets = await pool.query(`SELECT b.id,b.limit_usd,
+        const statusResult=await pool.query(`SELECT s.balance_usd,s.committed_baseline_usd,
           COALESCE((SELECT SUM(CASE WHEN r.status='settled' THEN r.settled_usd
             WHEN r.status='reserved' THEN r.reserved_usd ELSE 0 END)
-            FROM ai_budget_reservations r WHERE r.budget_id=b.id),0) AS committed_usd
-          FROM ai_providers p LEFT JOIN LATERAL (
-            SELECT id,limit_usd FROM ai_provider_budgets
-            WHERE provider_id=p.id AND enabled=TRUE
-              AND CURRENT_DATE>=period_start AND CURRENT_DATE<period_end
-            ORDER BY period_start DESC LIMIT 2
-          ) b ON TRUE WHERE p.code=$1`,[body.providerCode]);
-        if (budgets.rows.length!==1 || budgets.rows[0].id==null)
-          return reply.code(409).send({error:'AI_BUDGET_NOT_CONFIGURED'});
-        const limit=Number(budgets.rows[0].limit_usd);
-        const committed=Number(budgets.rows[0].committed_usd);
-        if (!Number.isFinite(limit)||limit<=0||!Number.isFinite(committed)||committed<0)
-          return reply.code(409).send({error:'AI_BUDGET_UNAVAILABLE'});
-        const remaining=limit-committed;
-        if (remaining<=0)return reply.code(409).send({error:'AI_BUDGET_EXCEEDED'});
-        if (committed/limit>=0.8)budgetWarning='AI_BUDGET_NEAR_LIMIT';
+            FROM ai_budget_reservations r JOIN ai_provider_budgets b ON b.id=r.budget_id
+            WHERE b.provider_id=p.id),0) AS committed_usd
+          FROM ai_providers p LEFT JOIN LATERAL
+            (SELECT balance_usd,committed_baseline_usd FROM ai_provider_balance_snapshots
+             WHERE provider_id=p.id ORDER BY id DESC LIMIT 1) s ON TRUE
+          WHERE p.code=$1`,[body.providerCode]);
+        const record=statusResult.rows[0];
+        if(!record||record.balance_usd==null)return reply.code(409).send({error:'AI_MANUAL_BALANCE_NOT_CONFIGURED'});
+        const balance=Number(record.balance_usd);
+        const used=Math.max(0,Number(record.committed_usd)-Number(record.committed_baseline_usd));
+        if(!Number.isFinite(balance)||!Number.isFinite(used))return reply.code(409).send({error:'AI_BUDGET_UNAVAILABLE'});
+        if(balance-used<=0)return reply.code(409).send({error:'AI_BUDGET_EXCEEDED'});
+        if(balance>0&&used/balance>=0.8)budgetWarning='AI_BUDGET_NEAR_LIMIT';
       }
       const { rows } = await pool.query(`INSERT INTO ai_humas_model_selections(task_code,model_id,updated_by)
         VALUES($1,$2,$3) ON CONFLICT(task_code) DO UPDATE SET model_id=EXCLUDED.model_id,
