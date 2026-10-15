@@ -78,6 +78,20 @@ export async function registerAiAdminRoutes(app:FastifyInstance,pool:Pool,jwtSec
     try{const r=await pool.query('UPDATE ai_models SET provider_id=$2,code=$3,name=$4,capabilities=$5::jsonb,enabled=$6,updated_at=NOW() WHERE id=$1 RETURNING id,provider_id,code,name,capabilities,enabled,created_at,updated_at',[id.data,v[0],v[1],v[2],JSON.stringify(v[3]),v[4]]);await audit(request,'AI_MODEL_UPDATED',id.data);return{data:r.rows[0]};}catch(e:any){return reply.code(409).send({error:'AI_MODEL_UPDATE_FAILED',detail:String(e?.message||e).slice(0,200)});}
   });
 
+  app.delete('/api/admin/ai/models/:id',{preHandler:guard},async(request,reply)=>{
+    const id=z.coerce.number().int().positive().safeParse((request.params as any).id);
+    if(!id.success)return reply.code(400).send({error:'INVALID_AI_MODEL'});
+    try{
+      const result=await pool.query('DELETE FROM ai_models WHERE id=$1 RETURNING id',[id.data]);
+      if(!result.rowCount)return reply.code(404).send({error:'AI_MODEL_NOT_FOUND'});
+      await audit(request,'AI_MODEL_DELETED',id.data);
+      return {data:{deleted:true,id:id.data}};
+    }catch(e:any){
+      if(e?.code==='23503')return reply.code(409).send({error:'AI_MODEL_IN_USE'});
+      return reply.code(500).send({error:'AI_MODEL_DELETE_FAILED'});
+    }
+  });
+
   app.get('/api/admin/ai/tasks',{preHandler:guard},async()=>({data:(await pool.query('SELECT id,code,name,description,enabled,created_at,updated_at FROM ai_tasks ORDER BY name,id')).rows}));
   app.post('/api/admin/ai/tasks',{preHandler:guard},async(request,reply)=>{
     const p=z.object({code:z.string().trim().min(2).max(100).regex(/^[A-Za-z0-9_-]+$/),name:z.string().trim().min(2).max(200),description:z.string().trim().max(1000).optional().nullable(),enabled:z.boolean().default(true)}).safeParse(request.body);if(!p.success)return reply.code(400).send({error:'INVALID_AI_TASK'});
