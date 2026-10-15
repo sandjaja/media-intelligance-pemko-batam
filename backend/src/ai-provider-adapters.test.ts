@@ -75,6 +75,21 @@ test('Gemini thinking tokens count toward billable output usage', async () => {
   assert.deepEqual(result.usage, { inputTokens: 12, outputTokens: 22 });
 });
 
+test('Gemini safety stop is rejected', async () => {
+  mockResponse({ candidates: [{ finishReason: 'SAFETY', content: { parts: [{ text: '{"ok":true}' }] } }], usageMetadata: { promptTokenCount: 2, candidatesTokenCount: 2 } });
+  await assert.rejects(invokeAiProvider({ provider: 'gemini', model: 'test-model', apiKey: 'mock', prompt: 'hello' }), /AI_PROVIDER_OUTPUT_BLOCKED/);
+});
+
+test('OpenAI refusal is rejected', async () => {
+  mockResponse({ status: 'completed', output: [{ content: [{ type: 'refusal', refusal: 'blocked' }, { type: 'output_text', text: '{"ok":true}' }] }], usage: { input_tokens: 2, output_tokens: 2 } });
+  await assert.rejects(invokeAiProvider({ provider: 'openai', model: 'test-model', apiKey: 'mock', prompt: 'hello' }), /AI_PROVIDER_OUTPUT_BLOCKED/);
+});
+
+test('Claude refusal is rejected', async () => {
+  mockResponse({ stop_reason: 'refusal', content: [{ type: 'text', text: '{"ok":true}' }], usage: { input_tokens: 2, output_tokens: 2 } });
+  await assert.rejects(invokeAiProvider({ provider: 'anthropic', model: 'test-model', apiKey: 'mock', prompt: 'hello' }), /AI_PROVIDER_OUTPUT_BLOCKED/);
+});
+
 test('Gemini truncated JSON is rejected even if parseable', async () => {
   mockResponse({
     candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [{ text: '{"ok":true}' }] } }],
