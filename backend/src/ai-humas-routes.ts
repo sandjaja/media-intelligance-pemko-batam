@@ -91,6 +91,39 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
     }
   });
 
+  app.get('/api/humas/ai/budget-status', { preHandler: guard }, async (_request, reply) => {
+    try {
+      const { rows } = await pool.query(
+        `SELECT p.code AS provider_code, b.id AS budget_id, b.limit_usd,
+                COALESCE((SELECT SUM(CASE WHEN r.status='settled' THEN r.settled_usd
+                                          WHEN r.status='reserved' THEN r.reserved_usd ELSE 0 END)
+                          FROM ai_budget_reservations r WHERE r.budget_id=b.id),0) AS committed_usd
+           FROM ai_providers p
+           LEFT JOIN LATERAL (
+             SELECT id, limit_usd FROM ai_provider_budgets
+              WHERE provider_id=p.id AND enabled=TRUE
+                AND CURRENT_DATE>=period_start AND CURRENT_DATE<period_end
+              ORDER BY period_start DESC LIMIT 1
+           ) b ON TRUE
+          WHERE LOWER(p.code) IN ('openai','anthropic','claude')`,
+      );
+      return { data: rows.map(row => {
+        const limit = row.budget_id == null ? null : Number(row.limit_usd);
+        const committed = row.budget_id == null ? null : Number(row.committed_usd);
+        const remaining = limit == null || committed == null ? null : Math.max(0, limit-committed);
+        const ratio = limit != null && limit > 0 && committed != null ? committed/limit : null;
+        return {
+          provider_code: row.provider_code,
+          status: limit == null ? 'not_configured' : remaining === 0 ? 'exhausted' : ratio != null && ratio >= 0.8 ? 'near_limit' : 'available',
+          remaining_budget_usd: remaining,
+          warning: limit == null || remaining === 0 ? 'Anggaran AI tidak mencukupi. Silakan hubungi Admin untuk top up atau penyesuaian batas anggaran.' : ratio != null && ratio >= 0.8 ? 'Anggaran AI mendekati batas. Hubungi Admin sebelum menggunakan model berbayar.' : null,
+        };
+      }), notice: 'Status berdasarkan anggaran internal, bukan saldo kredit provider.' };
+    } catch {
+      return reply.code(503).send({ error: 'AI_BUDGET_STATUS_UNAVAILABLE' });
+    }
+  });
+
   app.get('/api/humas/ai/available-models', { preHandler: guard }, async (_request, reply) => {
     try {
       const { rows } = await pool.query(
