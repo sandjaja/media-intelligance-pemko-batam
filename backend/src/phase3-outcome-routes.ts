@@ -157,7 +157,10 @@ Output JSON:
   }
   const raw=candidate.content?.parts?.map((x:any)=>x.text||'').join('');
   if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');
-  try{return JSON.parse(raw);}catch{throw new Error('GEMINI_ANALYSIS_INVALID_JSON');}
+  let parsed:unknown;
+  try{parsed=JSON.parse(raw);}catch{throw new Error('GEMINI_ANALYSIS_INVALID_JSON');}
+  if(parsed===null||typeof parsed!=='object'||Array.isArray(parsed))throw new Error('GEMINI_ANALYSIS_INVALID_JSON_SHAPE');
+  return parsed;
 }
 
 async function analyzeMonitoringAgainstPublication(pool:Pool,input:any,userId:string){
@@ -234,7 +237,10 @@ HASILKAN JSON:
   }
   const raw=candidate.content?.parts?.map((x:any)=>x.text||'').join('');
   if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');
-  try{return JSON.parse(raw);}catch{throw new Error('GEMINI_ANALYSIS_INVALID_JSON');}
+  let parsed:unknown;
+  try{parsed=JSON.parse(raw);}catch{throw new Error('GEMINI_ANALYSIS_INVALID_JSON');}
+  if(parsed===null||typeof parsed!=='object'||Array.isArray(parsed))throw new Error('GEMINI_ANALYSIS_INVALID_JSON_SHAPE');
+  return parsed;
 }
 
 export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
