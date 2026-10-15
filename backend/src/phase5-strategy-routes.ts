@@ -29,6 +29,27 @@ const reviewSchema=z.object({note:z.string().trim().max(4000).nullable().optiona
 const districtFields=z.object({
  evidenceContext:z.record(z.string(),z.any()).default({}),localAudiences:z.array(z.any()).default([]),communicationFocus:z.array(z.any()).default([]),localMessages:z.array(z.any()).default([]),talkingPoints:z.array(z.any()).default([]),localChannels:z.array(z.any()).default([]),coordinationOpds:z.array(z.any()).default([]),timingStrategy:z.record(z.string(),z.any()).default({}),successKpis:z.array(z.any()).default([]),fieldUpdateRequirements:z.array(z.any()).default([])
 });
+export async function reserveGeminiDailyQuota(pool:Pick<Pool,'query'>,model:string):Promise<void>{
+ const quota=await pool.query("SELECT to_regclass('public.ai_free_tier_daily_limits') IS NOT NULL AS available");
+ if(!quota.rows[0]?.available)return;
+ const configured=await pool.query(`SELECT l.model_id,l.max_requests,l.enabled
+   FROM ai_free_tier_daily_limits l
+   JOIN ai_models m ON m.id=l.model_id
+   JOIN ai_providers p ON p.id=m.provider_id
+   WHERE p.code='gemini' AND m.code=$1`,[model]);
+ if(!configured.rows[0]?.enabled)return;
+ const reserved=await pool.query(`INSERT INTO ai_free_tier_daily_usage(model_id,usage_date,reserved_requests)
+   SELECT l.model_id,(now() AT TIME ZONE 'UTC')::date,1
+   FROM ai_free_tier_daily_limits l
+   WHERE l.model_id=$1 AND l.enabled=TRUE AND l.max_requests>=1
+   ON CONFLICT(model_id,usage_date) DO UPDATE
+   SET reserved_requests=ai_free_tier_daily_usage.reserved_requests+1,updated_at=now()
+   WHERE ai_free_tier_daily_usage.reserved_requests <
+     (SELECT max_requests FROM ai_free_tier_daily_limits
+      WHERE model_id=EXCLUDED.model_id AND enabled=TRUE)
+   RETURNING reserved_requests`,[configured.rows[0].model_id]);
+ if(!reserved.rowCount)throw new Error('AI_GEMINI_DAILY_QUOTA_EXCEEDED');
+}
 async function generateStrategyWithGemini(pool:Pool,input:any,userId:string){
  // Respect the Humas model choice. Never silently execute Gemini if Humas selected a
  // different provider: paid providers require the separate budgeted gateway path.
@@ -86,30 +107,8 @@ Output JSON:
  // The free-tier quota configuration is opt-in. Until its migration and
  // per-model limit are explicitly enabled, preserve the existing Gemini path.
  // Once enabled, reserve atomically before calling the provider.
- const quota=await pool.query(
-   "SELECT to_regclass('public.ai_free_tier_daily_limits') IS NOT NULL AS available"
- );
- if(quota.rows[0]?.available){
-   const configured=await pool.query(`SELECT l.model_id,l.max_requests,l.enabled
-     FROM ai_free_tier_daily_limits l
-     JOIN ai_models m ON m.id=l.model_id
-     JOIN ai_providers p ON p.id=m.provider_id
-     WHERE p.code='gemini' AND m.code=$1`,[model]);
-   if(configured.rows[0]?.enabled){
-     const reserved=await pool.query(`INSERT INTO ai_free_tier_daily_usage(model_id,usage_date,reserved_requests)
-       SELECT l.model_id,(now() AT TIME ZONE 'UTC')::date,1
-       FROM ai_free_tier_daily_limits l
-       WHERE l.model_id=$1 AND l.enabled=TRUE AND l.max_requests>=1
-       ON CONFLICT(model_id,usage_date) DO UPDATE
-       SET reserved_requests=ai_free_tier_daily_usage.reserved_requests+1,updated_at=now()
-       WHERE ai_free_tier_daily_usage.reserved_requests <
-         (SELECT max_requests FROM ai_free_tier_daily_limits
-          WHERE model_id=EXCLUDED.model_id AND enabled=TRUE)
-       RETURNING reserved_requests`,[configured.rows[0].model_id]);
-     if(!reserved.rowCount)throw new Error('AI_GEMINI_DAILY_QUOTA_EXCEEDED');
-   }
- }
- const {rows}=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
+ await reserveGeminiDailyQuota(pool,model);
+  const {rows}=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
  if(!rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
  const key=decryptIntegrationCredential(rows[0].credential_ciphertext);
  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},signal:AbortSignal.timeout(30000),body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json',maxOutputTokens:4096}})});
