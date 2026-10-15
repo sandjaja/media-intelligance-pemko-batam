@@ -2,7 +2,7 @@ import { FastifyInstance, FastifyRequest } from 'fastify';
 import { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
-import { encryptIntegrationCredential, integrationCredentialHint } from './integration-credentials.js';
+import { decryptIntegrationCredential, encryptIntegrationCredential, integrationCredentialHint } from './integration-credentials.js';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 
 declare module 'fastify' { interface FastifyRequest { aiAdminAuthz?: AuthorizationContext } }
@@ -35,6 +35,24 @@ export async function registerAiAdminRoutes(app:FastifyInstance,pool:Pool,jwtSec
     await pool.query('INSERT INTO ai_provider_credentials(provider_id,credential_ciphertext,credential_hint) VALUES($1,$2,$3) ON CONFLICT(provider_id) DO UPDATE SET credential_ciphertext=EXCLUDED.credential_ciphertext,credential_hint=EXCLUDED.credential_hint,updated_at=NOW()',[provider.id,encrypted,hint]);
     await audit(request,'AI_CREDENTIAL_UPDATED',provider.id);
     return{data:{code:code.data,credential_hint:hint}};
+  });
+  app.post('/api/admin/ai/credentials/:code/test',{preHandler:guard},async(request,reply)=>{
+    const parsed=z.enum(['gemini','openai','anthropic']).safeParse((request.params as any).code);
+    if(!parsed.success)return reply.code(400).send({error:'INVALID_AI_PROVIDER'});
+    const {rows}=await pool.query('SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code=$1',[parsed.data]);
+    if(!rows[0])return reply.code(409).send({error:'AI_CREDENTIAL_NOT_CONFIGURED'});
+    let credential:string;
+    try{credential=decryptIntegrationCredential(rows[0].credential_ciphertext);}catch{return reply.code(503).send({error:'AI_CREDENTIAL_DECRYPT_FAILED'});}
+    const endpoints:{[key:string]:{url:string,headers:Record<string,string>}}={
+      gemini:{url:'https://generativelanguage.googleapis.com/v1beta/models?pageSize=1',headers:{'x-goog-api-key':credential}},
+      openai:{url:'https://api.openai.com/v1/models',headers:{Authorization:'Bearer '+credential}},
+      anthropic:{url:'https://api.anthropic.com/v1/models?limit=1',headers:{'x-api-key':credential,'anthropic-version':'2023-06-01'}}
+    };
+    const target=endpoints[parsed.data];
+    try{const response=await fetch(target.url,{method:'GET',headers:target.headers,signal:AbortSignal.timeout(12000)});
+      await audit(request,'AI_CREDENTIAL_CONNECTION_TEST',parsed.data);
+      return{data:{provider:parsed.data,connected:response.ok,httpStatus:response.status}};
+    }catch{return reply.code(502).send({error:'AI_CONNECTION_TEST_FAILED'});}
   });
   app.get('/api/admin/ai/providers',{preHandler:guard},async()=>({data:(await pool.query('SELECT id,code,name,base_url,enabled,secret_reference,created_at,updated_at FROM ai_providers ORDER BY name,id')).rows}));
   app.post('/api/admin/ai/providers',{preHandler:guard},async(request,reply)=>{
