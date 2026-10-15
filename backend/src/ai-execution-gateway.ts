@@ -1,4 +1,5 @@
 import type { Pool } from 'pg';
+import { reserveGeminiDailyRequest } from './ai-gemini-quota-reservation.js';
 import { randomUUID } from 'node:crypto';
 import { reserveAiBudget, settleAiBudgetWithUsage, getAiModelPrice, calculateAiTokenCost } from './ai-budget-reservation.js';
 import { invokeAiProvider, AI_GATEWAY_MAX_OUTPUT_TOKENS, type AiProvider } from './ai-provider-adapters.js';
@@ -106,11 +107,16 @@ export async function executeConfiguredAi(pool: Pool, input: {
     providerId: Number(route.provider_id),
     modelId: Number(route.model_id),
     estimatedUsd,
-    invoke: () => invokeAiProvider({
-      provider: input.provider,
-      model: input.modelCode,
-      apiKey,
-      prompt: input.prompt,
-    }),
+    invoke: async () => {
+      // Even budgeted Gemini routes consume the same per-model daily quota.
+      // Reserve immediately before the outbound provider call, never for OpenAI/Claude.
+      if (input.provider === 'gemini') await reserveGeminiDailyRequest(pool, input.modelCode);
+      return invokeAiProvider({
+        provider: input.provider,
+        model: input.modelCode,
+        apiKey,
+        prompt: input.prompt,
+      });
+    },
   });
 }
