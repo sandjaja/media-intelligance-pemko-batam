@@ -30,6 +30,65 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
     }
   };
 
+  // Editable only for the five explicitly agreed Humas analysis tasks.
+  // No runtime AI call reads these settings until each legacy prompt is migrated.
+  app.get('/api/humas/ai/prompts', { preHandler: guard }, async (_request, reply) => {
+    try {
+      const { rows } = await pool.query(
+        'SELECT task_code,prompt_text,default_prompt_text,version,updated_at FROM ai_humas_task_prompts WHERE task_code = ANY($1::text[]) ORDER BY task_code',
+        [HUMAS_AI_TASKS],
+      );
+      return { data: rows, editable_tasks: HUMAS_AI_TASKS, execution_ready: false };
+    } catch {
+      return reply.code(503).send({ error: 'AI_PROMPT_STORAGE_UNAVAILABLE' });
+    }
+  });
+
+  app.put('/api/humas/ai/prompts/:taskCode', { preHandler: guard }, async (request, reply) => {
+    const taskCode = (request.params as { taskCode?: string }).taskCode;
+    const body = request.body as { prompt?: unknown; expectedVersion?: unknown } | null;
+    if (!taskCode || !(HUMAS_AI_TASKS as readonly string[]).includes(taskCode) ||
+        typeof body?.prompt !== 'string' || body.prompt.trim().length < 20 ||
+        body.prompt.length > 30000 || !Number.isSafeInteger(body.expectedVersion) ||
+        (body.expectedVersion as number) < 1) {
+      return reply.code(400).send({ error: 'AI_PROMPT_INVALID' });
+    }
+    const token = request.cookies.access_token;
+    if (!token) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
+    const payload = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
+    if (typeof payload.sub !== 'string') return reply.code(401).send({ error: 'INVALID_ACCESS_TOKEN' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const current = await client.query(
+        'SELECT version,prompt_text FROM ai_humas_task_prompts WHERE task_code=$1 FOR UPDATE', [taskCode],
+      );
+      if (!current.rows[0]) {
+        await client.query('ROLLBACK');
+        return reply.code(409).send({ error: 'AI_PROMPT_DEFAULT_NOT_MIGRATED' });
+      }
+      if (Number(current.rows[0].version) !== body.expectedVersion) {
+        await client.query('ROLLBACK');
+        return reply.code(409).send({ error: 'AI_PROMPT_VERSION_CONFLICT' });
+      }
+      await client.query(
+        'INSERT INTO ai_humas_task_prompt_history(task_code,version,prompt_text,changed_by) VALUES($1,$2,$3,$4)',
+        [taskCode,current.rows[0].version,current.rows[0].prompt_text,payload.sub],
+      );
+      const updated = await client.query(
+        'UPDATE ai_humas_task_prompts SET prompt_text=$2,version=version+1,updated_by=$3,updated_at=now() WHERE task_code=$1 RETURNING task_code,version,updated_at',
+        [taskCode,body.prompt.trim(),payload.sub],
+      );
+      await client.query('COMMIT');
+      return { data: updated.rows[0], execution_ready: false };
+    } catch {
+      await client.query('ROLLBACK').catch(() => {});
+      return reply.code(503).send({ error: 'AI_PROMPT_SAVE_FAILED' });
+    } finally {
+      client.release();
+    }
+  });
+
   app.get('/api/humas/ai/usage-summary', { preHandler: guard }, async (request, reply) => {
     try {
       const token=request.cookies.access_token;
