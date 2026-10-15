@@ -42,6 +42,8 @@ async function generateStrategyWithGemini(pool:Pool,input:any,userId:string){
    throw new Error('AI_STRATEGY_SELECTED_MODEL_DISABLED');
  const modelRows=selected.rows.length ? selected.rows :
    (await pool.query("SELECT m.code AS model_code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 1")).rows;
+ // A missing explicit selection may use the configured Gemini free route only.
+ // Never fall back from a selected provider to another provider after a failure.
  const model=modelRows[0]?.model_code;
  if(!model)throw new Error('AI_STRATEGY_GEMINI_MODEL_NOT_CONFIGURED');
  const promptRow=await pool.query("SELECT prompt_text FROM ai_humas_task_prompts WHERE task_code='strakom_analysis' LIMIT 1").catch(()=>({rows:[]}));
@@ -79,6 +81,8 @@ Output JSON:
    });
    return result.data;
  }
+ // Apply the same input ceiling to free-tier requests before any external call.
+ if(prompt.length>12000)throw new Error('AI_STRATEGY_PROMPT_TOO_LARGE');
  const {rows}=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
  if(!rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
  const key=decryptIntegrationCredential(rows[0].credential_ciphertext);
