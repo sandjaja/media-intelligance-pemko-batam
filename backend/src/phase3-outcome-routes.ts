@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
+import { decryptIntegrationCredential } from './integration-credentials.js';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
@@ -43,10 +44,15 @@ async function fetchWebsitePublication(rawUrl:string){
     return cleanPublicationHtml((await r.text()).slice(0,2_000_000));
   }finally{clearTimeout(timer)}
 }
-async function analyzePublicationPackage(input:any,mediaParts:any[]=[]){
-  const key=process.env.GEMINI_API_KEY;if(!key)throw new Error('GEMINI_API_KEY_MISSING');
-  const model=process.env.GEMINI_MODEL||'gemini-3.5-flash-lite';
-  const prompt=`Anda adalah analis komunikasi pemerintah daerah. Tugas Anda menilai apakah MATERI PUBLIKASI resmi benar-benar mengeksekusi INTI STRATEGI KOMUNIKASI (Strakom) yang sudah disetujui Humas.
+async function analyzePublicationPackage(pool:Pool,input:any,mediaParts:any[]=[]){
+  const credentials=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
+  if(!credentials.rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
+  const key=decryptIntegrationCredential(credentials.rows[0].credential_ciphertext);
+  const models=await pool.query("SELECT m.code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 1");
+  if(!models.rows[0])throw new Error('GEMINI_DATABASE_MODEL_MISSING');
+  const model=models.rows[0].code;
+  const promptRows=await pool.query("SELECT prompt_text FROM ai_humas_task_prompts WHERE task_code='publication_analysis' LIMIT 1").catch(()=>({rows:[]}));
+  const prompt=(promptRows.rows[0]?.prompt_text||`Anda adalah analis komunikasi pemerintah daerah. Tugas Anda menilai apakah MATERI PUBLIKASI resmi benar-benar mengeksekusi INTI STRATEGI KOMUNIKASI (Strakom) yang sudah disetujui Humas.
 
 PRINSIP WAJIB:
 - Strakom Approved adalah SATU-SATUNYA baseline strategi. Jangan menggunakan Analisis Gap atau Klarifikasi/Respons OPD sebagai baseline tambahan; keduanya sudah dirangkum saat Strakom disusun.
@@ -84,20 +90,22 @@ HASILKAN:
 10. monitoringFocus: turunkan hanya hal yang memang perlu diamati SETELAH publikasi untuk mengetahui pickup/persistensi claim/sinyal baru/sentimen-risiko/amplifikasi. Gunakan evidence yang tersedia di sistem (ONLINE, PRINT, SOCIAL, OWNED), jangan mengandalkan komentar/share/engagement jika tidak tersedia.
 
 Output JSON:
-{"strategyEssence":{"summary":"...","essentialIntent":["..."],"priorityAudience":["..."],"coreMessage":["..."],"intendedApproach":"..."},"executionAssessment":{"status":"ALIGNED|PARTIAL|MISALIGNED|INSUFFICIENT_EVIDENCE","assessment":"..."},"achieved":["..."],"gaps":["..."],"communicationStyle":{"observed":"...","fitAssessment":"..."},"strengths":["..."],"audienceAndMessage":{"assessment":"...","potentialMisunderstanding":["..."]},"improvements":[{"priority":"HIGH|MEDIUM|LOW","recommendation":"...","reason":"..."}],"coordinationFollowUp":{"status":"NONE|NEEDS_CONFIRMATION|NEEDS_COORDINATION|FOLLOWUP_PUBLICATION","missingInformation":["..."],"parties":["..."],"recommendation":"...","reason":"..."},"monitoringFocus":[{"type":"MESSAGE_PICKUP|CLAIM_PERSISTENCE|NEW_CLAIM|SENTIMENT_RISK|OFFICIAL_AMPLIFICATION","target":"...","rationale":"...","expectedSignal":"...","sourceTypes":["ONLINE","PRINT","SOCIAL","OWNED"]}]}
-
-DATA:
-${JSON.stringify(input).slice(0,50000)}`;
+{"strategyEssence":{"summary":"...","essentialIntent":["..."],"priorityAudience":["..."],"coreMessage":["..."],"intendedApproach":"..."},"executionAssessment":{"status":"ALIGNED|PARTIAL|MISALIGNED|INSUFFICIENT_EVIDENCE","assessment":"..."},"achieved":["..."],"gaps":["..."],"communicationStyle":{"observed":"...","fitAssessment":"..."},"strengths":["..."],"audienceAndMessage":{"assessment":"...","potentialMisunderstanding":["..."]},"improvements":[{"priority":"HIGH|MEDIUM|LOW","recommendation":"...","reason":"..."}],"coordinationFollowUp":{"status":"NONE|NEEDS_CONFIRMATION|NEEDS_COORDINATION|FOLLOWUP_PUBLICATION","missingInformation":["..."],"parties":["..."],"recommendation":"...","reason":"..."},"monitoringFocus":[{"type":"MESSAGE_PICKUP|CLAIM_PERSISTENCE|NEW_CLAIM|SENTIMENT_RISK|OFFICIAL_AMPLIFICATION","target":"...","rationale":"...","expectedSignal":"...","sourceTypes":["ONLINE","PRINT","SOCIAL","OWNED"]}]}`)+'\\n\\nDATA:\\n'+JSON.stringify(input).slice(0,50000);
   const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt},...mediaParts]}],generationConfig:{responseMimeType:'application/json'}})});
   if(!r.ok)throw new Error(`Gemini HTTP ${r.status}`);
   const payload=await r.json() as any,raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');
   return JSON.parse(raw);
 }
 
-async function analyzeMonitoringAgainstPublication(input:any){
-  const key=process.env.GEMINI_API_KEY;if(!key)throw new Error('GEMINI_API_KEY_MISSING');
-  const model=process.env.GEMINI_MODEL||'gemini-3.5-flash-lite';
-  const prompt=`Anda adalah analis komunikasi strategis pemerintah daerah pada AKHIR satu siklus respons isu. Monitoring sudah selesai. Tugas Anda bukan sekadar memeriksa apakah fokus monitoring ditemukan, tetapi menyimpulkan apa arti seluruh evidence pascapublikasi bagi langkah komunikasi berikutnya.
+async function analyzeMonitoringAgainstPublication(pool:Pool,input:any){
+  const credentials=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
+  if(!credentials.rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
+  const key=decryptIntegrationCredential(credentials.rows[0].credential_ciphertext);
+  const models=await pool.query("SELECT m.code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 1");
+  if(!models.rows[0])throw new Error('GEMINI_DATABASE_MODEL_MISSING');
+  const model=models.rows[0].code;
+  const promptRows=await pool.query("SELECT prompt_text FROM ai_humas_task_prompts WHERE task_code='monitoring_analysis' LIMIT 1").catch(()=>({rows:[]}));
+  const prompt=(promptRows.rows[0]?.prompt_text||`Anda adalah analis komunikasi strategis pemerintah daerah pada AKHIR satu siklus respons isu. Monitoring sudah selesai. Tugas Anda bukan sekadar memeriksa apakah fokus monitoring ditemukan, tetapi menyimpulkan apa arti seluruh evidence pascapublikasi bagi langkah komunikasi berikutnya.
 
 Gunakan secara terpadu: konteks issue dan routing OPD/wilayah, Analisis Gap awal, respons final OPD bila ada, Analisa Publikasi beserta monitoringFocus, dan evidence 4 media setelah publikasi. Semua kesimpulan harus dapat ditelusuri ke data yang diberikan. Jangan mengarang fakta, OPD, kecamatan, tindakan lapangan, reaksi audiens, engagement, atau kejadian masa depan.
 
@@ -140,10 +148,7 @@ HASILKAN JSON:
 "opdAnticipation":[{"opd":"nama dari context","anticipation":"...","reason":"..."}],
 "districtAnticipation":[{"district":"nama dari context","anticipation":"...","reason":"..."}],
 "nextCommunication":{"action":"NO_FURTHER_ACTION|KEEP_WATCHING|REINFORCE_MESSAGE|ADDITIONAL_CLARIFICATION|FOLLOWUP_PUBLICATION|NEXT_CYCLE_REVIEW","priority":"HIGH|MEDIUM|LOW","recommendation":"...","reason":"..."},
-"watchNext":["..."],"remainingGap":["..."],"newSignals":["..."]}.
-
-DATA:
-${JSON.stringify(input).slice(0,50000)}`;
+"watchNext":["..."],"remainingGap":["..."],"newSignals":["..."]}.`)+'\\n\\nDATA:\\n'+JSON.stringify(input).slice(0,50000);
   const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}})});
   if(!r.ok)throw new Error(`Gemini HTTP ${r.status}`);
   const payload=await r.json() as any,raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');
@@ -293,7 +298,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
       // One immutable publication analysis per workflow/cycle.
       // Once a snapshot exists, always return it and never call the analysis engine again.
       if(existing)return{data:{source:existing.source,gapAnalyzedAt:existing.gap_analyzed_at,analysis:existing.result,analyzedAt:existing.analyzed_at,saved:true}};
-      const analysis=await analyzePublicationPackage({issueTitle:String(w.title||''),approvedStrategy,publicationEvidence:materials},mediaParts);
+      const analysis=await analyzePublicationPackage(pool,{issueTitle:String(w.title||''),approvedStrategy,publicationEvidence:materials},mediaParts);
       const source={type:'strategy-vs-publication',strategyId:Number(approvedStrategy.id),strategyVersion:Number(approvedStrategy.version),evidenceCount:evidence.length,saved_at:w.publication_evidence_saved_at};
       const saved=(await pool.query(`INSERT INTO issue_publication_analysis_snapshots(workflow_id,issue_id,result,source,gap_analyzed_at,analyzed_by) VALUES($6,$1,$2::jsonb,$3::jsonb,$4,$5) ON CONFLICT(workflow_id) DO UPDATE SET result=EXCLUDED.result,source=EXCLUDED.source,gap_analyzed_at=EXCLUDED.gap_analyzed_at,analyzed_by=EXCLUDED.analyzed_by,analyzed_at=NOW() WHERE issue_publication_analysis_snapshots.workflow_id=EXCLUDED.workflow_id AND $7::boolean RETURNING analyzed_at`,[p.data.id,JSON.stringify(analysis),JSON.stringify(source),approvedStrategy?.approved_at||null,ctx.id,w.id,false])).rows[0];
       if(!saved){const concurrent=(await pool.query('SELECT result,source,gap_analyzed_at,analyzed_at FROM issue_publication_analysis_snapshots WHERE workflow_id=$1',[w.id])).rows[0];return{data:{source:concurrent.source,gapAnalyzedAt:concurrent.gap_analyzed_at,analysis:concurrent.result,analyzedAt:concurrent.analyzed_at,saved:true}}}
@@ -382,7 +387,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
         }
         const gapForPublication=(await pool.query(`SELECT result FROM issue_communication_gap_snapshots WHERE workflow_id=$1 LIMIT 1`,[w.id])).rows[0]||null;
         const responseForPublication=(await pool.query(`SELECT s.response_text,s.facts_data,s.key_message,s.supporting_links,o.name opd_name FROM issue_response_submissions s LEFT JOIN opd o ON o.id=s.opd_id WHERE s.workflow_id=$1 AND s.status='APPROVED' ORDER BY s.version DESC,s.updated_at DESC LIMIT 1`,[w.id])).rows[0]||null;
-        publicationAnalysis=await analyzePublicationPackage({issueTitle:String(w.title||''),gap:gapForPublication?.result||null,finalResponse:responseForPublication,publicationEvidence:materials},mediaParts);
+        publicationAnalysis=await analyzePublicationPackage(pool,{issueTitle:String(w.title||''),gap:gapForPublication?.result||null,finalResponse:responseForPublication,publicationEvidence:materials},mediaParts);
         const evidenceForAi=[
           ...online.map((x:any)=>({ref:`online:${x.id}`,source:'ONLINE',title:x.title||'',text:String(x.summary||x.content||'').slice(0,3500)})),
           ...print.map((x:any)=>({ref:`print:${x.id}`,source:'PRINT',title:x.title||'',text:String(x.content||'').slice(0,3500)})),
@@ -390,7 +395,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
           ...owned.map((x:any)=>({ref:`owned:${x.id}`,source:'OWNED',title:x.title||'',text:String(x.content||'').slice(0,3500)}))
         ];
         if(Array.isArray(publicationAnalysis?.monitoringFocus)&&publicationAnalysis.monitoringFocus.length){
-          const issueContext=(gapForPublication?.result as any)?.data?.issueContext||(gapForPublication?.result as any)?.issueContext||{};focusAssessment=await analyzeMonitoringAgainstPublication({issue:{title:String(w.title||''),riskLevel:w.risk_level||null,momentum:w.momentum||null},routing:{leadOpd:w.lead_opd_name||responseForPublication?.opd_name||issueContext?.opds?.primary?.name||null,supportingOpds:issueContext?.opds?.supporting||[],geographicScope:issueContext?.geographicScope||null,districts:issueContext?.districts||issueContext?.geography?.districts||[]},gap:gapForPublication?.result||null,finalResponse:responseForPublication||null,publicationAnalysis,monitoringFocus:publicationAnalysis.monitoringFocus,evidence:evidenceForAi,evidenceCounts:{online:online.length,print:print.length,social:externalSocial.length,owned:owned.length,total:evidenceForAi.length}});
+          const issueContext=(gapForPublication?.result as any)?.data?.issueContext||(gapForPublication?.result as any)?.issueContext||{};focusAssessment=await analyzeMonitoringAgainstPublication(pool,{issue:{title:String(w.title||''),riskLevel:w.risk_level||null,momentum:w.momentum||null},routing:{leadOpd:w.lead_opd_name||responseForPublication?.opd_name||issueContext?.opds?.primary?.name||null,supportingOpds:issueContext?.opds?.supporting||[],geographicScope:issueContext?.geographicScope||null,districts:issueContext?.districts||issueContext?.geography?.districts||[]},gap:gapForPublication?.result||null,finalResponse:responseForPublication||null,publicationAnalysis,monitoringFocus:publicationAnalysis.monitoringFocus,evidence:evidenceForAi,evidenceCounts:{online:online.length,print:print.length,social:externalSocial.length,owned:owned.length,total:evidenceForAi.length}});
         }
       }
     }catch(error:any){request.log.warn({issueId,reason:String(error?.message||error).slice(0,180)},'publication-package monitoring analysis unavailable');}
@@ -440,7 +445,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
         }
         const gapForPublication=(await pool.query(`SELECT result FROM issue_communication_gap_snapshots WHERE workflow_id=$1 LIMIT 1`,[w.id])).rows[0]||null;
         const responseForPublication=(await pool.query(`SELECT s.response_text,s.facts_data,s.key_message,s.supporting_links,o.name opd_name FROM issue_response_submissions s LEFT JOIN opd o ON o.id=s.opd_id WHERE s.workflow_id=$1 AND s.status='APPROVED' ORDER BY s.version DESC,s.updated_at DESC LIMIT 1`,[w.id])).rows[0]||null;
-        publicationAnalysis=await analyzePublicationPackage({issueTitle:String(w.title||''),gap:gapForPublication?.result||null,finalResponse:responseForPublication,publicationEvidence:materials},mediaParts);
+        publicationAnalysis=await analyzePublicationPackage(pool,{issueTitle:String(w.title||''),gap:gapForPublication?.result||null,finalResponse:responseForPublication,publicationEvidence:materials},mediaParts);
         const evidenceForAi=[
           ...online.map((x:any)=>({ref:`online:${x.id}`,source:'ONLINE',title:x.title||'',text:String(x.summary||x.content||'').slice(0,3500)})),
           ...print.map((x:any)=>({ref:`print:${x.id}`,source:'PRINT',title:x.title||'',text:String(x.content||'').slice(0,3500)})),
@@ -448,7 +453,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
           ...owned.map((x:any)=>({ref:`owned:${x.id}`,source:'OWNED',title:x.title||'',text:String(x.content||'').slice(0,3500)}))
         ];
         if(Array.isArray(publicationAnalysis?.monitoringFocus)&&publicationAnalysis.monitoringFocus.length){
-          const issueContext=(gapForPublication?.result as any)?.data?.issueContext||(gapForPublication?.result as any)?.issueContext||{};focusAssessment=await analyzeMonitoringAgainstPublication({issue:{title:String(w.title||''),riskLevel:w.risk_level||null,momentum:w.momentum||null},routing:{leadOpd:w.lead_opd_name||responseForPublication?.opd_name||issueContext?.opds?.primary?.name||null,supportingOpds:issueContext?.opds?.supporting||[],geographicScope:issueContext?.geographicScope||null,districts:issueContext?.districts||issueContext?.geography?.districts||[]},gap:gapForPublication?.result||null,finalResponse:responseForPublication||null,publicationAnalysis,monitoringFocus:publicationAnalysis.monitoringFocus,evidence:evidenceForAi,evidenceCounts:{online:online.length,print:print.length,social:externalSocial.length,owned:owned.length,total:evidenceForAi.length}});
+          const issueContext=(gapForPublication?.result as any)?.data?.issueContext||(gapForPublication?.result as any)?.issueContext||{};focusAssessment=await analyzeMonitoringAgainstPublication(pool,{issue:{title:String(w.title||''),riskLevel:w.risk_level||null,momentum:w.momentum||null},routing:{leadOpd:w.lead_opd_name||responseForPublication?.opd_name||issueContext?.opds?.primary?.name||null,supportingOpds:issueContext?.opds?.supporting||[],geographicScope:issueContext?.geographicScope||null,districts:issueContext?.districts||issueContext?.geography?.districts||[]},gap:gapForPublication?.result||null,finalResponse:responseForPublication||null,publicationAnalysis,monitoringFocus:publicationAnalysis.monitoringFocus,evidence:evidenceForAi,evidenceCounts:{online:online.length,print:print.length,social:externalSocial.length,owned:owned.length,total:evidenceForAi.length}});
         }
       }
     }catch(error:any){request.log.warn({issueId,reason:String(error?.message||error).slice(0,180)},'publication-package monitoring analysis unavailable');}
