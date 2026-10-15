@@ -1,3 +1,5 @@
+import type { Pool } from 'pg';
+import { prepareGeminiRequest } from './ai-gemini-config.js';
 import { extractIssueAngles, type IssueAngleEvidence } from './issue-angle-extractor.js';
 
 export type DynamicClaim={
@@ -33,11 +35,11 @@ export type IssueAnalysisContext={
  districts?:Array<{id?:number;code?:string|null;name:string}>;
 };
 
-export async function extractDynamicIssueClaims(evidence:IssueAngleEvidence[],context:IssueAnalysisContext={}){
+export async function extractDynamicIssueClaims(evidence:IssueAngleEvidence[],context:IssueAnalysisContext={},pool?:Pool){
 
  const fallback=(reason='UNKNOWN')=>{const r=extractIssueAngles(evidence);return{...r,mode:'deterministic-fallback' as const,fallbackReason:reason,claims:r.angles.map(a=>({...a,claim:a.label,confidence:0,evidenceIds:a.evidence.map(x=>`${x.source}:${x.id}`)}))}};
- const key=process.env.GEMINI_API_KEY;if(!evidence.length)return fallback('NO_VALID_EVIDENCE');if(!key)return fallback('GEMINI_API_KEY_MISSING');
- const model=process.env.GEMINI_MODEL||'gemini-3.5-flash-lite';
+ if(!evidence.length)return fallback('NO_VALID_EVIDENCE');if(!pool)return fallback('GEMINI_DATABASE_POOL_MISSING');
+ let key:string,model:string;try{({key,model}=await prepareGeminiRequest(pool));}catch{return fallback('GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}
  const source=evidence.slice(0,40).map(e=>({evidenceId:ref(e),source:e.source,title:clip(e.title,500),text:clip([e.summary,e.content,e.body_text].filter(Boolean).join(' '))}));
  try{
   const prompt=`Anda adalah Dynamic Communication Angle Extractor untuk analisis komunikasi pemerintah. Analisis evidence media dari SUDUT KOMUNIKASI, bukan hanya mencari masalah. Setiap evidence valid dapat membawa informasi, capaian, concern, risiko, dampak, tuntutan, ketidakpastian, atau sudut komunikasi lain yang relevan.
