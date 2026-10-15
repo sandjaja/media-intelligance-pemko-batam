@@ -91,7 +91,10 @@ export async function executeConfiguredAi(pool: Pool, input: {
   }
   if (!apiKey) throw new Error('AI_GATEWAY_CREDENTIAL_UNAVAILABLE');
   const price = await getAiModelPrice(pool, Number(route.model_id));
-  const estimatedUsd = calculateAiTokenCost(Math.max(2048, input.prompt.length * 2), AI_GATEWAY_MAX_OUTPUT_TOKENS, price);
+  // Estimate the upper bound using UTF-8 bytes (not JavaScript UTF-16 code units).
+  // This avoids under-reserving for Indonesian text mixed with emoji or other multibyte characters.
+  const estimatedInputTokens = Math.max(2048, Buffer.byteLength(input.prompt, 'utf8') * 2);
+  const estimatedUsd = calculateAiTokenCost(estimatedInputTokens, AI_GATEWAY_MAX_OUTPUT_TOKENS, price);
   if (estimatedUsd <= 0) throw new Error('AI_GATEWAY_ZERO_COST_REQUIRES_FREE_TIER_POLICY');
   return executeBudgetedAi(pool, {
     userId: input.userId,
