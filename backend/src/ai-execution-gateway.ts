@@ -60,7 +60,7 @@ export async function executeConfiguredAi(pool: Pool, input: {
   modelCode: string;
   prompt: string;
 }): Promise<AiGatewayResult<unknown>> {
-  if (!input.taskCode || !input.modelCode || !input.prompt || input.prompt.length > 12000) {
+  if (!Number.isSafeInteger(input.userId) || input.userId <= 0 || !input.taskCode || !input.modelCode || !input.prompt || input.prompt.length > 12000) {
     throw new Error('AI_GATEWAY_INVALID_REQUEST');
   }
   const { rows } = await pool.query(
