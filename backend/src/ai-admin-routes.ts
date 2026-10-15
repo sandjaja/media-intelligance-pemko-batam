@@ -155,5 +155,13 @@ export async function registerAiAdminRoutes(app:FastifyInstance,pool:Pool,jwtSec
     return {data:result.rows};
   });
 
+  app.get('/api/admin/ai/usage/summary',{preHandler:guard},async(request,reply)=>{
+    const parsed=z.object({days:z.coerce.number().int().min(1).max(365).default(30)}).safeParse(request.query);
+    if(!parsed.success)return reply.code(400).send({error:'INVALID_USAGE_PERIOD'});
+    const sql='SELECT l.user_id,u.email AS user_email,p.code AS provider_code,m.code AS model_code,t.code AS task_code,COUNT(*)::int AS requests,COALESCE(SUM(l.input_tokens),0)::bigint AS input_tokens,COALESCE(SUM(l.output_tokens),0)::bigint AS output_tokens,(COALESCE(SUM(l.input_tokens),0)+COALESCE(SUM(l.output_tokens),0))::bigint AS total_tokens FROM ai_usage_logs l LEFT JOIN users u ON u.id=l.user_id LEFT JOIN ai_providers p ON p.id=l.provider_id LEFT JOIN ai_models m ON m.id=l.model_id LEFT JOIN ai_tasks t ON t.id=l.task_id WHERE l.created_at>=NOW()-($1::int * INTERVAL \'1 day\') GROUP BY l.user_id,u.email,p.code,m.code,t.code ORDER BY total_tokens DESC';
+    const result=await pool.query(sql,[parsed.data.days]);
+    return {data:result.rows,days:parsed.data.days};
+  });
+
   app.get('/api/admin/ai/usage',{preHandler:guard},async(request)=>{const q=z.object({limit:z.coerce.number().int().min(1).max(200).default(50)}).safeParse(request.query);const limit=q.success?q.data.limit:50;return{data:(await pool.query('SELECT l.id,l.user_id,u.email AS user_email,l.status,l.latency_ms,l.input_tokens,l.output_tokens,(COALESCE(l.input_tokens,0)+COALESCE(l.output_tokens,0)) AS total_tokens,l.error_code,l.created_at,t.code task_code,p.code provider_code,m.code model_code FROM ai_usage_logs l LEFT JOIN users u ON u.id=l.user_id LEFT JOIN ai_tasks t ON t.id=l.task_id LEFT JOIN ai_providers p ON p.id=l.provider_id LEFT JOIN ai_models m ON m.id=l.model_id ORDER BY l.created_at DESC,l.id DESC LIMIT $1',[limit])).rows};});
 }
