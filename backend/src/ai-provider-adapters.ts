@@ -55,7 +55,9 @@ export async function invokeAiProvider(input: {
   let inputTokens: unknown;
   let outputTokens: unknown;
   if (input.provider === 'gemini') {
-    if (payload.candidates?.[0]?.finishReason === 'MAX_TOKENS') throw new Error('AI_PROVIDER_OUTPUT_TRUNCATED');
+    const finishReason = payload.candidates?.[0]?.finishReason;
+    if (finishReason === 'MAX_TOKENS') throw new Error('AI_PROVIDER_OUTPUT_TRUNCATED');
+    if (finishReason && finishReason !== 'STOP') throw new Error('AI_PROVIDER_OUTPUT_BLOCKED');
     raw = payload.candidates?.[0]?.content?.parts?.map((part: any) => part.text ?? '').join('');
     inputTokens = payload.usageMetadata?.promptTokenCount;
     // Gemini may bill thinking tokens in addition to visible candidate tokens.
@@ -66,6 +68,8 @@ export async function invokeAiProvider(input: {
     outputTokens = visibleTokens + thinkingTokens;
   } else if (input.provider === 'openai') {
     if (payload.status === 'incomplete') throw new Error('AI_PROVIDER_OUTPUT_TRUNCATED');
+    if (payload.status && payload.status !== 'completed') throw new Error('AI_PROVIDER_OUTPUT_BLOCKED');
+    if (payload.output?.some((item: any) => (item.content ?? []).some((part: any) => part.type === 'refusal'))) throw new Error('AI_PROVIDER_OUTPUT_BLOCKED');
     raw = payload.output?.flatMap((item: any) => item.content ?? [])
       .filter((part: any) => part.type === 'output_text')
       .map((part: any) => part.text ?? '').join('');
@@ -73,6 +77,7 @@ export async function invokeAiProvider(input: {
     outputTokens = payload.usage?.output_tokens;
   } else {
     if (payload.stop_reason === 'max_tokens') throw new Error('AI_PROVIDER_OUTPUT_TRUNCATED');
+    if (payload.stop_reason === 'refusal') throw new Error('AI_PROVIDER_OUTPUT_BLOCKED');
     raw = payload.content?.filter((part: any) => part.type === 'text')
       .map((part: any) => part.text ?? '').join('');
     inputTokens = payload.usage?.input_tokens;
