@@ -145,6 +145,7 @@ Output JSON:
     });
     return result.data;
   }
+  if(prompt.length>12000)throw new Error('GEMINI_ANALYSIS_PROMPT_TOO_LARGE');
   const credentials=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
   if(!credentials.rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
   const key=decryptIntegrationCredential(credentials.rows[0].credential_ciphertext);
@@ -225,6 +226,7 @@ HASILKAN JSON:
     });
     return result.data;
   }
+  if(prompt.length>12000)throw new Error('GEMINI_ANALYSIS_PROMPT_TOO_LARGE');
   const credentials=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
   if(!credentials.rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
   const key=decryptIntegrationCredential(credentials.rows[0].credential_ciphertext);
