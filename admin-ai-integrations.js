@@ -46,5 +46,35 @@ function setupReconciliation(){
  section.querySelector('#aiReconciliationToggle').addEventListener('click',()=>{const content=section.querySelector('#aiReconciliationContent');const show=content.classList.contains('hidden');content.classList.toggle('hidden',!show);section.querySelector('#aiReconciliationToggle').setAttribute('aria-expanded',String(show));if(show)loadReconciliation();});
  section.querySelector('#aiReconciliationRefresh').addEventListener('click',loadReconciliation);
 }
-document.addEventListener('DOMContentLoaded',()=>{setupReconciliation();load();});
+async function loadGeminiQuotas(){
+ const root=document.getElementById('aiGeminiQuotaRows');if(!root)return;
+ root.textContent='Memuat pengaturan kuota...';
+ try{
+  const response=await fetch('/api/admin/ai/gemini-quotas',{credentials:'include'});
+  const data=await response.json();
+  if(!response.ok)throw Error(data.error||'Pengaturan kuota belum tersedia');
+  root.innerHTML=(data.data||[]).map(m=>'<div class="rounded-lg border border-slate-700 p-3 space-y-2" data-gemini-quota="'+Number(m.model_id)+'"><div class="text-sm font-bold">'+esc(m.model_name||m.model_code)+'</div><div class="text-xs text-slate-400">Reservasi hari ini (UTC): '+Number(m.reserved_today||0)+'</div><label class="text-xs">Batas permintaan per hari <input data-quota-limit type="number" min="1" max="100000" value="'+Number(m.max_requests||100)+'" class="w-full rounded bg-slate-900 border border-slate-700 p-2"></label><label class="flex items-center gap-2 text-xs"><input data-quota-enabled type="checkbox" '+(m.enabled?'checked':'')+'>Aktifkan kuota</label><button type="button" data-quota-save class="rounded bg-cyan-700 px-3 py-2 text-xs font-bold">Simpan kuota</button></div>').join('')||'<p class="text-xs">Belum ada model Gemini.</p>';
+ }catch(err){root.textContent='Kuota belum tersedia: '+err.message;}
+}
+function setupGeminiQuotas(){
+ const panel=document.getElementById('aiPanel');if(!panel||document.getElementById('aiGeminiQuotaSection'))return;
+ const section=document.createElement('section');section.id='aiGeminiQuotaSection';section.className='mt-5 rounded-xl border border-slate-700 p-4 space-y-3';
+ section.innerHTML='<h3 class="font-bold">Kuota Harian Gemini</h3><p class="text-xs text-slate-400">Batasi permintaan Gemini per model. Saat kuota nonaktif, permintaan Gemini akan ditolak. Penghitungan menggunakan UTC.</p><button type="button" id="aiGeminiQuotaRefresh" class="rounded border border-slate-600 px-3 py-2 text-xs">Muat ulang kuota</button><div id="aiGeminiQuotaRows" class="grid gap-3"></div>';
+ panel.appendChild(section);
+ section.querySelector('#aiGeminiQuotaRefresh').addEventListener('click',loadGeminiQuotas);
+ section.addEventListener('click',async e=>{
+  const btn=e.target.closest?.('[data-quota-save]');if(!btn)return;
+  const row=btn.closest('[data-gemini-quota]'),modelId=Number(row.dataset.geminiQuota);
+  const limit=Number(row.querySelector('[data-quota-limit]').value),enabled=row.querySelector('[data-quota-enabled]').checked;
+  if(!Number.isInteger(limit)||limit<1||limit>100000){alert('Batas kuota harus 1–100000.');return;}
+  btn.disabled=true;
+  try{
+   const r=await fetch('/api/admin/ai/gemini-quotas/'+modelId,{method:'PUT',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({max_requests:limit,enabled})});
+   const data=await r.json();if(!r.ok)throw Error(data.error||'Gagal menyimpan kuota');
+   await loadGeminiQuotas();
+  }catch(err){alert('Gagal menyimpan: '+err.message);}finally{btn.disabled=false;}
+ });
+ loadGeminiQuotas();
+}
+document.addEventListener('DOMContentLoaded',()=>{setupReconciliation();setupGeminiQuotas();load();});
 })();
