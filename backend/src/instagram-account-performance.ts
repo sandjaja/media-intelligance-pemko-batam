@@ -46,6 +46,7 @@ export function registerInstagramPerformanceRoutes(app: FastifyInstance, pool: P
     try {
       const result = await probe(handle);
       if (result.status !== 'public_metrics_available') {
+        request.log.warn({accountId:account.id,probeStatus:result.status,httpStatus:result.httpStatus,htmlBytes:result.htmlBytes,profileSignals:result.profileSignals,metricSources:result.metricSources,diagnosticSignals:result.diagnostics?.signals},'Instagram public metrics unavailable');
         return reply.code(422).send({error:'Statistik publik Instagram belum tersedia. Coba lagi nanti; pengukuran terakhir tetap tersimpan.'});
       }
       const m = result.publicMetrics;
