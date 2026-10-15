@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyRequest } from 'fastify';
 import { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
+import { listPendingAiReservations } from './ai-budget-reconciliation.js';
 import { decryptIntegrationCredential, encryptIntegrationCredential, integrationCredentialHint } from './integration-credentials.js';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 
@@ -21,6 +22,18 @@ export async function registerAiAdminRoutes(app:FastifyInstance,pool:Pool,jwtSec
     }catch{if(reply.sent)return;return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'});}
   };
   const audit=async(request:FastifyRequest,action:string,id:any)=>{try{await pool.query('INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,$2,$3::jsonb)',[(request.aiAdminAuthz as any)?.userId||null,action,JSON.stringify({id})]);}catch{}};
+
+  app.get('/api/admin/ai/budget/pending-reservations',{preHandler:guard},async(request,reply)=>{
+    const parsed=z.object({
+      minAgeMinutes:z.coerce.number().int().min(0).max(43200).default(30),
+      limit:z.coerce.number().int().min(1).max(500).default(100),
+    }).safeParse(request.query);
+    if(!parsed.success)return reply.code(400).send({error:'AI_RECONCILIATION_INVALID_FILTER'});
+    try{
+      const data=await listPendingAiReservations(pool,parsed.data.minAgeMinutes,parsed.data.limit);
+      return {data,read_only:true,notice:'Pending reservations require verified provider billing before settlement or release.'};
+    }catch{return reply.code(503).send({error:'AI_RECONCILIATION_UNAVAILABLE'});}
+  });
 
   app.get('/api/admin/ai/credentials/status',{preHandler:guard},async()=>({data:(await pool.query('SELECT p.code,c.credential_hint,c.updated_at FROM ai_providers p LEFT JOIN ai_provider_credentials c ON c.provider_id=p.id ORDER BY p.code')).rows}));
   app.put('/api/admin/ai/credentials/:code',{preHandler:guard},async(request,reply)=>{
