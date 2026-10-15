@@ -59,13 +59,9 @@ async function resolveHumasAiSelection(pool:Pool,taskCode:'publication_analysis'
   if(row && (!row.provider_enabled||!row.model_enabled))throw new Error('AI_HUMAS_SELECTED_MODEL_DISABLED');
   return row as {provider_code:string;model_code:string}|undefined;
 }
-async function analyzePublicationPackage(pool:Pool,input:any,mediaParts:any[]=[]){
+async function analyzePublicationPackage(pool:Pool,input:any,mediaParts:any[]=[],userId:string=''){
   const selection=await resolveHumasAiSelection(pool,'publication_analysis');
-  if(selection?.provider_code!=='gemini' && selection)throw new Error('AI_PUBLICATION_MULTIMODAL_PAID_GATEWAY_NOT_READY');
   const selectedModel=selection?.model_code;
-  const credentials=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
-  if(!credentials.rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
-  const key=decryptIntegrationCredential(credentials.rows[0].credential_ciphertext);
   const models=selectedModel ? {rows:[{code:selectedModel}]} :
     await pool.query("SELECT m.code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 1");
   if(!models.rows[0])throw new Error('GEMINI_DATABASE_MODEL_MISSING');
@@ -110,6 +106,21 @@ HASILKAN:
 
 Output JSON:
 {"strategyEssence":{"summary":"...","essentialIntent":["..."],"priorityAudience":["..."],"coreMessage":["..."],"intendedApproach":"..."},"executionAssessment":{"status":"ALIGNED|PARTIAL|MISALIGNED|INSUFFICIENT_EVIDENCE","assessment":"..."},"achieved":["..."],"gaps":["..."],"communicationStyle":{"observed":"...","fitAssessment":"..."},"strengths":["..."],"audienceAndMessage":{"assessment":"...","potentialMisunderstanding":["..."]},"improvements":[{"priority":"HIGH|MEDIUM|LOW","recommendation":"...","reason":"..."}],"coordinationFollowUp":{"status":"NONE|NEEDS_CONFIRMATION|NEEDS_COORDINATION|FOLLOWUP_PUBLICATION","missingInformation":["..."],"parties":["..."],"recommendation":"...","reason":"..."},"monitoringFocus":[{"type":"MESSAGE_PICKUP|CLAIM_PERSISTENCE|NEW_CLAIM|SENTIMENT_RISK|OFFICIAL_AMPLIFICATION","target":"...","rationale":"...","expectedSignal":"...","sourceTypes":["ONLINE","PRINT","SOCIAL","OWNED"]}]}`)+'\n\nDATA:\n'+JSON.stringify(input).slice(0,50000);
+  if(selection && selection.provider_code!=='gemini'){
+    // The text gateway cannot read attached image/PDF parts. Never drop evidence.
+    if(mediaParts.length)throw new Error('AI_PUBLICATION_MULTIMODAL_PAID_GATEWAY_NOT_READY');
+    if(prompt.length>12000)throw new Error('AI_PUBLICATION_PROMPT_TOO_LARGE');
+    const numericUserId=Number(userId);
+    if(!Number.isSafeInteger(numericUserId)||numericUserId<=0)throw new Error('AI_GATEWAY_INVALID_CONTEXT');
+    const result=await executeConfiguredAi(pool,{
+      userId:numericUserId,taskCode:'publication_analysis',
+      provider:selection.provider_code as AiProvider,modelCode:model,prompt
+    });
+    return result.data;
+  }
+  const credentials=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
+  if(!credentials.rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
+  const key=decryptIntegrationCredential(credentials.rows[0].credential_ciphertext);
   const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt},...mediaParts]}],generationConfig:{responseMimeType:'application/json'}})});
   if(!r.ok)throw new Error(`Gemini HTTP ${r.status}`);
   const payload=await r.json() as any,raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');
@@ -330,7 +341,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
       // One immutable publication analysis per workflow/cycle.
       // Once a snapshot exists, always return it and never call the analysis engine again.
       if(existing)return{data:{source:existing.source,gapAnalyzedAt:existing.gap_analyzed_at,analysis:existing.result,analyzedAt:existing.analyzed_at,saved:true}};
-      const analysis=await analyzePublicationPackage(pool,{issueTitle:String(w.title||''),approvedStrategy,publicationEvidence:materials},mediaParts);
+      const analysis=await analyzePublicationPackage(pool,{issueTitle:String(w.title||''),approvedStrategy,publicationEvidence:materials},mediaParts,ctx.id);
       const source={type:'strategy-vs-publication',strategyId:Number(approvedStrategy.id),strategyVersion:Number(approvedStrategy.version),evidenceCount:evidence.length,saved_at:w.publication_evidence_saved_at};
       const saved=(await pool.query(`INSERT INTO issue_publication_analysis_snapshots(workflow_id,issue_id,result,source,gap_analyzed_at,analyzed_by) VALUES($6,$1,$2::jsonb,$3::jsonb,$4,$5) ON CONFLICT(workflow_id) DO UPDATE SET result=EXCLUDED.result,source=EXCLUDED.source,gap_analyzed_at=EXCLUDED.gap_analyzed_at,analyzed_by=EXCLUDED.analyzed_by,analyzed_at=NOW() WHERE issue_publication_analysis_snapshots.workflow_id=EXCLUDED.workflow_id AND $7::boolean RETURNING analyzed_at`,[p.data.id,JSON.stringify(analysis),JSON.stringify(source),approvedStrategy?.approved_at||null,ctx.id,w.id,false])).rows[0];
       if(!saved){const concurrent=(await pool.query('SELECT result,source,gap_analyzed_at,analyzed_at FROM issue_publication_analysis_snapshots WHERE workflow_id=$1',[w.id])).rows[0];return{data:{source:concurrent.source,gapAnalyzedAt:concurrent.gap_analyzed_at,analysis:concurrent.result,analyzedAt:concurrent.analyzed_at,saved:true}}}
@@ -419,7 +430,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
         }
         const gapForPublication=(await pool.query(`SELECT result FROM issue_communication_gap_snapshots WHERE workflow_id=$1 LIMIT 1`,[w.id])).rows[0]||null;
         const responseForPublication=(await pool.query(`SELECT s.response_text,s.facts_data,s.key_message,s.supporting_links,o.name opd_name FROM issue_response_submissions s LEFT JOIN opd o ON o.id=s.opd_id WHERE s.workflow_id=$1 AND s.status='APPROVED' ORDER BY s.version DESC,s.updated_at DESC LIMIT 1`,[w.id])).rows[0]||null;
-        publicationAnalysis=await analyzePublicationPackage(pool,{issueTitle:String(w.title||''),gap:gapForPublication?.result||null,finalResponse:responseForPublication,publicationEvidence:materials},mediaParts);
+        publicationAnalysis=await analyzePublicationPackage(pool,{issueTitle:String(w.title||''),gap:gapForPublication?.result||null,finalResponse:responseForPublication,publicationEvidence:materials},mediaParts,ctx.id);
         const evidenceForAi=[
           ...online.map((x:any)=>({ref:`online:${x.id}`,source:'ONLINE',title:x.title||'',text:String(x.summary||x.content||'').slice(0,3500)})),
           ...print.map((x:any)=>({ref:`print:${x.id}`,source:'PRINT',title:x.title||'',text:String(x.content||'').slice(0,3500)})),
@@ -477,7 +488,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
         }
         const gapForPublication=(await pool.query(`SELECT result FROM issue_communication_gap_snapshots WHERE workflow_id=$1 LIMIT 1`,[w.id])).rows[0]||null;
         const responseForPublication=(await pool.query(`SELECT s.response_text,s.facts_data,s.key_message,s.supporting_links,o.name opd_name FROM issue_response_submissions s LEFT JOIN opd o ON o.id=s.opd_id WHERE s.workflow_id=$1 AND s.status='APPROVED' ORDER BY s.version DESC,s.updated_at DESC LIMIT 1`,[w.id])).rows[0]||null;
-        publicationAnalysis=await analyzePublicationPackage(pool,{issueTitle:String(w.title||''),gap:gapForPublication?.result||null,finalResponse:responseForPublication,publicationEvidence:materials},mediaParts);
+        publicationAnalysis=await analyzePublicationPackage(pool,{issueTitle:String(w.title||''),gap:gapForPublication?.result||null,finalResponse:responseForPublication,publicationEvidence:materials},mediaParts,ctx.id);
         const evidenceForAi=[
           ...online.map((x:any)=>({ref:`online:${x.id}`,source:'ONLINE',title:x.title||'',text:String(x.summary||x.content||'').slice(0,3500)})),
           ...print.map((x:any)=>({ref:`print:${x.id}`,source:'PRINT',title:x.title||'',text:String(x.content||'').slice(0,3500)})),
