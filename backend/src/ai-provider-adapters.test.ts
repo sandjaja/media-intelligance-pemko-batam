@@ -98,6 +98,23 @@ test('Gemini truncated JSON is rejected even if parseable', async () => {
   await assert.rejects(invokeAiProvider({ provider: 'gemini', model: 'test-model', apiKey: 'mock', prompt: 'hello' }), /AI_PROVIDER_OUTPUT_TRUNCATED/);
 });
 
+test('OpenAI failed response is rejected even with JSON content', async () => {
+  mockResponse({
+    status: 'failed',
+    output: [{ content: [{ type: 'output_text', text: '{"ok":true}' }] }],
+    usage: { input_tokens: 12, output_tokens: 7 },
+  });
+  await assert.rejects(invokeAiProvider({ provider: 'openai', model: 'test-model', apiKey: 'mock', prompt: 'hello' }), /AI_PROVIDER_OUTPUT_BLOCKED/);
+});
+
+test('Gemini nonstandard finish reason is rejected even with JSON content', async () => {
+  mockResponse({
+    candidates: [{ finishReason: 'RECITATION', content: { parts: [{ text: '{"ok":true}' }] } }],
+    usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 7 },
+  });
+  await assert.rejects(invokeAiProvider({ provider: 'gemini', model: 'test-model', apiKey: 'mock', prompt: 'hello' }), /AI_PROVIDER_OUTPUT_BLOCKED/);
+});
+
 test('OpenAI incomplete response is rejected even if parseable', async () => {
   mockResponse({
     status: 'incomplete',
