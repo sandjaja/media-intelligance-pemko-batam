@@ -179,6 +179,54 @@ export async function registerAiAdminRoutes(app:FastifyInstance,pool:Pool,jwtSec
   });
   app.delete('/api/admin/ai/routes/:id',{preHandler:guard},async(request,reply)=>{const id=z.coerce.number().int().positive().safeParse((request.params as any).id);if(!id.success)return reply.code(400).send({error:'INVALID_AI_ROUTE'});const r=await pool.query('DELETE FROM ai_task_routes WHERE id=$1 RETURNING id',[id.data]);if(!r.rows[0])return reply.code(404).send({error:'AI_ROUTE_NOT_FOUND'});await audit(request,'AI_ROUTE_DELETED',id.data);return{ok:true};});
 
+  // Manual balance is an absolute provider-balance snapshot, not a top-up delta.
+  // Only super admins may adjust it. Historical reservations remain intact.
+  app.get('/api/admin/ai/manual-balances',{preHandler:guard},async(_request,reply)=>{
+    try{
+      const result=await pool.query(`SELECT p.id AS provider_id,p.code AS provider_code,
+        s.balance_usd,s.committed_baseline_usd,s.reason,s.created_at,
+        COALESCE((SELECT SUM(CASE WHEN r.status='settled' THEN r.settled_usd
+          WHEN r.status='reserved' THEN r.reserved_usd ELSE 0 END)
+          FROM ai_budget_reservations r JOIN ai_provider_budgets b ON b.id=r.budget_id
+          WHERE b.provider_id=p.id),0) AS committed_usd
+        FROM ai_providers p LEFT JOIN LATERAL
+          (SELECT * FROM ai_provider_balance_snapshots WHERE provider_id=p.id ORDER BY id DESC LIMIT 1) s ON TRUE
+        WHERE LOWER(p.code) IN ('openai','anthropic','claude') ORDER BY p.code`);
+      return {data:result.rows.map(row=>{
+        const balance=row.balance_usd==null?null:Number(row.balance_usd);
+        const delta=Math.max(0,Number(row.committed_usd)-Number(row.committed_baseline_usd||0));
+        return {...row,remaining_usd:balance==null?null:Math.max(0,balance-delta),
+          used_since_update_usd:balance==null?null:delta};
+      })};
+    }catch{return reply.code(503).send({error:'AI_MANUAL_BALANCE_UNAVAILABLE'});}
+  });
+  app.post('/api/admin/ai/manual-balances',{preHandler:guard},async(request,reply)=>{
+    const parsed=z.object({
+      providerCode:z.enum(['openai','anthropic','claude']),
+      balanceUsd:z.number().finite().min(0).max(100000000),
+      reason:z.string().trim().min(5).max(500)
+    }).safeParse(request.body);
+    if(!parsed.success)return reply.code(400).send({error:'AI_MANUAL_BALANCE_INVALID'});
+    const client=await pool.connect();
+    try{
+      await client.query('BEGIN');
+      const provider=await client.query('SELECT id FROM ai_providers WHERE code=$1 FOR UPDATE',[parsed.data.providerCode]);
+      if(provider.rows.length!==1){await client.query('ROLLBACK');return reply.code(409).send({error:'AI_PROVIDER_NOT_FOUND'});}
+      const providerId=provider.rows[0].id;
+      const committed=await client.query(`SELECT COALESCE(SUM(CASE WHEN r.status='settled' THEN r.settled_usd
+        WHEN r.status='reserved' THEN r.reserved_usd ELSE 0 END),0) AS usd
+        FROM ai_budget_reservations r JOIN ai_provider_budgets b ON b.id=r.budget_id WHERE b.provider_id=$1`,[providerId]);
+      await client.query(`INSERT INTO ai_provider_balance_snapshots
+        (provider_id,balance_usd,committed_baseline_usd,reason,recorded_by)
+        VALUES($1,$2,$3,$4,$5)`,[providerId,parsed.data.balanceUsd,committed.rows[0].usd,parsed.data.reason,
+        String((request.aiAdminAuthz as any)?.userId||'admin')]);
+      await client.query('COMMIT');
+      await audit(request,'AI_MANUAL_BALANCE_UPDATED',parsed.data.providerCode);
+      return {ok:true};
+    }catch{await client.query('ROLLBACK');return reply.code(503).send({error:'AI_MANUAL_BALANCE_SAVE_FAILED'});}
+    finally{client.release();}
+  });
+
   app.get('/api/admin/ai/budgets',{preHandler:guard},async()=>{
     const result=await pool.query(`SELECT p.id AS provider_id,p.code AS provider_code,p.name AS provider_name,b.id AS budget_id,b.period_start,b.period_end,b.limit_usd,b.enabled,COALESCE((SELECT SUM(r.settled_usd) FROM ai_budget_reservations r WHERE r.budget_id=b.id AND r.status='settled'),0) AS spent_usd,COALESCE((SELECT SUM(r.reserved_usd) FROM ai_budget_reservations r WHERE r.budget_id=b.id AND r.status='reserved'),0) AS pending_usd,COALESCE((SELECT SUM(CASE WHEN r.status='settled' THEN r.settled_usd WHEN r.status='reserved' THEN r.reserved_usd ELSE 0 END) FROM ai_budget_reservations r WHERE r.budget_id=b.id),0) AS committed_usd FROM ai_providers p LEFT JOIN ai_provider_budgets b ON b.provider_id=p.id AND CURRENT_DATE>=b.period_start AND CURRENT_DATE<b.period_end ORDER BY p.code,b.period_start DESC`);
     return {data:result.rows};
