@@ -209,7 +209,7 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
       const payload = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
       if (typeof payload.sub !== 'string') return reply.code(401).send({ error: 'INVALID_ACCESS_TOKEN' });
       const selected = await pool.query(`SELECT m.id FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id
-        WHERE p.code=$1 AND m.code=$2 AND p.enabled=TRUE AND m.enabled=TRUE LIMIT 1`,
+        WHERE p.code=$1 AND m.code=$2 AND m.enabled=TRUE LIMIT 1`,
         [body.providerCode,body.modelCode]);
       if (!selected.rows[0]) return reply.code(409).send({ error: 'AI_MODEL_NOT_ENABLED' });
       const { rows } = await pool.query(`INSERT INTO ai_humas_model_selections(task_code,model_id,updated_by)
@@ -224,11 +224,11 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
     try {
       const { rows } = await pool.query(
         `SELECT p.code AS provider_code, p.name AS provider_name,
-                m.code AS model_code, m.name AS model_name,
+                m.code AS model_code, m.name AS model_name, p.enabled AS provider_enabled,
                 CASE WHEN LOWER(p.code) = 'gemini' AND m.capabilities->>'free_tier' = 'true' THEN 'free' WHEN LOWER(p.code) IN ('openai', 'anthropic', 'claude') THEN 'paid' ELSE 'unverified' END AS pricing_tier
            FROM ai_models m
            JOIN ai_providers p ON p.id = m.provider_id
-          WHERE p.enabled = TRUE AND m.enabled = TRUE
+          WHERE m.enabled = TRUE
           ORDER BY p.name, m.name`,
       );
       return { data: rows, tasks: HUMAS_AI_TASKS };
