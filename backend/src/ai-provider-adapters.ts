@@ -57,7 +57,12 @@ export async function invokeAiProvider(input: {
   if (input.provider === 'gemini') {
     raw = payload.candidates?.[0]?.content?.parts?.map((part: any) => part.text ?? '').join('');
     inputTokens = payload.usageMetadata?.promptTokenCount;
-    outputTokens = payload.usageMetadata?.candidatesTokenCount;
+    // Gemini may bill thinking tokens in addition to visible candidate tokens.
+    // Include them in the output ledger instead of silently undercounting.
+    const visibleTokens = tokenCount(payload.usageMetadata?.candidatesTokenCount);
+    const thinkingTokens = payload.usageMetadata?.thoughtsTokenCount === undefined
+      ? 0 : tokenCount(payload.usageMetadata.thoughtsTokenCount);
+    outputTokens = visibleTokens + thinkingTokens;
   } else if (input.provider === 'openai') {
     raw = payload.output?.flatMap((item: any) => item.content ?? [])
       .filter((part: any) => part.type === 'output_text')
