@@ -22,7 +22,7 @@ export async function invokeAiProvider(input: {
   prompt: string;
   timeoutMs?: number;
 }): Promise<AiProviderResponse> {
-  if (!input.model || !input.apiKey || !input.prompt) throw new Error('AI_PROVIDER_INVALID_REQUEST');
+  if (!input.model || !input.apiKey || !input.prompt || input.prompt.length > 12000) throw new Error('AI_PROVIDER_INVALID_REQUEST');
   const timeoutMs = input.timeoutMs ?? 60000;
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 120000) {
     throw new Error('AI_PROVIDER_INVALID_TIMEOUT');
