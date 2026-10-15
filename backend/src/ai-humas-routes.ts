@@ -85,7 +85,7 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
           ORDER BY t.code, r.priority`,
         [HUMAS_AI_TASKS],
       );
-      return { data: rows, execution_ready: false };
+      return { data: rows, execution_ready: false, notice: 'Routes are configuration only. Generation remains on legacy provider paths until budget enforcement and token attribution are implemented.' };
     } catch {
       return reply.code(503).send({ error: 'AI_ROUTES_UNAVAILABLE' });
     }
