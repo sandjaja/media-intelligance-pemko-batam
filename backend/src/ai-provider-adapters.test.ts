@@ -59,6 +59,18 @@ test('provider adapter rejects oversized prompt without network access', async (
   assert.equal(called, false);
 });
 
+test('Gemini prompt-level block is rejected even with parseable candidate', async () => {
+  mockResponse({
+    promptFeedback: { blockReason: 'SAFETY' },
+    candidates: [{ finishReason: 'STOP', content: { parts: [{ text: '{"ok":true}' }] } }],
+    usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 7 },
+  });
+  await assert.rejects(
+    invokeAiProvider({ provider: 'gemini', model: 'test-model', apiKey: 'mock', prompt: 'hello' }),
+    /AI_PROVIDER_OUTPUT_BLOCKED/,
+  );
+});
+
 test('Missing usage fails closed instead of logging zero', async () => {
   mockResponse({ candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }] });
   await assert.rejects(
