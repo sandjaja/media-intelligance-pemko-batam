@@ -57,7 +57,8 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
     if (!token) return reply.code(401).send({ error: 'UNAUTHENTICATED' });
     const payload = jwt.verify(token, jwtSecret) as jwt.JwtPayload;
     if (typeof payload.sub !== 'string') return reply.code(401).send({ error: 'INVALID_ACCESS_TOKEN' });
-    const client = await pool.connect();
+    let client;
+    try { client = await pool.connect(); } catch { return reply.code(503).send({ error: 'AI_PROMPT_STORAGE_UNAVAILABLE' }); }
     try {
       await client.query('BEGIN');
       const current = await client.query(
