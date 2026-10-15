@@ -114,7 +114,7 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
         const ratio = limit != null && limit > 0 && committed != null ? committed/limit : null;
         return {
           provider_code: row.provider_code,
-          status: limit == null ? 'not_configured' : remaining === 0 ? 'exhausted' : ratio != null && ratio >= 0.8 ? 'near_limit' : 'available',
+          status: limit == null ? 'not_configured' : !Number.isFinite(limit) || !Number.isFinite(committed) ? 'unavailable' : remaining === 0 ? 'exhausted' : ratio != null && ratio >= 0.8 ? 'near_limit' : 'available',
           remaining_budget_usd: remaining,
           warning: limit == null || remaining === 0 ? 'Anggaran AI tidak mencukupi. Silakan hubungi Admin untuk top up atau penyesuaian batas anggaran.' : ratio != null && ratio >= 0.8 ? 'Anggaran AI mendekati batas. Hubungi Admin sebelum menggunakan model berbayar.' : null,
         };
