@@ -60,7 +60,7 @@ export async function executeConfiguredAi(pool: Pool, input: {
   modelCode: string;
   prompt: string;
 }): Promise<AiGatewayResult<unknown>> {
-  if (!input.taskCode || !input.modelCode || !input.prompt) {
+  if (!input.taskCode || !input.modelCode || !input.prompt || input.prompt.length > 12000) {
     throw new Error('AI_GATEWAY_INVALID_REQUEST');
   }
   const { rows } = await pool.query(
@@ -91,7 +91,7 @@ export async function executeConfiguredAi(pool: Pool, input: {
   }
   if (!apiKey) throw new Error('AI_GATEWAY_CREDENTIAL_UNAVAILABLE');
   const price = await getAiModelPrice(pool, Number(route.model_id));
-  const estimatedUsd = calculateAiTokenCost(Math.max(1024, Math.ceil(input.prompt.length / 2)), AI_GATEWAY_MAX_OUTPUT_TOKENS, price);
+  const estimatedUsd = calculateAiTokenCost(Math.max(2048, input.prompt.length * 2), AI_GATEWAY_MAX_OUTPUT_TOKENS, price);
   if (estimatedUsd <= 0) throw new Error('AI_GATEWAY_ZERO_COST_REQUIRES_FREE_TIER_POLICY');
   return executeBudgetedAi(pool, {
     userId: input.userId,
