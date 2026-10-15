@@ -91,6 +91,27 @@ async function loadGeminiQuotas(){
   root.innerHTML=(data.data||[]).map(m=>'<div class="rounded-lg border border-slate-700 p-3 space-y-2" data-gemini-quota="'+Number(m.model_id)+'"><div class="text-sm font-bold">'+esc(m.model_name||m.model_code)+'</div><div class="text-xs text-slate-400">Reservasi hari ini (UTC): '+Number(m.reserved_today||0)+'</div><div class="text-xs '+(m.quota_status==='near_limit'||m.quota_status==='exhausted'?'text-amber-300':'text-slate-400')+'">Sisa: '+(m.remaining_today==null?'Belum diatur':Number(m.remaining_today))+' · Penggunaan: '+(m.usage_percent==null?'—':Number(m.usage_percent)+'%')+(m.quota_status==='near_limit'?' · Peringatan: sudah mencapai 80%':m.quota_status==='exhausted'?' · Kuota habis':'')+'</div><label class="text-xs">Batas permintaan per hari <input data-quota-limit type="number" min="1" max="100000" value="'+Number(m.max_requests??(String(m.model_code).includes('flash-lite')?50:20))+'" class="w-full rounded bg-slate-900 border border-slate-700 p-2"></label><label class="flex items-center gap-2 text-xs"><input data-quota-enabled type="checkbox" '+(m.enabled?'checked':'')+'>Aktifkan kuota</label><button type="button" data-quota-save class="rounded bg-cyan-700 px-3 py-2 text-xs font-bold">Simpan kuota</button></div>').join('')||'<p class="text-xs">Belum ada model Gemini.</p>';
  }catch(err){root.textContent='Kuota belum tersedia: '+err.message;}
 }
+async function loadGeminiFeatureUsage(){
+ const root=document.getElementById('aiGeminiFeatureRows');if(!root)return;
+ root.textContent='Memuat riwayat reservasi...';
+ try{
+  const response=await fetch('/api/admin/ai/gemini-feature-usage?days=7',{credentials:'include',cache:'no-store'});
+  const payload=await response.json().catch(()=>({}));
+  if(!response.ok)throw Error(payload.error||'HTTP '+response.status);
+  if(!root.isConnected)return;
+  const rows=Array.isArray(payload.data)?payload.data:[];
+  root.innerHTML=rows.length?rows.map(row=>'<div class="border-b border-slate-700 py-2"><strong>'+esc(row.feature_code||'unattributed')+'</strong> · '+esc(row.model_code||'—')+'<div class="text-xs text-slate-400">'+esc(String(row.usage_date||'').slice(0,10))+' (UTC) · '+Number(row.reserved_requests||0)+' reservasi</div></div>').join(''):'Belum ada reservasi Gemini yang tercatat per fitur selama 7 hari terakhir.';
+ }catch(err){if(root.isConnected)root.textContent='Riwayat belum tersedia: '+err.message;}
+}
+function setupGeminiFeatureUsage(){
+ const section=document.getElementById('aiGeminiQuotaSection');
+ if(!section||document.getElementById('aiGeminiFeatureSection'))return;
+ const details=document.createElement('details');details.id='aiGeminiFeatureSection';details.className='mt-4 rounded-xl border border-slate-700 p-4 space-y-3';
+ details.innerHTML='<summary class="font-bold cursor-pointer">Riwayat Penggunaan Gemini per Fitur</summary><p class="text-xs text-slate-400">Jumlah reservasi kuota internal, bukan jumlah permintaan sukses atau kuota resmi Google. Riwayat mulai dicatat sejak migrasi audit; tidak berlaku surut.</p><button type="button" id="aiGeminiFeatureRefresh" class="rounded border border-slate-600 px-3 py-2 text-xs">Muat ulang riwayat</button><div id="aiGeminiFeatureRows" class="text-sm"></div>';
+ section.insertAdjacentElement('afterend',details);
+ details.querySelector('#aiGeminiFeatureRefresh').addEventListener('click',loadGeminiFeatureUsage);
+ details.addEventListener('toggle',()=>{if(details.open)loadGeminiFeatureUsage();});
+}
 function setupGeminiQuotas(){
  const panel=document.getElementById('aiAdminProviders')?.parentElement;if(!panel||document.getElementById('aiGeminiQuotaSection'))return;
  const section=document.createElement('details');section.id='aiGeminiQuotaSection';section.className='mt-5 rounded-xl border border-slate-700 p-4 space-y-3';
@@ -111,5 +132,5 @@ function setupGeminiQuotas(){
  });
  loadGeminiQuotas();
 }
-document.addEventListener('DOMContentLoaded',()=>{setupReconciliation();setupManualBalances();setupGeminiQuotas();load();});
+document.addEventListener('DOMContentLoaded',()=>{setupReconciliation();setupManualBalances();setupGeminiQuotas();setupGeminiFeatureUsage();load();});
 })();
