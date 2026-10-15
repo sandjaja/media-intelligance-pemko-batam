@@ -141,7 +141,7 @@ function setupGeminiQuotas(){
  });
  loadGeminiQuotas();
 }
-document.addEventListener('DOMContentLoaded',()=>{setupReconciliation();setupGeminiQuotas();load();});
+document.addEventListener('DOMContentLoaded',()=>{setupReconciliation();setupManualBalances();setupGeminiQuotas();load();});
 })();+Number(b.remaining_usd).toFixed(4))+'</div><label class="block text-xs">Saldo aktual provider saat ini (USD)<input type="number" min="0" step="0.0001" data-balance-amount class="mt-1 w-full rounded border border-slate-600 p-2" placeholder="Contoh: 10.00"></label><label class="block text-xs">Alasan pembaruan<input data-balance-reason maxlength="500" class="mt-1 w-full rounded border border-slate-600 p-2" placeholder="Contoh: Top-up saldo provider"></label><button type="button" data-balance-save class="rounded bg-cyan-700 px-3 py-2 text-xs font-bold">Simpan saldo terbaru</button></div>').join('')||'<p>Provider berbayar belum tersedia.</p>';
  }catch(e){root.textContent='Saldo manual belum tersedia: '+e.message;}
 }
