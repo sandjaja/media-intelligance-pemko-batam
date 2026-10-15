@@ -137,5 +137,23 @@ export async function registerAiAdminRoutes(app:FastifyInstance,pool:Pool,jwtSec
     return {data:result.rows};
   });
 
+  app.get('/api/ai/usage/me',async(request,reply)=>{
+    const token=request.cookies.access_token;
+    if(!token)return reply.code(401).send({error:'UNAUTHENTICATED'});
+    let userId:string;
+    try{
+      const payload=jwt.verify(token,jwtSecret) as jwt.JwtPayload;
+      if(typeof payload.sub!=='string')return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'});
+      userId=payload.sub;
+    }catch{return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'});}
+    const auth=await loadAuthorizationContext(pool,userId);
+    if(!auth?.active)return reply.code(401).send({error:'USER_INACTIVE_OR_MISSING'});
+    if(!auth.roles.includes('humas')&&!auth.roles.includes('super_admin')&&auth.legacyRole!=='admin')return reply.code(403).send({error:'FORBIDDEN'});
+    const parsed=z.object({limit:z.coerce.number().int().min(1).max(100).default(30)}).safeParse(request.query);
+    const limit=parsed.success?parsed.data.limit:30;
+    const result=await pool.query('SELECT l.id,l.status,l.input_tokens,l.output_tokens,(COALESCE(l.input_tokens,0)+COALESCE(l.output_tokens,0)) AS total_tokens,l.created_at,t.code AS task_code,p.code AS provider_code,m.code AS model_code FROM ai_usage_logs l LEFT JOIN ai_tasks t ON t.id=l.task_id LEFT JOIN ai_providers p ON p.id=l.provider_id LEFT JOIN ai_models m ON m.id=l.model_id WHERE l.user_id=$1 ORDER BY l.created_at DESC,l.id DESC LIMIT $2',[auth.id,limit]);
+    return {data:result.rows};
+  });
+
   app.get('/api/admin/ai/usage',{preHandler:guard},async(request)=>{const q=z.object({limit:z.coerce.number().int().min(1).max(200).default(50)}).safeParse(request.query);const limit=q.success?q.data.limit:50;return{data:(await pool.query('SELECT l.id,l.user_id,u.email AS user_email,l.status,l.latency_ms,l.input_tokens,l.output_tokens,(COALESCE(l.input_tokens,0)+COALESCE(l.output_tokens,0)) AS total_tokens,l.error_code,l.created_at,t.code task_code,p.code provider_code,m.code model_code FROM ai_usage_logs l LEFT JOIN users u ON u.id=l.user_id LEFT JOIN ai_tasks t ON t.id=l.task_id LEFT JOIN ai_providers p ON p.id=l.provider_id LEFT JOIN ai_models m ON m.id=l.model_id ORDER BY l.created_at DESC,l.id DESC LIMIT $1',[limit])).rows};});
 }
