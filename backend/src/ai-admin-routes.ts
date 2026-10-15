@@ -35,6 +35,40 @@ export async function registerAiAdminRoutes(app:FastifyInstance,pool:Pool,jwtSec
     }catch{return reply.code(503).send({error:'AI_RECONCILIATION_UNAVAILABLE'});}
   });
 
+  app.get('/api/admin/ai/gemini-quotas',{preHandler:guard},async(_request,reply)=>{
+    try{
+      const exists=await pool.query("SELECT to_regclass('public.ai_free_tier_daily_limits') IS NOT NULL AS available");
+      if(!exists.rows[0]?.available)return reply.code(503).send({error:'AI_GEMINI_QUOTA_MIGRATION_REQUIRED'});
+      const result=await pool.query(`SELECT m.id AS model_id,m.code AS model_code,m.name AS model_name,
+        l.max_requests,COALESCE(l.enabled,FALSE) AS enabled,
+        COALESCE(u.reserved_requests,0)::int AS reserved_today
+        FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id
+        LEFT JOIN ai_free_tier_daily_limits l ON l.model_id=m.id
+        LEFT JOIN ai_free_tier_daily_usage u ON u.model_id=m.id
+          AND u.usage_date=(now() AT TIME ZONE 'UTC')::date
+        WHERE p.code='gemini' ORDER BY m.code`);
+      return {data:result.rows,timezone:'UTC'};
+    }catch{return reply.code(503).send({error:'AI_GEMINI_QUOTA_UNAVAILABLE'});}
+  });
+
+  app.put('/api/admin/ai/gemini-quotas/:modelId',{preHandler:guard},async(request,reply)=>{
+    const id=z.coerce.number().int().positive().safeParse((request.params as any).modelId);
+    const body=z.object({max_requests:z.number().int().min(1).max(100000),enabled:z.boolean()}).safeParse(request.body);
+    if(!id.success||!body.success)return reply.code(400).send({error:'AI_GEMINI_QUOTA_INVALID'});
+    try{
+      const updated=await pool.query(`INSERT INTO ai_free_tier_daily_limits(model_id,max_requests,enabled)
+        SELECT m.id,$2,$3 FROM ai_models m
+        JOIN ai_providers p ON p.id=m.provider_id
+        WHERE m.id=$1 AND p.code='gemini'
+        ON CONFLICT(model_id) DO UPDATE
+        SET max_requests=EXCLUDED.max_requests,enabled=EXCLUDED.enabled,updated_at=now()
+        RETURNING model_id,max_requests,enabled`,[id.data,body.data.max_requests,body.data.enabled]);
+      if(!updated.rowCount)return reply.code(404).send({error:'AI_GEMINI_MODEL_NOT_FOUND'});
+      await audit(request,'AI_GEMINI_QUOTA_UPDATED',id.data);
+      return {data:updated.rows[0]};
+    }catch{return reply.code(503).send({error:'AI_GEMINI_QUOTA_UNAVAILABLE'});}
+  });
+
   app.get('/api/admin/ai/credentials/status',{preHandler:guard},async()=>({data:(await pool.query('SELECT p.code,c.credential_hint,c.updated_at FROM ai_providers p LEFT JOIN ai_provider_credentials c ON c.provider_id=p.id ORDER BY p.code')).rows}));
   app.put('/api/admin/ai/credentials/:code',{preHandler:guard},async(request,reply)=>{
     const code=z.enum(['gemini','openai','anthropic']).safeParse((request.params as any).code);
