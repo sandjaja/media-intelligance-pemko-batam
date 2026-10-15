@@ -119,9 +119,6 @@ Output JSON:
 async function analyzeMonitoringAgainstPublication(pool:Pool,input:any,userId:string){
   const selection=await resolveHumasAiSelection(pool,'monitoring_analysis');
   const selectedModel=selection?.model_code;
-  const credentials=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
-  if(!credentials.rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
-  const key=decryptIntegrationCredential(credentials.rows[0].credential_ciphertext);
   const models=selectedModel ? {rows:[{code:selectedModel}]} :
     await pool.query("SELECT m.code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 1");
   if(!models.rows[0])throw new Error('GEMINI_DATABASE_MODEL_MISSING');
@@ -181,6 +178,9 @@ HASILKAN JSON:
     });
     return result.data;
   }
+  const credentials=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
+  if(!credentials.rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
+  const key=decryptIntegrationCredential(credentials.rows[0].credential_ciphertext);
   const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}})});
   if(!r.ok)throw new Error(`Gemini HTTP ${r.status}`);
   const payload=await r.json() as any,raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');
