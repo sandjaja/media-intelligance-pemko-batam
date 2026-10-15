@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import Fastify from 'fastify';
-import {ACTIVE_ACTORS,buildActiveApifySteps,buildActiveApifyInput,normalizeActiveApifyItems,advanceActiveApifyJob,registerActiveApifyRoutes,type ActiveApifyJob} from './apify-active-collection.js';
+import {readFileSync} from 'node:fs';
+import type {ApifyCollectorKind} from './apify-collection-plan.js';
+const adapters=JSON.parse(readFileSync(new URL('../config/apify-actor-adapters.json',import.meta.url),'utf8'));
+const ACTIVE_ACTORS=Object.fromEntries(Object.entries(adapters).map(([k,v]:[string,any])=>[k,v.actorId])) as Record<ApifyCollectorKind,string>;
+import {buildActiveApifySteps,buildActiveApifyInput,normalizeActiveApifyItems,advanceActiveApifyJob,registerActiveApifyRoutes,type ActiveApifyJob} from './apify-active-collection.js';
 import {encryptIntegrationCredential} from './integration-credentials.js';
 const collectors=Object.entries(ACTIVE_ACTORS).map(([kind,actorId])=>({kind:kind as keyof typeof ACTIVE_ACTORS,actorId,enabled:true}));
-const config={actorMaxCostUsd:Object.fromEntries(collectors.map(s=>[s.kind,0.5])),maxTiktokPerRun:20,maxInstagramPerRun:10};
+const config={actorAdapters:adapters,actorMaxCostUsd:Object.fromEntries(collectors.map(s=>[s.kind,0.5])),maxTiktokPerRun:20,maxInstagramPerRun:10};
 test('each platform runs exactly its enabled Admin actors, discoveries before comments',()=>{
  const tiktok=buildActiveApifySteps(collectors,config,'tiktok',50);
  assert.deepEqual(tiktok.map(s=>s.kind),['tiktok_posts','tiktok_hashtag','tiktok_comments']);
@@ -94,4 +98,21 @@ test('all enabled actors complete through persisted start/poll/import; retries n
   assert.ok(requests.filter(r=>r.body).every(r=>r.url.includes('maxTotalChargeUsd=0.5')));
   assert.equal(requests.find(r=>r.url.includes('instagram-comments-scraper-api/runs'))?.body.maxItems,2);
  }finally{globalThis.fetch=oldFetch;delete process.env.INTEGRATION_CREDENTIAL_KEY;}
+});
+test('import excludes old, current-day and undated posts before any social write',async()=>{
+ process.env.INTEGRATION_CREDENTIAL_KEY='unit-test-secret';
+ const job=state('RUNNING');job.createdAt='2026-10-15T06:00:00Z';let stored:any;
+ const query=async(sql:string,params?:any[])=>{
+  if(sql.includes('FOR UPDATE'))return{rows:[{id:1,metadata:structuredClone(job)}]};
+  if(sql.startsWith('UPDATE audit_logs')){stored=JSON.parse(params![1]);return{rows:[]};}
+  if(sql.includes('credential_ciphertext'))return{rows:[{settings:config,credential_ciphertext:encryptIntegrationCredential('fixture-token')}]};
+  if(sql.includes('FROM organizations'))return{rows:[{id:1,name:'Pemko Batam',code:'batam'}]};
+  if(sql.includes('FROM government_branding'))return{rows:[{city_name:'Batam'}]};
+  if(/(?:INSERT INTO|UPDATE) social_/i.test(sql))throw Error('Excluded content reached social ingestion');
+  return{rows:[]};
+ };
+ const pool={query,connect:async()=>({query,release(){}})} as any,oldFetch=globalThis.fetch;
+ globalThis.fetch=async(url)=>new Response(JSON.stringify(String(url).includes('/datasets/')?[null,'2026-10-13T00:00:00Z','2026-10-15T00:00:00Z'].map((timestamp,i)=>({shortCode:'ABCde123'+i,caption:'Batam',url:'https://www.instagram.com/p/ABCde123'+i+'/',timestamp})):{data:{id:'run12345',actId:'actor12345',status:'SUCCEEDED',defaultDatasetId:'dataset12345'}}));
+ try{await advanceActiveApifyJob(pool,job.jobId);assert.equal(stored.status,'DONE');assert.equal(stored.steps[0].counts.succeeded,0);assert.equal(stored.steps[0].counts.outsidePeriod,2);assert.equal(stored.steps[0].counts.missingDate,1);assert.equal(stored.period.date,'2026-10-14');}
+ finally{globalThis.fetch=oldFetch;delete process.env.INTEGRATION_CREDENTIAL_KEY;}
 });

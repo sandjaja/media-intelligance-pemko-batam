@@ -1,0 +1,211 @@
+{
+  "tiktok_posts": {
+    "actorId": "clockworks/tiktok-scraper",
+    "inputTemplate": {
+      "searchQueries": "{{queries}}",
+      "searchSection": "/video",
+      "resultsPerPage": "{{perQueryLimit}}",
+      "videoSearchSorting": "LATEST",
+      "videoSearchDateFilter": "PAST_WEEK",
+      "commentsPerPost": 0,
+      "scrapeRelatedVideos": false,
+      "shouldDownloadVideos": false,
+      "aiVideoDescription": false,
+      "aiVideoSummary": false
+    },
+    "output": {
+      "id": [
+        "id"
+      ],
+      "text": [
+        "text"
+      ],
+      "url": [
+        "webVideoUrl"
+      ],
+      "publishedAt": [
+        "createTimeISO",
+        "createTime"
+      ],
+      "authorHandle": [
+        "authorMeta.name",
+        "author.uniqueId"
+      ],
+      "authorName": [
+        "authorMeta.nickName",
+        "author.nickname"
+      ]
+    }
+  },
+  "instagram_posts": {
+    "actorId": "apify/instagram-scraper",
+    "inputTemplate": {
+      "search": "#{{hashtag}}",
+      "searchType": "hashtag",
+      "resultsType": "posts",
+      "resultsLimit": "{{limit}}",
+      "searchLimit": 1,
+      "onlyPostsNewerThan": "{{since}}"
+    },
+    "output": {
+      "id": [
+        "shortCode",
+        "shortcode"
+      ],
+      "text": [
+        "caption"
+      ],
+      "url": [
+        "url"
+      ],
+      "publishedAt": [
+        "timestamp"
+      ],
+      "authorHandle": [
+        "ownerUsername"
+      ],
+      "authorName": [
+        "ownerFullName"
+      ]
+    }
+  },
+  "tiktok_comments": {
+    "actorId": "clockworks/tiktok-comments-scraper",
+    "inputTemplate": {
+      "postURLs": "{{parentUrls}}",
+      "commentsPerPost": "{{commentsPerPost}}",
+      "maxRepliesPerComment": 0
+    },
+    "output": {
+      "id": [
+        "cid",
+        "id",
+        "commentId"
+      ],
+      "text": [
+        "text"
+      ],
+      "publishedAt": [
+        "createTimeISO",
+        "createTime"
+      ],
+      "parentUrl": [
+        "videoWebUrl",
+        "videoUrl",
+        "postUrl"
+      ],
+      "parentId": [
+        "videoId"
+      ],
+      "authorHandle": [
+        "uniqueId",
+        "author.uniqueId"
+      ],
+      "authorName": [
+        "nickname",
+        "author.nickname"
+      ]
+    }
+  },
+  "instagram_comments": {
+    "actorId": "apidojo/instagram-comments-scraper-api",
+    "inputTemplate": {
+      "startUrls": "{{parentUrls}}",
+      "maxItems": "{{maxComments}}",
+      "fetchReplies": false,
+      "continueOnDuplicates": false
+    },
+    "output": {
+      "id": [
+        "id",
+        "commentId"
+      ],
+      "text": [
+        "message",
+        "text"
+      ],
+      "publishedAt": [
+        "createdAt",
+        "timestamp"
+      ],
+      "parentUrl": [
+        "inputSource",
+        "postUrl"
+      ],
+      "parentId": [
+        "postId"
+      ],
+      "authorHandle": [
+        "user.username",
+        "ownerUsername"
+      ],
+      "authorName": [
+        "user.fullName",
+        "ownerFullName"
+      ]
+    }
+  },
+  "tiktok_hashtag": {
+    "actorId": "clockworks/tiktok-hashtag-scraper",
+    "inputTemplate": {
+      "hashtags": "{{hashtags}}",
+      "resultsPerPage": "{{limit}}",
+      "shouldDownloadVideos": false,
+      "oldestPostDateUnified": "{{since}}",
+      "newestPostDate": "{{untilInclusive}}"
+    },
+    "output": {
+      "id": [
+        "id"
+      ],
+      "text": [
+        "text"
+      ],
+      "url": [
+        "webVideoUrl"
+      ],
+      "publishedAt": [
+        "createTimeISO",
+        "createTime"
+      ],
+      "authorHandle": [
+        "authorMeta.name",
+        "author.uniqueId"
+      ],
+      "authorName": [
+        "authorMeta.nickName",
+        "author.nickname"
+      ]
+    }
+  },
+  "instagram_hashtag": {
+    "actorId": "apify/instagram-hashtag-scraper",
+    "inputTemplate": {
+      "hashtags": "{{hashtags}}",
+      "resultsType": "posts",
+      "resultsLimit": "{{limit}}",
+      "onlyPostsNewerThan": "{{since}}"
+    },
+    "output": {
+      "id": [
+        "shortCode",
+        "shortcode"
+      ],
+      "text": [
+        "caption"
+      ],
+      "url": [
+        "url"
+      ],
+      "publishedAt": [
+        "timestamp"
+      ],
+      "authorHandle": [
+        "ownerUsername"
+      ],
+      "authorName": [
+        "ownerFullName"
+      ]
+    }
+  }
+}

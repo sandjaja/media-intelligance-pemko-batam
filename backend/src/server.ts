@@ -1,3 +1,4 @@
+import {actorAdapterSchema,validateActorAdapter} from './apify-actor-adapter.js';
 import 'dotenv/config';
 import Fastify, { FastifyReply, FastifyRequest } from 'fastify';
 import cookie from '@fastify/cookie';
@@ -105,7 +106,8 @@ app.put('/api/admin/integrations/apify/settings',{preHandler:[requireAuth,requir
   tiktokCommentsEnabled:z.boolean().default(true),instagramCommentsEnabled:z.boolean().default(true),
   tiktokHashtagEnabled:z.boolean().default(false),instagramHashtagEnabled:z.boolean().default(false),
   monthlyBudgetUsd:z.number().min(0.5).max(5).default(4),
-  actorMaxCostUsd:z.partialRecord(z.enum(['tiktok_posts','instagram_posts','tiktok_comments','instagram_comments','tiktok_hashtag','instagram_hashtag']),z.number().min(0.01).max(5)).refine(v=>v.tiktok_posts===undefined||v.tiktok_posts>=0.5,{message:'TikTok Posts requires at least $0.50 per run'}).optional(),
+  actorAdapters:z.partialRecord(z.enum(['tiktok_posts','instagram_posts','tiktok_comments','instagram_comments','tiktok_hashtag','instagram_hashtag']),actorAdapterSchema).optional(),
+  actorMaxCostUsd:z.partialRecord(z.enum(['tiktok_posts','instagram_posts','tiktok_comments','instagram_comments','tiktok_hashtag','instagram_hashtag']),z.number().min(0.01).max(5)).optional(),
   maxTiktokPerRun:z.number().int().min(0).max(100).default(20),
   maxInstagramPerRun:z.number().int().min(0).max(100).default(10),
   maxCommentsPerPost:z.number().int().min(0).max(50).default(10),
@@ -121,13 +123,17 @@ app.put('/api/admin/integrations/apify/settings',{preHandler:[requireAuth,requir
   {enabled:config.tiktokHashtagEnabled,id:config.tiktokHashtagActor,kind:'tiktok_hashtag'},
   {enabled:config.instagramHashtagEnabled,id:config.instagramHashtagActor,kind:'instagram_hashtag'}
  ];
+ if(config.actorAdapters){
+  try{for(const item of enabledCollectors.filter(c=>c.enabled))validateActorAdapter(config.actorAdapters[item.kind as keyof typeof config.actorAdapters],String(item.id).replace('~','/'),item.kind.endsWith('_comments'));}
+  catch{return reply.code(400).send({error:'APIFY_ACTOR_ADAPTER_INVALID_OR_ID_MISMATCH'});}
+ }
  if(!enabledCollectors.some(item=>item.enabled))return reply.code(400).send({error:'APIFY_AT_LEAST_ONE_ACTOR_REQUIRED'});
  if(enabledCollectors.some(item=>item.enabled&&!item.id))return reply.code(400).send({error:'APIFY_ENABLED_ACTOR_ID_REQUIRED'});
-  const activeActorIds=enabledCollectors.filter(item=>item.enabled).map(item=>item.id?.trim());
+  const activeActorIds=enabledCollectors.filter(item=>item.enabled).map(item=>item.id?.trim().replace('~','/'));
   if(new Set(activeActorIds).size!==activeActorIds.length)return reply.code(400).send({error:'APIFY_ENABLED_ACTOR_IDS_MUST_BE_UNIQUE'});
   if(enabledCollectors.some(item=>item.enabled&&typeof config.actorMaxCostUsd?.[item.kind as keyof NonNullable<typeof config.actorMaxCostUsd>]!=='number'))return reply.code(400).send({error:'APIFY_ENABLED_ACTOR_COST_LIMIT_REQUIRED'});
  const standby=[
-  {enabled:config.tiktokHashtagEnabled,id:config.tiktokHashtagActor,kind:'tiktok_hashtag',minimum:0.5},
+  {enabled:config.tiktokHashtagEnabled,id:config.tiktokHashtagActor,kind:'tiktok_hashtag',minimum:0.01},
   {enabled:config.instagramHashtagEnabled,id:config.instagramHashtagActor,kind:'instagram_hashtag',minimum:0.01}
  ] as const;
  for(const item of standby){

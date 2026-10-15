@@ -6,7 +6,7 @@ import {loadApifyAdminCollectorSettings} from './apify-admin-collector-settings.
 import type {ApifyCollectorKind} from './apify-collection-plan.js';
 import {decryptIntegrationCredential} from './integration-credentials.js';
 import {loadApifyGeographicSearchPlan} from './apify-geographic-search.js';
-import {previewGeographicActorInput} from './apify-geographic-input.js';
+import {validateActorAdapter,renderActorTemplate,mappedField,mappedDate,yesterdayJakarta,publicationInPeriod,type ActorAdapter,type CollectionPeriod} from './apify-actor-adapter.js';
 import {normalizeApifyTikTokPosts} from './apify-tiktok-post-normalizer.js';
 import {normalizeApifyInstagramPosts} from './apify-instagram-post-normalizer.js';
 import {normalizeApifyComment} from './apify-social-adapter.js';
@@ -14,22 +14,17 @@ import {ingestSocialBatch,type SocialCandidate} from './social-collector.js';
 import {loadOrganizationMediaScope} from './organization-media-scope.js';
 import {classifySocialOrganizationScope} from './social-organization-scope.js';
 
-export const ACTIVE_ACTORS:Record<ApifyCollectorKind,string>={
- tiktok_posts:'clockworks/tiktok-scraper',instagram_posts:'apify/instagram-scraper',
- tiktok_comments:'clockworks/tiktok-comments-scraper',instagram_comments:'apidojo/instagram-comments-scraper-api',
- tiktok_hashtag:'clockworks/tiktok-hashtag-scraper',instagram_hashtag:'apify/instagram-hashtag-scraper'
-};
 type Platform='tiktok'|'instagram';
 type Selection=Platform|'apify';
 type Parent={externalId:string;canonicalUrl:string;title:string;content:string};
-type Counts={datasetItems:number;rejected:number;outOfScope:number;received:number;succeeded:number;failed:number;skipped:number};
-type Step={kind:ApifyCollectorKind;platform:Platform;actorId:string;cap:number;limit:number;status:'QUEUED'|'STARTING'|'RUNNING'|'IMPORTING'|'DONE'|'SKIPPED'|'FAILED'|'UNCERTAIN';runId?:string;actId?:string;datasetId?:string;offset?:number;error?:string;costUsd?:number;parents?:Parent[];counts?:Counts};
-export type ActiveApifyJob={jobId:string;selection:Selection;status:'RUNNING'|'DONE'|'PARTIAL'|'FAILED'|'UNCERTAIN';maxVideos:number;maxCommentsPerPost:number;monthlyCommentsLimit:number;steps:Step[];createdAt:string};
+type Counts={datasetItems:number;rejected:number;outOfScope:number;received:number;succeeded:number;failed:number;skipped:number;outsidePeriod:number;missingDate:number};
+type Step={adapter?:ActorAdapter;kind:ApifyCollectorKind;platform:Platform;actorId:string;cap:number;limit:number;status:'QUEUED'|'STARTING'|'RUNNING'|'IMPORTING'|'DONE'|'SKIPPED'|'FAILED'|'UNCERTAIN';runId?:string;actId?:string;datasetId?:string;offset?:number;error?:string;costUsd?:number;parents?:Parent[];counts?:Counts};
+export type ActiveApifyJob={jobId:string;selection:Selection;status:'RUNNING'|'DONE'|'PARTIAL'|'FAILED'|'UNCERTAIN';maxVideos:number;maxCommentsPerPost:number;monthlyCommentsLimit:number;steps:Step[];createdAt:string;period?:CollectionPeriod};
 const terminal=(s:Step)=>['DONE','SKIPPED','FAILED','UNCERTAIN'].includes(s.status);
 const safeActor=(id:string)=>id.trim().replace('~','/');
 const actorPlatform=(kind:ApifyCollectorKind):Platform=>kind.startsWith('tiktok_')?'tiktok':'instagram';
 const isComments=(kind:ApifyCollectorKind)=>kind.endsWith('_comments');
-const counts=():Counts=>({datasetItems:0,rejected:0,outOfScope:0,received:0,succeeded:0,failed:0,skipped:0});
+const counts=():Counts=>({datasetItems:0,rejected:0,outOfScope:0,received:0,succeeded:0,failed:0,skipped:0,outsidePeriod:0,missingDate:0});
 const safeError=(e:unknown)=>e instanceof Error&&/^APIFY_[A-Z0-9_]+$/.test(e.message)?e.message:'APIFY_COLLECTION_STEP_FAILED';
 function finish(job:ActiveApifyJob){
  if(job.steps.some(s=>s.status==='UNCERTAIN'))job.status='UNCERTAIN';
@@ -39,54 +34,48 @@ export function buildActiveApifySteps(settings:Awaited<ReturnType<typeof loadApi
  const enabled=settings.filter(s=>s.enabled&&(selection==='apify'||actorPlatform(s.kind)===selection));
  if(!enabled.length)throw Error('APIFY_NO_COLLECTORS_ENABLED');
  return enabled.sort((a,b)=>Number(isComments(a.kind))-Number(isComments(b.kind))).map(s=>{
-  if(safeActor(s.actorId)!==ACTIVE_ACTORS[s.kind])throw Error('APIFY_CONFIGURED_ACTOR_NOT_SUPPORTED');
+  const actorId=safeActor(s.actorId);
+  if(!/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+$/.test(actorId))throw Error('APIFY_ACTOR_ID_INVALID');
+  const adapter=validateActorAdapter(config.actorAdapters?.[s.kind],actorId,isComments(s.kind));
   const cap=config.actorMaxCostUsd?.[s.kind];
   if(typeof cap!=='number'||!Number.isFinite(cap)||cap<0.01||cap>5)throw Error('APIFY_ACTOR_CHARGE_CAP_NOT_CONFIGURED');
   const platform=actorPlatform(s.kind),adminLimit=config[platform==='tiktok'?'maxTiktokPerRun':'maxInstagramPerRun'];
   if(!Number.isInteger(adminLimit)||adminLimit<0||adminLimit>100)throw Error('APIFY_ADMIN_ITEM_LIMIT_INVALID');
-  return{kind:s.kind,platform,actorId:safeActor(s.actorId),cap,limit:Math.min(maxVideos,adminLimit),status:'QUEUED'};
+  return{kind:s.kind,platform,actorId,adapter,cap,limit:Math.min(maxVideos,adminLimit),status:'QUEUED'};
  });
 }
-export function buildActiveApifyInput(step:Step,city:string,queries:string[],commentsPerPost:number):Record<string,unknown>|null{
- if(step.limit===0)return null;
+export function buildActiveApifyInput(step:Step,city:string,queries:string[],commentsPerPost:number,period:CollectionPeriod=yesterdayJakarta()):Record<string,unknown>|null{
+ if(step.limit===0||isComments(step.kind)&&(!step.parents?.length||commentsPerPost===0))return null;
+ const adapter=validateActorAdapter(step.adapter,step.actorId,isComments(step.kind));
  const tag=city.normalize('NFKC').replace(/\s+/g,'').toLocaleLowerCase('id');
- if(!/^[\p{L}\p{N}_]{3,80}$/u.test(tag))throw Error('APIFY_GEOGRAPHIC_CITY_INVALID');
- if(isComments(step.kind)){
-  if(!step.parents?.length||commentsPerPost===0)return null;
-  const urls=step.parents.map(p=>p.canonicalUrl);
-  return step.platform==='tiktok'?{postURLs:urls,commentsPerPost,maxRepliesPerComment:0}:
-   {startUrls:urls,maxItems:Math.min(500,urls.length*commentsPerPost),fetchReplies:false,continueOnDuplicates:false};
- }
- if(step.kind==='tiktok_hashtag')return{hashtags:[tag],resultsPerPage:step.limit,shouldDownloadVideos:false};
- if(step.kind==='instagram_hashtag')return{hashtags:[tag],resultsType:'posts',resultsLimit:step.limit};
- if(step.kind==='instagram_posts')return{search:'#'+tag,searchType:'hashtag',resultsType:'posts',resultsLimit:step.limit,searchLimit:1};
- // Reuse the proven TikTok input adapter, retaining the total Admin item limit.
- const target=([10,20,50].includes(step.limit)?step.limit:10) as 10|20|50;
- const proposed=previewGeographicActorInput({actorId:step.actorId,plan:{organizationId:0,city,queries,excludedAmbiguousTerms:[]},maxVideos:target,maxQueries:Math.min(5,step.limit)}).proposedInput;
- proposed.resultsPerPage=Math.max(1,Math.floor(step.limit/Math.min(5,step.limit,queries.length)));
- return proposed;
+ if(!/^[\p{L}\p{N}_]{3,80}$/u.test(tag)||!queries.length)throw Error('APIFY_GEOGRAPHIC_CITY_INVALID');
+ const scopedQueries=queries.slice(0,Math.min(5,step.limit));
+ return renderActorTemplate(adapter.inputTemplate,{city,queries:scopedQueries,hashtag:tag,hashtags:[tag],limit:step.limit,perQueryLimit:Math.max(1,Math.floor(step.limit/scopedQueries.length)),parentUrls:step.parents?.map(p=>p.canonicalUrl)??[],commentsPerPost,maxComments:Math.min(500,(step.parents?.length??0)*commentsPerPost),since:period.start,until:period.end,untilInclusive:new Date(Date.parse(period.end)-1).toISOString(),sinceDate:period.date,untilDate:period.date}) as Record<string,unknown>;
 }
 const normalizeUrl=(value:unknown):string=>{try{const u=new URL(String(value));return u.origin+u.pathname.replace(/\/$/,'');}catch{return ''}};
 export function normalizeActiveApifyItems(step:Step,items:unknown[]):{candidates:SocialCandidate[];rejected:number}{
- if(!isComments(step.kind)){
-  const result=step.platform==='tiktok'?normalizeApifyTikTokPosts(items):normalizeApifyInstagramPosts(items);
-  result.candidates.forEach(c=>{c.collector='apify-'+step.kind;c.metadata={...(c.metadata as object),actorId:step.actorId,runId:step.runId,collectorKind:step.kind};});
-  return result;
- }
+ const adapter=validateActorAdapter(step.adapter,step.actorId,isComments(step.kind));
  const candidates:SocialCandidate[]=[];let rejected=0;
  for(const raw of items){
   if(!raw||typeof raw!=='object'||Array.isArray(raw)){rejected++;continue;}
-  const row=raw as Record<string,any>;
-  const url=row.videoWebUrl??row.inputSource??row.postUrl??row.videoUrl??row.inputUrl;
-  const parent=step.parents?.find(p=>normalizeUrl(p.canonicalUrl)===normalizeUrl(url))??
-   step.parents?.find(p=>String(row.postId??row.videoId??'')===p.externalId);
-  // Provider text cannot invent a parent or borrow a different post's scope.
-  if(!parent){rejected++;continue;}
-  const mapped={...row,text:row.text??row.message,postUrl:parent.canonicalUrl,username:row.username??row.uniqueId??row.user?.username};
-  const candidate=normalizeApifyComment(step.platform,mapped,parent.canonicalUrl);
+  const output=adapter.output,id=mappedField(raw,output.id),text=mappedField(raw,output.text),publishedAt=mappedDate(mappedField(raw,output.publishedAt));
+  const authorHandle=mappedField(raw,output.authorHandle),authorName=mappedField(raw,output.authorName);
+  if(typeof text!=='string'||!text.trim()||typeof id!=='string'&&!(typeof id==='number'&&Number.isSafeInteger(id))){rejected++;continue;}
+  let candidate:SocialCandidate|null=null;
+  if(!isComments(step.kind)){
+   const url=mappedField(raw,output.url),row=step.platform==='tiktok'?{id:String(id),text,webVideoUrl:url,createTime:publishedAt?Date.parse(publishedAt)/1000:null}:{shortCode:String(id),caption:text,url,timestamp:publishedAt};
+   candidate=(step.platform==='tiktok'?normalizeApifyTikTokPosts([row]):normalizeApifyInstagramPosts([row])).candidates[0]??null;
+  }else{
+   const url=mappedField(raw,output.parentUrl),parentId=mappedField(raw,output.parentId);
+   const parent=step.parents?.find(p=>!!url&&normalizeUrl(p.canonicalUrl)===normalizeUrl(url))??step.parents?.find(p=>parentId!==null&&String(parentId)===p.externalId);
+   if(!parent){rejected++;continue;}
+   candidate=normalizeApifyComment(step.platform,{id:String(id),text,postUrl:parent.canonicalUrl,createdAt:publishedAt});
+   if(candidate)candidate.context={parentContent:parent};
+  }
   if(!candidate){rejected++;continue;}
-  candidate.context={parentContent:parent};candidate.collector='apify-'+step.kind;
-  candidate.metadata={...(candidate.metadata as object),actorId:step.actorId,runId:step.runId,collectorKind:step.kind};
+  candidate.authorHandle=typeof authorHandle==='string'?authorHandle:null;candidate.authorName=typeof authorName==='string'?authorName:null;
+  candidate.publishedAt=publishedAt;candidate.collector='apify-'+step.kind;
+  candidate.metadata={provider:'apify',actorId:step.actorId,runId:step.runId,collectorKind:step.kind};
   candidates.push(candidate);
  }
  return{candidates,rejected};
@@ -106,7 +95,7 @@ async function save(client:PoolClient,id:string,job:ActiveApifyJob){finish(job);
 export async function createActiveApifyJob(pool:Pool,selection:Selection,maxVideos:number,userId:string){
  const cfg=await config(pool),collectors=await loadApifyAdminCollectorSettings(pool);
  const steps=buildActiveApifySteps(collectors,cfg.settings,selection,maxVideos);
- const job:ActiveApifyJob={jobId:randomUUID(),selection,maxVideos,status:'RUNNING',maxCommentsPerPost:Math.max(0,Math.min(50,Number(cfg.settings.maxCommentsPerPost)||0)),monthlyCommentsLimit:Math.max(0,Math.min(10000,Number(cfg.settings.monthlyCommentsLimit)||0)),steps,createdAt:new Date().toISOString()};
+ const job:ActiveApifyJob={jobId:randomUUID(),selection,maxVideos,status:'RUNNING',maxCommentsPerPost:Math.max(0,Math.min(50,Number(cfg.settings.maxCommentsPerPost)||0)),monthlyCommentsLimit:Math.max(0,Math.min(10000,Number(cfg.settings.monthlyCommentsLimit)||0)),steps,createdAt:new Date().toISOString(),period:yesterdayJakarta()};
  const client=await pool.connect();
  try{
   await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(78124680)');
@@ -130,7 +119,9 @@ export async function advanceActiveApifyJob(pool:Pool,jobId:string){
    if(Date.now()-Date.parse((step as Step&{startedAt?:string}).startedAt??job.createdAt)>60000){step.status='UNCERTAIN';step.error='APIFY_START_UNCERTAIN_CHECK_APIFY_CONSOLE';await save(client,row.id,job);}
    await client.query('COMMIT');transaction=false;return job;
   }
-  const {token}=await config(pool);
+  const cfg=await config(pool),token=cfg.token;
+  job.period??=yesterdayJakarta(new Date(job.createdAt));
+  step.adapter??=validateActorAdapter(cfg.settings.actorAdapters?.[step.kind],step.actorId,isComments(step.kind));
   if(step.status==='QUEUED'){
    const plan=await loadApifyGeographicSearchPlan(pool);
    if(isComments(step.kind)){
@@ -138,11 +129,11 @@ export async function advanceActiveApifyJob(pool:Pool,jobId:string){
     const allowance=Math.max(0,job.monthlyCommentsLimit-Number(remaining));
     const perPost=Math.min(job.maxCommentsPerPost,allowance);
     const parentLimit=perPost?Math.min(step.limit,Math.floor(Math.min(500,allowance)/perPost)):0;
-    const parents=parentLimit?(await pool.query(`SELECT external_id AS "externalId",canonical_url AS "canonicalUrl",LEFT(title,300) AS title,LEFT(content,3000) AS content FROM social_mentions WHERE platform=$1 AND source_kind='external' AND content_type NOT IN ('comment','reply') AND canonical_url IS NOT NULL AND metadata->'organizationScope'->>'status'='RELEVANT' ORDER BY captured_at DESC,id DESC LIMIT $2`,[step.platform,parentLimit])).rows:[];
+    const parents=parentLimit?(await pool.query(`SELECT external_id AS "externalId",canonical_url AS "canonicalUrl",LEFT(title,300) AS title,LEFT(content,3000) AS content FROM social_mentions WHERE platform=$1 AND source_kind='external' AND content_type NOT IN ('comment','reply') AND canonical_url IS NOT NULL AND metadata->'organizationScope'->>'status'='RELEVANT' AND published_at >= $3::timestamptz AND published_at < $4::timestamptz ORDER BY published_at DESC,id DESC LIMIT $2`,[step.platform,parentLimit,job.period.start,job.period.end])).rows:[];
     step.parents=parents.filter(p=>step.platform==='tiktok'?/^https:\/\/(www\.)?tiktok\.com\/@[^/]+\/video\/\d+\/?$/.test(p.canonicalUrl):/^https:\/\/(www\.)?instagram\.com\/(p|reel)\/[\w-]+\/?$/.test(p.canonicalUrl));
     (step as Step&{commentsPerPost?:number}).commentsPerPost=perPost;
    }
-   const input=buildActiveApifyInput(step,plan.city,plan.queries,(step as Step&{commentsPerPost?:number}).commentsPerPost??job.maxCommentsPerPost);
+   const input=buildActiveApifyInput(step,plan.city,plan.queries,(step as Step&{commentsPerPost?:number}).commentsPerPost??job.maxCommentsPerPost,job.period);
    if(!input){step.status='SKIPPED';step.error=isComments(step.kind)?'APIFY_NO_ELIGIBLE_PARENTS_OR_COMMENT_QUOTA':'APIFY_ADMIN_ITEM_LIMIT_ZERO';await save(client,row.id,job);await client.query('COMMIT');transaction=false;return job;}
    step.status='STARTING';(step as Step&{startedAt?:string}).startedAt=new Date().toISOString();
    await save(client,row.id,job);await client.query('COMMIT');transaction=false;
@@ -176,9 +167,13 @@ export async function advanceActiveApifyJob(pool:Pool,jobId:string){
     const items:unknown=await dataResponse.json();if(!Array.isArray(items)||items.length>pageSize)throw Error('APIFY_DATASET_SHAPE_INVALID');
     const normalized=normalizeActiveApifyItems(step,items),scope=await loadOrganizationMediaScope(client as unknown as Pool);
     if(!scope)throw Error('APIFY_ORGANIZATION_SCOPE_UNAVAILABLE');
-    const candidates=normalized.candidates.filter(c=>classifySocialOrganizationScope({title:c.title,content:c.content,context:c.context},scope).status!=='OUT_OF_SCOPE');
+    const dated=normalized.candidates.filter(c=>publicationInPeriod(c.publishedAt,job.period!));
+    step.counts.outsidePeriod??=0;step.counts.missingDate??=0;
+    step.counts.missingDate+=normalized.candidates.filter(c=>!c.publishedAt).length;
+    step.counts.outsidePeriod+=normalized.candidates.filter(c=>!!c.publishedAt&&!publicationInPeriod(c.publishedAt,job.period!)).length;
+    const candidates=dated.filter(c=>classifySocialOrganizationScope({title:c.title,content:c.content,context:c.context},scope).status!=='OUT_OF_SCOPE');
     const result=candidates.length?await ingestSocialBatch(client as unknown as Pool,candidates,'apify-'+step.kind):{received:0,succeeded:0,failed:0,results:[]};
-    step.counts.datasetItems+=items.length;step.counts.rejected+=normalized.rejected;step.counts.outOfScope+=normalized.candidates.length-candidates.length;
+    step.counts.datasetItems+=items.length;step.counts.rejected+=normalized.rejected;step.counts.outOfScope+=dated.length-candidates.length;
     step.counts.received+=result.received;step.counts.succeeded+=result.succeeded;step.counts.failed+=result.failed;step.counts.skipped+=result.results.filter(r=>r.skipped===true).length;
     step.offset+=items.length;
     if(items.length>0&&normalized.rejected===items.length){step.status='FAILED';step.error='APIFY_DATASET_NO_SUPPORTED_ITEMS';}
@@ -206,7 +201,8 @@ export async function registerActiveApifyRoutes(app:FastifyInstance,pool:Pool,gu
   const parsed=z.object({jobId:z.string().uuid()}).safeParse(request.params);if(!parsed.success)return reply.code(400).send({error:'APIFY_COLLECTION_ID_INVALID'});
   const job=(await pool.query(`SELECT metadata FROM audit_logs WHERE action='APIFY_ACTIVE_COLLECTION' AND metadata->>'jobId'=$1`,[parsed.data.jobId])).rows[0]?.metadata as ActiveApifyJob|undefined;
   if(!job)return reply.code(404).send({error:'APIFY_COLLECTION_NOT_FOUND'});
-  const {token}=await config(pool);const data=[];
+  const cfg=await config(pool),token=cfg.token;
+  const data=[];
   for(const step of job.steps.filter(s=>s.datasetId&&s.counts?.rejected)){
    const response=await provider('datasets/'+encodeURIComponent(step.datasetId!)+'/items?clean=true&limit=1',token);if(!response.ok)continue;
    const items:unknown=await response.json();if(!Array.isArray(items))continue;
