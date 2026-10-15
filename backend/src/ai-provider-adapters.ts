@@ -58,6 +58,7 @@ export async function invokeAiProvider(input: {
     const finishReason = payload.candidates?.[0]?.finishReason;
     if (finishReason === 'MAX_TOKENS') throw new Error('AI_PROVIDER_OUTPUT_TRUNCATED');
     if (finishReason && finishReason !== 'STOP') throw new Error('AI_PROVIDER_OUTPUT_BLOCKED');
+    if (payload.promptFeedback?.blockReason) throw new Error('AI_PROVIDER_OUTPUT_BLOCKED');
     raw = payload.candidates?.[0]?.content?.parts?.map((part: any) => part.text ?? '').join('');
     inputTokens = payload.usageMetadata?.promptTokenCount;
     // Gemini may bill thinking tokens in addition to visible candidate tokens.
