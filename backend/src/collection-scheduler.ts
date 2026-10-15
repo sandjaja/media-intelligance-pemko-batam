@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
-import {previewScheduledApifyCollection} from './apify-scheduled-preview.js';
+import {startScheduledApifyCollection} from './apify-scheduled-collection.js';
+import {reconcileCollectionRun} from './collection-run-result.js';
 import { runOnlineSourceCollection } from './online-article-moderation-routes.js';
 import { clusterNewOnlineArticles } from './online-story-clustering.js';
 import { collectOwnedWebsiteAccount } from './website-collector.js';
@@ -112,36 +113,42 @@ function summarizeOnline(batch:{results:Record<string,unknown>[],clustering:any}
   };
 }
 
-export async function runCollection(pool:Pool,trigger:CollectionTrigger,requestedBy:string|null,sources:CollectionSource[]){
-  const lock=await pool.query(`SELECT pg_try_advisory_lock(78124599) acquired`);
-  if(!lock.rows[0]?.acquired)return {ok:false,skipped:true,reason:'COLLECTION_ALREADY_RUNNING'};
+export async function runCollection(pool:Pool,trigger:CollectionTrigger,requestedBy:string|null,sources:CollectionSource[],options:{includeApify?:boolean;now?:Date}={}){
+  const lockClient=await pool.connect();
+  let lock;
+  try{await lockClient.query('BEGIN');lock=await lockClient.query(`SELECT pg_try_advisory_xact_lock(78124599) acquired`);}catch(e){await lockClient.query('ROLLBACK').catch(()=>undefined);lockClient.release();throw e;}
+  if(!lock.rows[0]?.acquired){await lockClient.query('ROLLBACK');lockClient.release();return {ok:false,skipped:true,reason:'COLLECTION_ALREADY_RUNNING'};}
   let runId:string|null=null;
   try{
+    if(trigger==='SCHEDULED'){
+      const existing=(await pool.query(`SELECT id FROM collection_scheduler_runs WHERE trigger_type='SCHEDULED' AND (started_at AT TIME ZONE 'Asia/Jakarta')::date=($1::timestamptz AT TIME ZONE 'Asia/Jakarta')::date LIMIT 1`,[(options.now??new Date()).toISOString()])).rows[0];
+      if(existing)return {ok:true,skipped:true,reason:'ALREADY_RAN_TODAY',runId:String(existing.id)};
+    }
     const run=await pool.query(`INSERT INTO collection_scheduler_runs(trigger_type,status,requested_by,sources) VALUES($1,'RUNNING',$2,$3::jsonb) RETURNING id`,[trigger,requestedBy,JSON.stringify({selected:sources})]);
     runId=String(run.rows[0].id);
     const result:any={};
-    if(sources.includes('online'))result.online=summarizeOnline(await collectOnline(pool));
-    if(sources.includes('owned'))result.owned=await collectOwned(pool);
-    if(sources.includes('social')){
-      result.social=await collectSocial(pool,trigger);
-      // Existing YouTube runner remains unchanged. Scheduled Apify is preview
-      // only until billable execution, reconciliation and recovery are approved.
-      if(trigger==='SCHEDULED'){
-        try{result.apify=await previewScheduledApifyCollection(pool)}
-        catch{result.apify={mode:'preview_only',billableRunStarted:false,reason:'APIFY_SCHEDULE_PREVIEW_UNAVAILABLE'}}
-      }
+    // Start Apify first: its webhook can run while the other sources collect.
+    // The Media Sosial YouTube button still calls this runner without includeApify.
+    if(sources.includes('social')&&(trigger==='SCHEDULED'||options.includeApify)){
+      try{result.apify=await startScheduledApifyCollection(pool,runId,trigger,options.now)}
+      catch(error){result.apify={status:'FAILED',error:error instanceof Error&&/^APIFY_[A-Z0-9_]+$/.test(error.message)?error.message:'APIFY_SCHEDULE_FAILED'}}
     }
-    const failed=Number(result.online?.failed||0)+Number(result.owned?.failed||0)+Number(result.social?.failed||0);
-    const successful=(result.online?.succeeded||0)+(result.owned?.succeeded||0)+(result.social?.succeeded||0);
-    const status=failed>0?(successful>0?'PARTIAL':'FAILED'):'SUCCESS';
-    await pool.query(`UPDATE collection_scheduler_runs SET status=$2,finished_at=now(),result=$3::jsonb WHERE id=$1`,[runId,status,JSON.stringify(result)]);
+    for(const source of sources){
+      try{
+        if(source==='online')result.online=summarizeOnline(await collectOnline(pool));
+        if(source==='owned')result.owned=await collectOwned(pool);
+        if(source==='social')result.social=await collectSocial(pool,trigger);
+      }catch(error){result[source]={succeeded:0,failed:1,error:error instanceof Error?error.message:'COLLECTION_SOURCE_FAILED'}}
+    }
+    result.baseComplete=true;
+    const {status,result:mergedResult}=await reconcileCollectionRun(pool,runId,result);
     await pool.query(`UPDATE collection_scheduler_config SET last_run_at=now(),updated_at=updated_at WHERE id=1`);
-    return {ok:status!=='FAILED',runId,status,result};
+    return {ok:status!=='FAILED',runId,status,result:mergedResult};
   }catch(error){
     const message=error instanceof Error?error.message:String(error);
     if(runId)await pool.query(`UPDATE collection_scheduler_runs SET status='FAILED',finished_at=now(),error_message=$2 WHERE id=$1`,[runId,message]).catch(()=>undefined);
     throw error;
-  }finally{await pool.query(`SELECT pg_advisory_unlock(78124599)`).catch(()=>undefined)}
+  }finally{await lockClient.query('ROLLBACK').catch(()=>undefined);lockClient.release()}
 }
 
 export async function runScheduledCollectionIfDue(pool:Pool,now=new Date()){
@@ -152,15 +159,13 @@ export async function runScheduledCollectionIfDue(pool:Pool,now=new Date()){
   const hour=parts.find(x=>x.type==='hour')?.value||'00';
   const scheduled=String(config.run_time||'08:00:00').slice(0,5);
   if(`${hour}:00`!==scheduled.slice(0,2)+':00')return {ok:true,skipped:true,reason:'NOT_DUE',scheduled};
-  // Only a successful/partial SCHEDULED run may suppress today's automatic run.
+  // One scheduled attempt per Jakarta day. Callback retries resume its Apify job.
   // Manual "Jalankan Sekarang" runs must never consume the daily schedule.
   const latestScheduled=(await pool.query(
-    `SELECT finished_at
+    `SELECT started_at AS finished_at
        FROM collection_scheduler_runs
       WHERE trigger_type='SCHEDULED'
-        AND status IN ('SUCCESS','PARTIAL')
-        AND finished_at IS NOT NULL
-      ORDER BY finished_at DESC
+      ORDER BY started_at DESC
       LIMIT 1`
   )).rows[0];
   if(latestScheduled?.finished_at){
@@ -173,5 +178,5 @@ export async function runScheduledCollectionIfDue(pool:Pool,now=new Date()){
   if(config.owned_enabled)sources.push('owned');
   if(config.social_enabled)sources.push('social');
   if(!sources.length)return {ok:true,skipped:true,reason:'NO_SOURCE_ENABLED'};
-  return runCollection(pool,'SCHEDULED',null,sources);
+  return runCollection(pool,'SCHEDULED',null,sources,{now});
 }

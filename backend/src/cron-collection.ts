@@ -2,6 +2,7 @@ import type { IncomingMessage,ServerResponse } from 'node:http';
 import { Pool } from 'pg';
 import { runScheduledCollectionIfDue } from './collection-scheduler.js';
 const json=(res:ServerResponse,status:number,body:any)=>{res.statusCode=status;res.setHeader('content-type','application/json; charset=utf-8');res.setHeader('cache-control','no-store');res.end(JSON.stringify(body))};
+export const config={maxDuration:300};
 export default async function handler(req:IncomingMessage,res:ServerResponse){
  if(req.method!=='GET')return json(res,405,{error:'METHOD_NOT_ALLOWED'});
  const secret=process.env.CRON_SECRET;if(!secret||req.headers.authorization!==`Bearer ${secret}`)return json(res,401,{error:'UNAUTHORIZED'});

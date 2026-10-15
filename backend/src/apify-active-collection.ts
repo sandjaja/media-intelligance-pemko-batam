@@ -1,3 +1,4 @@
+import {apifyRunWebhookParameter} from './apify-callback-auth.js';
 import {randomUUID} from 'node:crypto';
 import type {Pool,PoolClient} from 'pg';
 import type {FastifyInstance} from 'fastify';
@@ -19,7 +20,7 @@ type Selection=Platform|'apify';
 type Parent={externalId:string;canonicalUrl:string;title:string;content:string};
 type Counts={datasetItems:number;rejected:number;outOfScope:number;received:number;succeeded:number;failed:number;skipped:number;outsidePeriod:number;missingDate:number};
 type Step={adapter?:ActorAdapter;kind:ApifyCollectorKind;platform:Platform;actorId:string;cap:number;limit:number;status:'QUEUED'|'STARTING'|'RUNNING'|'IMPORTING'|'DONE'|'SKIPPED'|'FAILED'|'UNCERTAIN';runId?:string;actId?:string;datasetId?:string;offset?:number;error?:string;costUsd?:number;parents?:Parent[];counts?:Counts};
-export type ActiveApifyJob={jobId:string;selection:Selection;status:'RUNNING'|'DONE'|'PARTIAL'|'FAILED'|'UNCERTAIN';maxVideos:number;maxCommentsPerPost:number;monthlyCommentsLimit:number;steps:Step[];createdAt:string;period?:CollectionPeriod};
+export type ActiveApifyJob={jobId:string;selection:Selection;status:'RUNNING'|'DONE'|'PARTIAL'|'FAILED'|'UNCERTAIN';maxVideos:number;maxCommentsPerPost:number;monthlyCommentsLimit:number;steps:Step[];createdAt:string;period?:CollectionPeriod;trigger?:'MANUAL'|'SCHEDULED';schedulerRunId?:string;callbackBaseUrl?:string};
 const terminal=(s:Step)=>['DONE','SKIPPED','FAILED','UNCERTAIN'].includes(s.status);
 const safeActor=(id:string)=>id.trim().replace('~','/');
 const actorPlatform=(kind:ApifyCollectorKind):Platform=>kind.startsWith('tiktok_')?'tiktok':'instagram';
@@ -92,16 +93,20 @@ async function provider(path:string,token:string,init:RequestInit={}){
  return fetch('https://api.apify.com/v2/'+path,{...init,headers:{Authorization:'Bearer '+token,'Content-Type':'application/json',Accept:'application/json'},signal:AbortSignal.timeout(20000)});
 }
 async function save(client:PoolClient,id:string,job:ActiveApifyJob){finish(job);await client.query(`UPDATE audit_logs SET metadata=$2::jsonb WHERE id=$1`,[id,JSON.stringify(job)]);}
-export async function createActiveApifyJob(pool:Pool,selection:Selection,maxVideos:number,userId:string){
+export async function createActiveApifyJob(pool:Pool,selection:Selection,maxVideos:number,userId:string|null,options:{trigger?:'MANUAL'|'SCHEDULED';schedulerRunId?:string;callbackBaseUrl?:string;now?:Date}={}){
  const cfg=await config(pool),collectors=await loadApifyAdminCollectorSettings(pool);
  const steps=buildActiveApifySteps(collectors,cfg.settings,selection,maxVideos);
- const job:ActiveApifyJob={jobId:randomUUID(),selection,maxVideos,status:'RUNNING',maxCommentsPerPost:Math.max(0,Math.min(50,Number(cfg.settings.maxCommentsPerPost)||0)),monthlyCommentsLimit:Math.max(0,Math.min(10000,Number(cfg.settings.monthlyCommentsLimit)||0)),steps,createdAt:new Date().toISOString(),period:yesterdayJakarta()};
+ const job:ActiveApifyJob={jobId:randomUUID(),selection,maxVideos,status:'RUNNING',maxCommentsPerPost:Math.max(0,Math.min(50,Number(cfg.settings.maxCommentsPerPost)||0)),monthlyCommentsLimit:Math.max(0,Math.min(10000,Number(cfg.settings.monthlyCommentsLimit)||0)),steps,createdAt:(options.now??new Date()).toISOString(),period:yesterdayJakarta(options.now),trigger:options.trigger??(options.schedulerRunId?'SCHEDULED':'MANUAL'),schedulerRunId:options.schedulerRunId,callbackBaseUrl:options.callbackBaseUrl};
  const client=await pool.connect();
  try{
   await client.query('BEGIN');await client.query('SELECT pg_advisory_xact_lock(78124680)');
+  if(job.trigger==='SCHEDULED'){
+   const prior=(await client.query(`SELECT metadata FROM audit_logs WHERE action='APIFY_ACTIVE_COLLECTION' AND metadata->>'trigger'='SCHEDULED' AND metadata->'period'->>'date'=$1 ORDER BY created_at DESC LIMIT 1`,[job.period!.date])).rows[0];
+   if(prior){await client.query('COMMIT');return prior.metadata as ActiveApifyJob;}
+  }
   // Resuming an unfinished collection never starts another paid copy.
   const existing=await client.query(`SELECT metadata FROM audit_logs WHERE action='APIFY_ACTIVE_COLLECTION' AND metadata->>'status' IN ('RUNNING','UNCERTAIN') ORDER BY created_at DESC LIMIT 1`);
-  if(existing.rows.length){await client.query('COMMIT');return existing.rows[0].metadata as ActiveApifyJob;}
+  if(existing.rows.length){if(options.schedulerRunId)throw Error('APIFY_OTHER_COLLECTION_STILL_ACTIVE');await client.query('COMMIT');return existing.rows[0].metadata as ActiveApifyJob;}
   await client.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'APIFY_ACTIVE_COLLECTION',$2::jsonb)`,[userId,JSON.stringify(job)]);
   await client.query('COMMIT');return job;
  }catch(e){await client.query('ROLLBACK');throw e;}finally{client.release();}
@@ -139,7 +144,7 @@ export async function advanceActiveApifyJob(pool:Pool,jobId:string){
    await save(client,row.id,job);await client.query('COMMIT');transaction=false;
    try{
     // The configured cap goes straight to Apify. No cash-balance verification loop.
-    const response=await provider('acts/'+step.actorId.replace('/','~')+'/runs?maxTotalChargeUsd='+step.cap,token,{method:'POST',body:JSON.stringify(input)});
+    const response=await provider('acts/'+step.actorId.replace('/','~')+'/runs?maxTotalChargeUsd='+step.cap+apifyRunWebhookParameter(job,step.kind),token,{method:'POST',body:JSON.stringify(input)});
     if(!response.ok){step.status='FAILED';step.error='APIFY_PROVIDER_REJECTED_RUN_'+response.status;}
     else{
      const run=(await response.json() as {data?:{id?:string;actId?:string}}).data;

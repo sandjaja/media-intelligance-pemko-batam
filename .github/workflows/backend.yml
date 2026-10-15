@@ -37,6 +37,7 @@ jobs:
           node --check phase3-outcome-ui.js
           node --check issue-management-v2.js
           node --check social-intelligence.js
+          node --check admin-scheduler.js
           node --check owned-channel-intelligence.js
           node --check online-latest-news.js
           node --check communication-strategy-ui.js

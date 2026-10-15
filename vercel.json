@@ -3,8 +3,18 @@
   "version": 2,
   "builds": [
     {
+      "src": "backend/src/cron-apify-complete.ts",
+      "use": "@vercel/node",
+      "config": {
+        "maxDuration": 300
+      }
+    },
+    {
       "src": "backend/src/cron-collection.ts",
-      "use": "@vercel/node"
+      "use": "@vercel/node",
+      "config": {
+        "maxDuration": 300
+      }
     },
     {
       "src": "backend/src/vercel.ts",
@@ -48,6 +58,10 @@
     }
   ],
   "routes": [
+    {
+      "src": "/api/cron/apify-complete",
+      "dest": "/backend/src/cron-apify-complete.ts"
+    },
     {
       "src": "/api/cron/collection",
       "dest": "/backend/src/cron-collection.ts"
