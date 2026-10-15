@@ -20,6 +20,7 @@ function gatewayPool(options: { route?: boolean; budget?: boolean; providerError
     if (sql.includes('SUM(CASE')) return { rows: [{ usd: 0 }], rowCount: 1 };
     if (sql.includes('INSERT INTO ai_budget_reservations')) return { rows: [{ id: 7 }], rowCount: 1 };
     if (sql.includes('FROM ai_budget_reservations r')) return { rows: [{ task_id: 3, status: 'reserved', provider_id: 2 }], rowCount: 1 };
+    if (sql.includes('SELECT status FROM ai_budget_reservations WHERE id=$1 FOR UPDATE')) return { rows: [{ status: 'reserved' }], rowCount: 1 };
     if (sql.includes('FROM ai_model_prices pr')) return { rows: [{ input_usd_per_million: 1, output_usd_per_million: 2 }], rowCount: 1 };
     if (sql.includes('UPDATE ai_budget_reservations')) return { rows: [{ id: 7 }], rowCount: 1 };
     if (sql.includes('INSERT INTO ai_usage_logs')) {
