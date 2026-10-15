@@ -95,7 +95,8 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
     try {
       const { rows } = await pool.query(
         `SELECT p.code AS provider_code, p.name AS provider_name,
-                m.code AS model_code, m.name AS model_name
+                m.code AS model_code, m.name AS model_name,
+                CASE WHEN LOWER(p.code) = 'gemini' THEN 'free' ELSE 'paid' END AS pricing_tier
            FROM ai_models m
            JOIN ai_providers p ON p.id = m.provider_id
           WHERE p.enabled = TRUE AND m.enabled = TRUE
