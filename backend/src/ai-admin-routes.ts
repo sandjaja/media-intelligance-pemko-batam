@@ -216,6 +216,17 @@ export async function registerAiAdminRoutes(app:FastifyInstance,pool:Pool,jwtSec
       const committed=await client.query(`SELECT COALESCE(SUM(CASE WHEN r.status='settled' THEN r.settled_usd
         WHEN r.status='reserved' THEN r.reserved_usd ELSE 0 END),0) AS usd
         FROM ai_budget_reservations r JOIN ai_provider_budgets b ON b.id=r.budget_id WHERE b.provider_id=$1`,[providerId]);
+      // Maintain a single current reservation ledger for providers with no
+      // existing active budget. Its limit is not the authority: manual balance is.
+      const currentBudget=await client.query(`SELECT id FROM ai_provider_budgets
+        WHERE provider_id=$1 AND enabled=TRUE AND CURRENT_DATE>=period_start
+          AND CURRENT_DATE<period_end LIMIT 2`,[providerId]);
+      if(currentBudget.rows.length>1){await client.query('ROLLBACK');return reply.code(409).send({error:'AI_BUDGET_AMBIGUOUS'});}
+      if(currentBudget.rows.length===0){
+        await client.query(`INSERT INTO ai_provider_budgets
+          (provider_id,period_start,period_end,limit_usd,enabled)
+          VALUES($1,CURRENT_DATE,(CURRENT_DATE + INTERVAL '100 years')::date,100000000,TRUE)`,[providerId]);
+      }
       await client.query(`INSERT INTO ai_provider_balance_snapshots
         (provider_id,balance_usd,committed_baseline_usd,reason,recorded_by)
         VALUES($1,$2,$3,$4,$5)`,[providerId,parsed.data.balanceUsd,committed.rows[0].usd,parsed.data.reason,
