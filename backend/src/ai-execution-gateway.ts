@@ -2,6 +2,7 @@ import type { Pool } from 'pg';
 import { randomUUID } from 'node:crypto';
 import { reserveAiBudget, settleAiBudgetWithUsage } from './ai-budget-reservation.js';
 import { invokeAiProvider, type AiProvider } from './ai-provider-adapters.js';
+import { decryptIntegrationCredential } from './integration-credentials.js';
 
 export type AiGatewayUsage = { inputTokens: number; outputTokens: number };
 export type AiGatewayResult<T> = { data: T; usage: AiGatewayUsage; actualUsd: number };
@@ -59,9 +60,8 @@ export async function executeConfiguredAi(pool: Pool, input: {
   modelCode: string;
   prompt: string;
   estimatedUsd: number;
-  apiKey: string;
 }): Promise<AiGatewayResult<unknown>> {
-  if (!input.taskCode || !input.modelCode || !input.prompt || !input.apiKey) {
+  if (!input.taskCode || !input.modelCode || !input.prompt) {
     throw new Error('AI_GATEWAY_INVALID_REQUEST');
   }
   const { rows } = await pool.query(
@@ -77,6 +77,20 @@ export async function executeConfiguredAi(pool: Pool, input: {
   );
   if (!rows.length) throw new Error('AI_GATEWAY_ROUTE_NOT_CONFIGURED');
   const route = rows[0];
+  // Credentials never come from Humas requests. Read encrypted server-side
+  // configuration and fail closed if the provider key cannot be decrypted.
+  const credential = await pool.query(
+    'SELECT credential_ciphertext FROM ai_provider_credentials WHERE provider_id=$1',
+    [route.provider_id],
+  );
+  if (!credential.rowCount) throw new Error('AI_GATEWAY_CREDENTIAL_NOT_CONFIGURED');
+  let apiKey: string;
+  try {
+    apiKey = decryptIntegrationCredential(credential.rows[0].credential_ciphertext);
+  } catch {
+    throw new Error('AI_GATEWAY_CREDENTIAL_UNAVAILABLE');
+  }
+  if (!apiKey) throw new Error('AI_GATEWAY_CREDENTIAL_UNAVAILABLE');
   return executeBudgetedAi(pool, {
     userId: input.userId,
     taskId: Number(route.task_id),
@@ -86,7 +100,7 @@ export async function executeConfiguredAi(pool: Pool, input: {
     invoke: () => invokeAiProvider({
       provider: input.provider,
       model: input.modelCode,
-      apiKey: input.apiKey,
+      apiKey,
       prompt: input.prompt,
     }),
   });
