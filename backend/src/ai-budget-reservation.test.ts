@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import type { Pool } from 'pg';
 import { calculateAiTokenCost, reserveAiBudget, settleAiBudgetWithUsage } from './ai-budget-reservation.js';
 
-function fakePool(options: { limit: number; spent: number; missingBudget?: boolean; failLog?: boolean }) {
+function fakePool(options: { limit: number; spent: number; missingBudget?: boolean; missingSnapshot?: boolean; baseline?: number; failLog?: boolean }) {
   const statements: string[] = [];
   let released = false;
   const client = {
@@ -11,7 +11,7 @@ function fakePool(options: { limit: number; spent: number; missingBudget?: boole
       statements.push(sql);
       if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rows: [], rowCount: 0 };
       if (sql.includes('FROM ai_providers WHERE')) return { rows: [{ id: 1 }], rowCount: 1 };
-      if (sql.includes('FROM ai_provider_balance_snapshots')) return { rows: [{ balance_usd: options.limit, committed_baseline_usd: 0 }], rowCount: 1 };
+      if (sql.includes('FROM ai_provider_balance_snapshots')) return options.missingSnapshot ? { rows: [], rowCount: 0 } : { rows: [{ balance_usd: options.limit, committed_baseline_usd: options.baseline ?? 0 }], rowCount: 1 };
       if (sql.includes('FROM ai_provider_budgets')) {
         return options.missingBudget ? { rows: [], rowCount: 0 } : { rows: [{ id: 10, limit_usd: options.limit }], rowCount: 1 };
       }
@@ -62,6 +62,24 @@ test('reservation fails closed without an active budget', async () => {
   const db = fakePool({ limit: 1, spent: 0, missingBudget: true });
   await assert.rejects(reserveAiBudget(db.pool, { providerId: 1, taskId: 3, requestKey: 'mock-3', estimatedUsd: 0.1 }), /AI_BUDGET_NOT_CONFIGURED/);
   assert.ok(db.statements.includes('ROLLBACK'));
+});
+
+test('paid reservation fails closed without an admin-entered balance', async () => {
+  const db = fakePool({ limit: 10, spent: 0, missingSnapshot: true });
+  await assert.rejects(reserveAiBudget(db.pool, { providerId: 1, taskId: 3, requestKey: 'no-balance', estimatedUsd: 0.1 }), /AI_MANUAL_BALANCE_NOT_CONFIGURED/);
+  assert.equal(db.statements.some(s => s.includes('INSERT INTO ai_budget_reservations')), false);
+});
+
+test('new manual balance does not deduct pre-snapshot spending again', async () => {
+  const db = fakePool({ limit: 5, spent: 102, baseline: 100 });
+  await reserveAiBudget(db.pool, { providerId: 1, taskId: 3, requestKey: 'new-baseline', estimatedUsd: 2.5 });
+  assert.ok(db.statements.includes('COMMIT'));
+});
+
+test('manual balance blocks reservations exceeding remaining after baseline', async () => {
+  const db = fakePool({ limit: 5, spent: 104, baseline: 100 });
+  await assert.rejects(reserveAiBudget(db.pool, { providerId: 1, taskId: 3, requestKey: 'over-balance', estimatedUsd: 1.5 }), /AI_BUDGET_EXCEEDED/);
+  assert.equal(db.statements.some(s => s.includes('INSERT INTO ai_budget_reservations')), false);
 });
 
 test('settlement records Humas user and actual token cost atomically', async () => {
