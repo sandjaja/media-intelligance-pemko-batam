@@ -87,7 +87,27 @@ Output JSON:
  if(!rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
  const key=decryptIntegrationCredential(rows[0].credential_ciphertext);
  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},signal:AbortSignal.timeout(30000),body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json',maxOutputTokens:4096}})});
- if(!r.ok)throw new Error(r.status===429?'AI_GEMINI_QUOTA_EXCEEDED':`Gemini HTTP ${r.status}`);const payload=await r.json() as any;if(payload.promptFeedback?.blockReason||payload.candidates?.[0]?.finishReason==='SAFETY')throw new Error('AI_GEMINI_RESPONSE_BLOCKED');if(payload.candidates?.[0]?.finishReason!=='STOP')throw new Error('AI_GEMINI_RESPONSE_INCOMPLETE');const raw=payload.candidates[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');return JSON.parse(raw);
+ if(!r.ok)throw new Error(r.status===429?'AI_GEMINI_QUOTA_EXCEEDED':`Gemini HTTP ${r.status}`);const payload=await r.json() as any;if(payload.promptFeedback?.blockReason||payload.candidates?.[0]?.finishReason==='SAFETY')throw new Error('AI_GEMINI_RESPONSE_BLOCKED');if(payload.candidates?.[0]?.finishReason!=='STOP')throw new Error('AI_GEMINI_RESPONSE_INCOMPLETE');const raw=payload.candidates[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');
+ const generated=JSON.parse(raw);
+ // Free-tier calls do not reserve USD, but must still be recorded in the
+ // shared token ledger. Do not report a successful generation if usage is
+ // missing or the ledger write fails.
+ const usage=payload.usageMetadata;
+ const validTokens=(n:unknown)=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0;
+ if(!validTokens(usage?.promptTokenCount)||!validTokens(usage?.candidatesTokenCount)||
+    (usage?.thoughtsTokenCount!==undefined&&!validTokens(usage.thoughtsTokenCount)))
+   throw new Error('AI_GEMINI_USAGE_MISSING');
+ const inputTokens=usage.promptTokenCount as number;
+ const outputTokens=(usage.candidatesTokenCount as number)+(usage.thoughtsTokenCount??0);
+ if(!Number.isSafeInteger(outputTokens))throw new Error('AI_GEMINI_USAGE_INVALID');
+ const logged=await pool.query(`INSERT INTO ai_usage_logs(task_id,provider_id,model_id,status,input_tokens,output_tokens)
+   SELECT t.id,p.id,m.id,'success',$2,$3
+   FROM ai_tasks t JOIN ai_providers p ON p.code='gemini'
+   JOIN ai_models m ON m.provider_id=p.id AND m.code=$1
+   WHERE t.code='strakom_analysis' AND p.enabled=TRUE AND m.enabled=TRUE
+   RETURNING id`,[model,inputTokens,outputTokens]);
+ if(!logged.rowCount)throw new Error('AI_GEMINI_USAGE_LOG_FAILED');
+ return generated;
 }
 
 export async function registerPhase5StrategyRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
