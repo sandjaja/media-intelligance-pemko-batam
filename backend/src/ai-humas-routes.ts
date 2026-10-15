@@ -211,7 +211,7 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
         const remaining=valid?Math.max(0,balance-used!):null;
         const ratio=valid&&balance>0?used!/balance:null;
         const status=!valid?'not_configured':remaining===0?'exhausted':ratio!=null&&ratio>=0.8?'near_limit':'available';
-        return {provider_code:row.provider_code,status,remaining_budget_usd:remaining,
+        return {provider_code:row.provider_code,status,initial_balance_usd:balance,used_since_update_usd:used,usage_percent:ratio==null?null:Math.min(100,Math.round(ratio*1000)/10),remaining_budget_usd:remaining,
           warning:status==='near_limit'?'Saldo AI berbayar telah digunakan 80% atau lebih. Hubungi Admin.':
             status==='available'?null:'Saldo AI berbayar tidak tersedia atau habis. Hubungi Admin.'};
       }),notice:'Saldo internal berdasarkan input manual Admin, bukan saldo API provider.'};
