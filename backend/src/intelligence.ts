@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { decryptIntegrationCredential } from './integration-credentials.js';
 
 export type IntelligenceArticle = {
   id: string;
@@ -49,29 +50,30 @@ function fallbackBrief(rows: IntelligenceArticle[]) {
   };
 }
 
-async function providerBrief(rows: IntelligenceArticle[]) {
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) return null;
-  const model = process.env.OPENAI_MODEL || 'gpt-5-mini';
+async function providerBrief(pool: Pool, rows: IntelligenceArticle[]) {
+  const credential = await pool.query(
+    "SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1",
+  );
+  if (!credential.rows[0]) return null;
+  const key = decryptIntegrationCredential(credential.rows[0].credential_ciphertext);
+  const models = await pool.query(
+    "SELECT m.code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 1",
+  );
+  if (!models.rows[0]) return null;
+  const model = models.rows[0].code as string;
   const input = rows.slice(0, 10).map((r, i) => ({ rank: i + 1, ...r }));
-  const response = await fetch('https://api.openai.com/v1/responses', {
+  const prompt = 'Anda adalah analis media intelligence pemerintah daerah. Buat executive brief singkat, faktual, tidak mengarang fakta, pisahkan fakta dan rekomendasi. Kembalikan JSON dengan keys headline, situation, implications, actions (array), key_message, priority. Priority hanya WATCH, MEDIUM, HIGH, IMMEDIATE.\\nDATA:\\n' + JSON.stringify(input);
+  const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {
     method: 'POST',
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
-    body: JSON.stringify({
-      model,
-      input: [
-        { role: 'system', content: [{ type: 'input_text', text: 'Anda adalah analis media intelligence untuk pemerintah daerah. Buat executive brief singkat, faktual, tidak mengarang fakta, dan pisahkan fakta dari rekomendasi. Output JSON dengan keys headline, situation, implications, actions (array), key_message, priority. Priority hanya WATCH, MEDIUM, HIGH, IMMEDIATE.' }] },
-        { role: 'user', content: [{ type: 'input_text', text: JSON.stringify(input) }] }
-      ],
-      text: { format: { type: 'json_object' } },
-      max_output_tokens: 900
-    })
+    headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json' } }),
+    signal: AbortSignal.timeout(15000),
   });
-  if (!response.ok) throw new Error(`AI provider HTTP ${response.status}`);
+  if (!response.ok) throw new Error('Gemini HTTP ' + response.status);
   const payload = await response.json() as any;
-  const text = payload.output_text || payload.output?.flatMap((x: any) => x.content || []).find((x: any) => x.type === 'output_text')?.text;
-  if (!text) throw new Error('AI provider returned no text');
-  return { mode: 'ai', ...JSON.parse(text) };
+  const raw = payload.candidates?.[0]?.content?.parts?.map((x: any) => x.text || '').join('');
+  if (!raw) throw new Error('Gemini returned no text');
+  return { mode: 'ai', ...JSON.parse(raw) };
 }
 
 export async function getExecutiveBrief(pool: Pool, opdId: string | null = null) {
@@ -81,5 +83,5 @@ export async function getExecutiveBrief(pool: Pool, opdId: string | null = null)
   params.push(20);
   const { rows } = await pool.query(`SELECT a.id,a.title,a.summary,a.published_at,a.sentiment,a.importance_score,a.impact_score,a.velocity_score,a.risk_score,a.risk_level,ms.name source_name,o.name opd_name FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id LEFT JOIN opd o ON o.id=a.opd_id ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY a.risk_score DESC,a.impact_score DESC,a.importance_score DESC,a.published_at DESC NULLS LAST LIMIT $${params.length}`, params);
   const data = rows.map(r => ({ ...r, id: String(r.id), importance_score: num(r.importance_score), impact_score: num(r.impact_score), velocity_score: num(r.velocity_score), risk_score: num(r.risk_score) })) as IntelligenceArticle[];
-  try { return await providerBrief(data) ?? fallbackBrief(data); } catch { return { ...fallbackBrief(data), mode: 'deterministic-fallback', provider_error: true }; }
+  try { return await providerBrief(pool, data) ?? fallbackBrief(data); } catch { return { ...fallbackBrief(data), mode: 'deterministic-fallback', provider_error: true }; }
 }
