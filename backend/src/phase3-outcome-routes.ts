@@ -1,6 +1,8 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
 import { decryptIntegrationCredential } from './integration-credentials.js';
+import { executeConfiguredAi } from './ai-execution-gateway.js';
+import type { AiProvider } from './ai-provider-adapters.js';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
@@ -44,7 +46,7 @@ async function fetchWebsitePublication(rawUrl:string){
     return cleanPublicationHtml((await r.text()).slice(0,2_000_000));
   }finally{clearTimeout(timer)}
 }
-async function assertHumasGeminiSelection(pool:Pool,taskCode:'publication_analysis'|'monitoring_analysis'){
+async function resolveHumasAiSelection(pool:Pool,taskCode:'publication_analysis'|'monitoring_analysis'){
   // Existing publication/monitoring paths support Gemini only. Fail closed for
   // selected paid models until their evidence-aware gateway path is connected.
   const selected=await pool.query(`SELECT p.code AS provider_code,p.enabled AS provider_enabled,
@@ -54,12 +56,13 @@ async function assertHumasGeminiSelection(pool:Pool,taskCode:'publication_analys
     JOIN ai_providers p ON p.id=m.provider_id
     WHERE s.task_code=$1 LIMIT 1`,[taskCode]);
   const row=selected.rows[0];
-  if(row && row.provider_code!=='gemini')throw new Error('AI_HUMAS_PAID_GATEWAY_NOT_READY');
   if(row && (!row.provider_enabled||!row.model_enabled))throw new Error('AI_HUMAS_SELECTED_MODEL_DISABLED');
-  return row?.model_code as string|undefined;
+  return row as {provider_code:string;model_code:string}|undefined;
 }
 async function analyzePublicationPackage(pool:Pool,input:any,mediaParts:any[]=[]){
-  const selectedModel=await assertHumasGeminiSelection(pool,'publication_analysis');
+  const selection=await resolveHumasAiSelection(pool,'publication_analysis');
+  if(selection?.provider_code!=='gemini' && selection)throw new Error('AI_PUBLICATION_MULTIMODAL_PAID_GATEWAY_NOT_READY');
+  const selectedModel=selection?.model_code;
   const credentials=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
   if(!credentials.rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
   const key=decryptIntegrationCredential(credentials.rows[0].credential_ciphertext);
@@ -113,8 +116,9 @@ Output JSON:
   return JSON.parse(raw);
 }
 
-async function analyzeMonitoringAgainstPublication(pool:Pool,input:any){
-  const selectedModel=await assertHumasGeminiSelection(pool,'monitoring_analysis');
+async function analyzeMonitoringAgainstPublication(pool:Pool,input:any,userId:string){
+  const selection=await resolveHumasAiSelection(pool,'monitoring_analysis');
+  const selectedModel=selection?.model_code;
   const credentials=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
   if(!credentials.rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
   const key=decryptIntegrationCredential(credentials.rows[0].credential_ciphertext);
@@ -167,6 +171,16 @@ HASILKAN JSON:
 "districtAnticipation":[{"district":"nama dari context","anticipation":"...","reason":"..."}],
 "nextCommunication":{"action":"NO_FURTHER_ACTION|KEEP_WATCHING|REINFORCE_MESSAGE|ADDITIONAL_CLARIFICATION|FOLLOWUP_PUBLICATION|NEXT_CYCLE_REVIEW","priority":"HIGH|MEDIUM|LOW","recommendation":"...","reason":"..."},
 "watchNext":["..."],"remainingGap":["..."],"newSignals":["..."]}.`)+'\n\nDATA:\n'+JSON.stringify(input).slice(0,50000);
+  if(selection && selection.provider_code!=='gemini') {
+    if(prompt.length>12000)throw new Error('AI_MONITORING_PROMPT_TOO_LARGE');
+    const numericUserId=Number(userId);
+    if(!Number.isSafeInteger(numericUserId)||numericUserId<=0)throw new Error('AI_GATEWAY_INVALID_CONTEXT');
+    const result=await executeConfiguredAi(pool,{
+      userId:numericUserId,taskCode:'monitoring_analysis',
+      provider:selection.provider_code as AiProvider,modelCode:model,prompt
+    });
+    return result.data;
+  }
   const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}})});
   if(!r.ok)throw new Error(`Gemini HTTP ${r.status}`);
   const payload=await r.json() as any,raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');
@@ -413,7 +427,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
           ...owned.map((x:any)=>({ref:`owned:${x.id}`,source:'OWNED',title:x.title||'',text:String(x.content||'').slice(0,3500)}))
         ];
         if(Array.isArray(publicationAnalysis?.monitoringFocus)&&publicationAnalysis.monitoringFocus.length){
-          const issueContext=(gapForPublication?.result as any)?.data?.issueContext||(gapForPublication?.result as any)?.issueContext||{};focusAssessment=await analyzeMonitoringAgainstPublication(pool,{issue:{title:String(w.title||''),riskLevel:w.risk_level||null,momentum:w.momentum||null},routing:{leadOpd:w.lead_opd_name||responseForPublication?.opd_name||issueContext?.opds?.primary?.name||null,supportingOpds:issueContext?.opds?.supporting||[],geographicScope:issueContext?.geographicScope||null,districts:issueContext?.districts||issueContext?.geography?.districts||[]},gap:gapForPublication?.result||null,finalResponse:responseForPublication||null,publicationAnalysis,monitoringFocus:publicationAnalysis.monitoringFocus,evidence:evidenceForAi,evidenceCounts:{online:online.length,print:print.length,social:externalSocial.length,owned:owned.length,total:evidenceForAi.length}});
+          const issueContext=(gapForPublication?.result as any)?.data?.issueContext||(gapForPublication?.result as any)?.issueContext||{};focusAssessment=await analyzeMonitoringAgainstPublication(pool,{issue:{title:String(w.title||''),riskLevel:w.risk_level||null,momentum:w.momentum||null},routing:{leadOpd:w.lead_opd_name||responseForPublication?.opd_name||issueContext?.opds?.primary?.name||null,supportingOpds:issueContext?.opds?.supporting||[],geographicScope:issueContext?.geographicScope||null,districts:issueContext?.districts||issueContext?.geography?.districts||[]},gap:gapForPublication?.result||null,finalResponse:responseForPublication||null,publicationAnalysis,monitoringFocus:publicationAnalysis.monitoringFocus,evidence:evidenceForAi,evidenceCounts:{online:online.length,print:print.length,social:externalSocial.length,owned:owned.length,total:evidenceForAi.length}},ctx.id);
         }
       }
     }catch(error:any){request.log.warn({issueId,reason:String(error?.message||error).slice(0,180)},'publication-package monitoring analysis unavailable');}
@@ -471,7 +485,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
           ...owned.map((x:any)=>({ref:`owned:${x.id}`,source:'OWNED',title:x.title||'',text:String(x.content||'').slice(0,3500)}))
         ];
         if(Array.isArray(publicationAnalysis?.monitoringFocus)&&publicationAnalysis.monitoringFocus.length){
-          const issueContext=(gapForPublication?.result as any)?.data?.issueContext||(gapForPublication?.result as any)?.issueContext||{};focusAssessment=await analyzeMonitoringAgainstPublication(pool,{issue:{title:String(w.title||''),riskLevel:w.risk_level||null,momentum:w.momentum||null},routing:{leadOpd:w.lead_opd_name||responseForPublication?.opd_name||issueContext?.opds?.primary?.name||null,supportingOpds:issueContext?.opds?.supporting||[],geographicScope:issueContext?.geographicScope||null,districts:issueContext?.districts||issueContext?.geography?.districts||[]},gap:gapForPublication?.result||null,finalResponse:responseForPublication||null,publicationAnalysis,monitoringFocus:publicationAnalysis.monitoringFocus,evidence:evidenceForAi,evidenceCounts:{online:online.length,print:print.length,social:externalSocial.length,owned:owned.length,total:evidenceForAi.length}});
+          const issueContext=(gapForPublication?.result as any)?.data?.issueContext||(gapForPublication?.result as any)?.issueContext||{};focusAssessment=await analyzeMonitoringAgainstPublication(pool,{issue:{title:String(w.title||''),riskLevel:w.risk_level||null,momentum:w.momentum||null},routing:{leadOpd:w.lead_opd_name||responseForPublication?.opd_name||issueContext?.opds?.primary?.name||null,supportingOpds:issueContext?.opds?.supporting||[],geographicScope:issueContext?.geographicScope||null,districts:issueContext?.districts||issueContext?.geography?.districts||[]},gap:gapForPublication?.result||null,finalResponse:responseForPublication||null,publicationAnalysis,monitoringFocus:publicationAnalysis.monitoringFocus,evidence:evidenceForAi,evidenceCounts:{online:online.length,print:print.length,social:externalSocial.length,owned:owned.length,total:evidenceForAi.length}},ctx.id);
         }
       }
     }catch(error:any){request.log.warn({issueId,reason:String(error?.message||error).slice(0,180)},'publication-package monitoring analysis unavailable');}
