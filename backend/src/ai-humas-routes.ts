@@ -33,6 +33,7 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
   app.get('/api/humas/ai/usage-summary', { preHandler: guard }, async (request, reply) => {
     try {
       const token=request.cookies.access_token;
+      if(!token)return reply.code(401).send({error:'UNAUTHENTICATED'});
       const payload=jwt.verify(token,jwtSecret) as jwt.JwtPayload;
       if(typeof payload.sub!=='string')return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'});
       const { rows } = await pool.query(
