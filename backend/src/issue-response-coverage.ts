@@ -39,7 +39,7 @@ export function matchOfficialResponseCoverage(angles:CoverageAngle[],owned:Owned
 }
 
 
-export async function matchDynamicOfficialResponseCoverage(angles:CoverageAngle[],owned:OwnedResponse[]){
+export async function matchDynamicOfficialResponseCoverage(angles:CoverageAngle[],owned:OwnedResponse[],pool?:Pool){
  if(!angles.length)return{status:'UNASSESSED',coverage:[],officialResponseCount:owned.length,mode:'dynamic'};
  if(!owned.length)return{status:'NO_RESPONSE',coverage:angles.map(a=>({key:a.key,label:a.label,claim:a.claim||a.label,status:'NOT_COVERED',matchScore:0,matchedOfficial:null,externalEvidenceCount:a.evidence.length})),officialResponseCount:0,mode:'dynamic'};
  if(!pool)return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback',fallbackReason:'GEMINI_DATABASE_POOL_MISSING'};
