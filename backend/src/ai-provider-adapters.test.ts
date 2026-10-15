@@ -74,3 +74,29 @@ test('Gemini thinking tokens count toward billable output usage', async () => {
   const result = await invokeAiProvider({ provider: 'gemini', model: 'test-model', apiKey: 'mock', prompt: 'hello' });
   assert.deepEqual(result.usage, { inputTokens: 12, outputTokens: 22 });
 });
+
+test('Gemini truncated JSON is rejected even if parseable', async () => {
+  mockResponse({
+    candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [{ text: '{"ok":true}' }] } }],
+    usageMetadata: { promptTokenCount: 12, candidatesTokenCount: 7 },
+  });
+  await assert.rejects(invokeAiProvider({ provider: 'gemini', model: 'test-model', apiKey: 'mock', prompt: 'hello' }), /AI_PROVIDER_OUTPUT_TRUNCATED/);
+});
+
+test('OpenAI incomplete response is rejected even if parseable', async () => {
+  mockResponse({
+    status: 'incomplete',
+    output: [{ content: [{ type: 'output_text', text: '{"ok":true}' }] }],
+    usage: { input_tokens: 12, output_tokens: 7 },
+  });
+  await assert.rejects(invokeAiProvider({ provider: 'openai', model: 'test-model', apiKey: 'mock', prompt: 'hello' }), /AI_PROVIDER_OUTPUT_TRUNCATED/);
+});
+
+test('Claude max token stop is rejected even if parseable', async () => {
+  mockResponse({
+    stop_reason: 'max_tokens',
+    content: [{ type: 'text', text: '{"ok":true}' }],
+    usage: { input_tokens: 12, output_tokens: 7 },
+  });
+  await assert.rejects(invokeAiProvider({ provider: 'anthropic', model: 'test-model', apiKey: 'mock', prompt: 'hello' }), /AI_PROVIDER_OUTPUT_TRUNCATED/);
+});
