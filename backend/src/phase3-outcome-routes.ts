@@ -76,6 +76,7 @@ function validatePublicationEvidenceSignature(mime:string,buf:Buffer):void{
   }
 }
 async function readPublicationEvidenceLimited(stream:ReadableStream<Uint8Array>,maxBytes=8_000_000):Promise<Buffer>{
+  if(!Number.isSafeInteger(maxBytes)||maxBytes<=0||maxBytes>8_000_000)throw new Error('PUBLICATION_EVIDENCE_INVALID_LIMIT');
   const chunks:Buffer[]=[];
   let total=0;
   for await(const chunk of Readable.fromWeb(stream as any)){
