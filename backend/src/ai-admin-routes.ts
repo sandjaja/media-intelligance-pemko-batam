@@ -41,7 +41,13 @@ export async function registerAiAdminRoutes(app:FastifyInstance,pool:Pool,jwtSec
       if(!exists.rows[0]?.available)return reply.code(503).send({error:'AI_GEMINI_QUOTA_MIGRATION_REQUIRED'});
       const result=await pool.query(`SELECT m.id AS model_id,m.code AS model_code,m.name AS model_name,
         l.max_requests,COALESCE(l.enabled,FALSE) AS enabled,
-        COALESCE(u.reserved_requests,0)::int AS reserved_today
+        COALESCE(u.reserved_requests,0)::int AS reserved_today,
+        CASE WHEN l.max_requests IS NOT NULL THEN GREATEST(0,l.max_requests-COALESCE(u.reserved_requests,0)) ELSE NULL END AS remaining_today,
+        CASE WHEN l.max_requests>0 THEN ROUND(100.0*COALESCE(u.reserved_requests,0)/l.max_requests,1) ELSE NULL END AS usage_percent,
+        CASE WHEN l.max_requests IS NULL OR NOT COALESCE(l.enabled,FALSE) THEN 'not_configured'
+             WHEN COALESCE(u.reserved_requests,0)>=l.max_requests THEN 'exhausted'
+             WHEN COALESCE(u.reserved_requests,0)*5>=l.max_requests*4 THEN 'near_limit'
+             ELSE 'available' END AS quota_status
         FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id
         LEFT JOIN ai_free_tier_daily_limits l ON l.model_id=m.id
         LEFT JOIN ai_free_tier_daily_usage u ON u.model_id=m.id
