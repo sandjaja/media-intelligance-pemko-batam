@@ -19,15 +19,15 @@ function mockQuota(limit:number,enabled=true,available=true){
  return {pool:pool as unknown as Pick<Pool,'query'>,used:()=>used};
 }
 
-test('disabled quota does not reserve',async()=>{
+test('disabled quota blocks calls',async()=>{
  const x=mockQuota(1,false);
- await reserveGeminiDailyQuota(x.pool,'gemini-test');
+ await assert.rejects(reserveGeminiDailyQuota(x.pool,'gemini-test'),/AI_GEMINI_DAILY_QUOTA_DISABLED/);
  assert.equal(x.used(),0);
 });
 
-test('unapplied quota migration preserves existing free path',async()=>{
+test('unapplied quota migration blocks calls',async()=>{
  const x=mockQuota(1,true,false);
- await reserveGeminiDailyQuota(x.pool,'gemini-test');
+ await assert.rejects(reserveGeminiDailyQuota(x.pool,'gemini-test'),/AI_GEMINI_DAILY_QUOTA_NOT_CONFIGURED/);
  assert.equal(x.used(),0);
 });
 
