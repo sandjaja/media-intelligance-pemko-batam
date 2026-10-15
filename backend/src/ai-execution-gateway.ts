@@ -1,6 +1,6 @@
 import type { Pool } from 'pg';
 import { randomUUID } from 'node:crypto';
-import { reserveAiBudget, settleAiBudgetWithUsage } from './ai-budget-reservation.js';
+import { reserveAiBudget, settleAiBudgetWithUsage, getAiModelPrice, calculateAiTokenCost } from './ai-budget-reservation.js';
 import { invokeAiProvider, type AiProvider } from './ai-provider-adapters.js';
 import { decryptIntegrationCredential } from './integration-credentials.js';
 
@@ -59,7 +59,6 @@ export async function executeConfiguredAi(pool: Pool, input: {
   provider: AiProvider;
   modelCode: string;
   prompt: string;
-  estimatedUsd: number;
 }): Promise<AiGatewayResult<unknown>> {
   if (!input.taskCode || !input.modelCode || !input.prompt) {
     throw new Error('AI_GATEWAY_INVALID_REQUEST');
@@ -91,12 +90,15 @@ export async function executeConfiguredAi(pool: Pool, input: {
     throw new Error('AI_GATEWAY_CREDENTIAL_UNAVAILABLE');
   }
   if (!apiKey) throw new Error('AI_GATEWAY_CREDENTIAL_UNAVAILABLE');
+  const price = await getAiModelPrice(pool, Number(route.model_id));
+  const estimatedUsd = calculateAiTokenCost(Math.max(1024, Math.ceil(input.prompt.length / 2)), 8192, price);
+  if (estimatedUsd <= 0) throw new Error('AI_GATEWAY_ZERO_COST_REQUIRES_FREE_TIER_POLICY');
   return executeBudgetedAi(pool, {
     userId: input.userId,
     taskId: Number(route.task_id),
     providerId: Number(route.provider_id),
     modelId: Number(route.model_id),
-    estimatedUsd: input.estimatedUsd,
+    estimatedUsd,
     invoke: () => invokeAiProvider({
       provider: input.provider,
       model: input.modelCode,
