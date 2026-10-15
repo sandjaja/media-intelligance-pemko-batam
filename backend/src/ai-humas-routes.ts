@@ -89,6 +89,10 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
         await client.query('ROLLBACK');
         return reply.code(409).send({ error: 'AI_PROMPT_VERSION_CONFLICT' });
       }
+      if (current.rows[0].prompt_text.trim() === body.prompt.trim()) {
+        await client.query('ROLLBACK');
+        return reply.code(409).send({ error: 'AI_PROMPT_UNCHANGED' });
+      }
       await client.query(
         'INSERT INTO ai_humas_task_prompt_history(task_code,version,prompt_text,changed_by) VALUES($1,$2,$3,$4)',
         [taskCode,current.rows[0].version,current.rows[0].prompt_text,payload.sub],
