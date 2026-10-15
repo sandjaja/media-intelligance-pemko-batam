@@ -68,6 +68,29 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
     }
   });
 
+  // Read-only routing preview. A configured route is not proof that budget checks
+  // or provider execution are enabled; generation must enforce those separately.
+  app.get('/api/humas/ai/task-routes', { preHandler: guard }, async (_request, reply) => {
+    try {
+      const { rows } = await pool.query(
+        `SELECT t.code AS task_code, p.code AS provider_code,
+                m.code AS model_code, r.priority, r.fallback_enabled
+           FROM ai_task_routes r
+           JOIN ai_tasks t ON t.id = r.task_id
+           JOIN ai_providers p ON p.id = r.provider_id
+           JOIN ai_models m ON m.id = r.model_id AND m.provider_id = p.id
+          WHERE t.code = ANY($1::text[])
+            AND t.enabled = TRUE AND r.enabled = TRUE
+            AND p.enabled = TRUE AND m.enabled = TRUE
+          ORDER BY t.code, r.priority`,
+        [HUMAS_AI_TASKS],
+      );
+      return { data: rows, execution_ready: false };
+    } catch {
+      return reply.code(503).send({ error: 'AI_ROUTES_UNAVAILABLE' });
+    }
+  });
+
   app.get('/api/humas/ai/available-models', { preHandler: guard }, async (_request, reply) => {
     try {
       const { rows } = await pool.query(
