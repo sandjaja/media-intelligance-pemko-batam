@@ -19,6 +19,7 @@ function fakePool(options: { limit: number; spent: number; missingBudget?: boole
       if (sql.includes('FROM ai_budget_reservations r') && sql.includes('JOIN ai_provider_budgets')) {
         return { rows: [{ task_id: 3, status: 'reserved', provider_id: 1 }], rowCount: 1 };
       }
+      if (sql.includes('SELECT status FROM ai_budget_reservations WHERE id=$1 FOR UPDATE')) return { rows: [{ status: 'reserved' }], rowCount: 1 };
       if (sql.includes('FROM ai_model_prices pr')) {
         return { rows: [{ input_usd_per_million: 1, output_usd_per_million: 2 }], rowCount: 1 };
       }
