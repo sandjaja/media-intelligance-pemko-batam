@@ -44,6 +44,23 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
     }
   });
 
+  // Read-only version history; previous prompts are retained for audit and optional manual restore.
+  app.get('/api/humas/ai/prompts/:taskCode/history', { preHandler: guard }, async (request, reply) => {
+    const taskCode = (request.params as { taskCode?: string }).taskCode;
+    if (!taskCode || !(HUMAS_AI_TASKS as readonly string[]).includes(taskCode)) {
+      return reply.code(400).send({ error: 'AI_PROMPT_INVALID_TASK' });
+    }
+    try {
+      const { rows } = await pool.query(
+        'SELECT version,prompt_text,changed_at FROM ai_humas_task_prompt_history WHERE task_code=$1 ORDER BY version DESC LIMIT 10',
+        [taskCode],
+      );
+      return { data: rows };
+    } catch {
+      return reply.code(503).send({ error: 'AI_PROMPT_HISTORY_UNAVAILABLE' });
+    }
+  });
+
   app.put('/api/humas/ai/prompts/:taskCode', { preHandler: guard }, async (request, reply) => {
     const taskCode = (request.params as { taskCode?: string }).taskCode;
     const body = request.body as { prompt?: unknown; expectedVersion?: unknown } | null;
