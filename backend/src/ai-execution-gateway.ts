@@ -94,6 +94,7 @@ export async function executeConfiguredAi(pool: Pool, input: {
   // Estimate the upper bound using UTF-8 bytes (not JavaScript UTF-16 code units).
   // This avoids under-reserving for Indonesian text mixed with emoji or other multibyte characters.
   const estimatedInputTokens = Math.max(2048, Buffer.byteLength(input.prompt, 'utf8') * 2);
+  if (!Number.isSafeInteger(estimatedInputTokens)) throw new Error('AI_GATEWAY_ESTIMATE_INVALID');
   const estimatedUsd = calculateAiTokenCost(estimatedInputTokens, AI_GATEWAY_MAX_OUTPUT_TOKENS, price);
   if (estimatedUsd <= 0) throw new Error('AI_GATEWAY_ZERO_COST_REQUIRES_FREE_TIER_POLICY');
   return executeBudgetedAi(pool, {
