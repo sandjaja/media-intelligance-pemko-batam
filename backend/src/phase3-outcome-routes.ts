@@ -377,11 +377,11 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
     const approvedStrategy=(await pool.query(`SELECT id,version,executive_summary,communication_objectives,target_audiences,key_messages,talking_points,channel_strategy,timing_strategy,spokesperson_strategy,content_formats,communication_risks,coordination_requirements,expected_communication_outcomes,success_kpis,approved_at FROM communication_strategies WHERE workflow_id=$1 AND status='APPROVED' AND is_current=TRUE ORDER BY version DESC LIMIT 1`,[w.id])).rows[0]||null;
     if(!approvedStrategy)return reply.code(409).send({error:'APPROVED_COMMUNICATION_STRATEGY_REQUIRED'});
     try{
-      const materials:any[]=[],mediaParts:any[]=[];
+      const materials:any[]=[],mediaParts:any[]=[];let evidenceBytes=0;
       for(const e of evidence){
         if(e.evidence_type==='WEBSITE'&&e.url){const article=await fetchWebsitePublication(String(e.url));materials.push({id:e.id,type:'WEBSITE',channel:e.channel,url:e.url,caption:e.caption,title:article.title,text:article.text});continue}
         const files=(await pool.query('SELECT id,storage_key,file_name,mime_type,file_order FROM issue_publication_evidence_files WHERE evidence_id=$1 ORDER BY file_order,id',[e.id])).rows;const fileMeta:any[]=[];
-        for(const file of files){const mime=validatePublicationEvidenceMime(file.mime_type);const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');const buf=await readPublicationEvidenceLimited(result.stream as ReadableStream<Uint8Array>);validatePublicationEvidenceSignature(mime,buf);mediaParts.push({inlineData:{mimeType:mime,data:buf.toString('base64')}});fileMeta.push({id:file.id,file_name:file.file_name,mime_type:file.mime_type,file_order:file.file_order});}
+        for(const file of files){const mime=validatePublicationEvidenceMime(file.mime_type);const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');const buf=await readPublicationEvidenceLimited(result.stream as ReadableStream<Uint8Array>);validatePublicationEvidenceSignature(mime,buf);evidenceBytes+=buf.length;if(evidenceBytes>16_000_000)throw new Error('PUBLICATION_EVIDENCE_TOTAL_TOO_LARGE');mediaParts.push({inlineData:{mimeType:mime,data:buf.toString('base64')}});fileMeta.push({id:file.id,file_name:file.file_name,mime_type:file.mime_type,file_order:file.file_order});}
         materials.push({id:e.id,type:e.evidence_type,channel:e.channel,caption:e.caption,files:fileMeta});
       }
       const existing=(await pool.query('SELECT result,source,gap_analyzed_at,analyzed_at FROM issue_publication_analysis_snapshots WHERE workflow_id=$1',[w.id])).rows[0]||null;
@@ -457,7 +457,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
     if(!focusAssessment)try{
       const publicationEvidence=(await pool.query(`SELECT e.* FROM issue_publication_evidence e WHERE e.workflow_id=$1 ORDER BY e.is_primary DESC,e.created_at,e.id`,[w.id])).rows;
       if(publicationEvidence.length){
-        const materials:any[]=[],mediaParts:any[]=[];
+        const materials:any[]=[],mediaParts:any[]=[];let evidenceBytes=0;
         for(const e of publicationEvidence){
           if(e.evidence_type==='WEBSITE'&&e.url){
             const article=await fetchWebsitePublication(String(e.url));
@@ -468,7 +468,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
           const fileMeta:any[]=[];
           for(const file of files){
             const mime=validatePublicationEvidenceMime(file.mime_type);
-            const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');const buf=await readPublicationEvidenceLimited(result.stream as ReadableStream<Uint8Array>);validatePublicationEvidenceSignature(mime,buf);
+            const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');const buf=await readPublicationEvidenceLimited(result.stream as ReadableStream<Uint8Array>);validatePublicationEvidenceSignature(mime,buf);evidenceBytes+=buf.length;if(evidenceBytes>16_000_000)throw new Error('PUBLICATION_EVIDENCE_TOTAL_TOO_LARGE');
             mediaParts.push({inlineData:{mimeType:mime,data:buf.toString('base64')}});
             fileMeta.push({id:file.id,file_name:file.file_name,mime_type:file.mime_type,file_order:file.file_order});
           }
@@ -514,7 +514,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
     try{
       const publicationEvidence=(await pool.query(`SELECT e.* FROM issue_publication_evidence e WHERE e.workflow_id=$1 ORDER BY e.is_primary DESC,e.created_at,e.id`,[w.id])).rows;
       if(publicationEvidence.length){
-        const materials:any[]=[],mediaParts:any[]=[];
+        const materials:any[]=[],mediaParts:any[]=[];let evidenceBytes=0;
         for(const e of publicationEvidence){
           if(e.evidence_type==='WEBSITE'&&e.url){
             const article=await fetchWebsitePublication(String(e.url));
@@ -525,7 +525,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
           const fileMeta:any[]=[];
           for(const file of files){
             const mime=validatePublicationEvidenceMime(file.mime_type);
-            const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');const buf=await readPublicationEvidenceLimited(result.stream as ReadableStream<Uint8Array>);validatePublicationEvidenceSignature(mime,buf);
+            const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');const buf=await readPublicationEvidenceLimited(result.stream as ReadableStream<Uint8Array>);validatePublicationEvidenceSignature(mime,buf);evidenceBytes+=buf.length;if(evidenceBytes>16_000_000)throw new Error('PUBLICATION_EVIDENCE_TOTAL_TOO_LARGE');
             mediaParts.push({inlineData:{mimeType:mime,data:buf.toString('base64')}});
             fileMeta.push({id:file.id,file_name:file.file_name,mime_type:file.mime_type,file_order:file.file_order});
           }
