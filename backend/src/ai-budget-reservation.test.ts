@@ -11,6 +11,7 @@ function fakePool(options: { limit: number; spent: number; missingBudget?: boole
       statements.push(sql);
       if (sql === 'BEGIN' || sql === 'COMMIT' || sql === 'ROLLBACK') return { rows: [], rowCount: 0 };
       if (sql.includes('FROM ai_providers WHERE')) return { rows: [{ id: 1 }], rowCount: 1 };
+      if (sql.includes('FROM ai_provider_balance_snapshots')) return { rows: [{ balance_usd: options.limit, committed_baseline_usd: 0 }], rowCount: 1 };
       if (sql.includes('FROM ai_provider_budgets')) {
         return options.missingBudget ? { rows: [], rowCount: 0 } : { rows: [{ id: 10, limit_usd: options.limit }], rowCount: 1 };
       }
