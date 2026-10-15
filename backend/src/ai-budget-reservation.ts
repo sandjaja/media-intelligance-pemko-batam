@@ -151,7 +151,16 @@ export async function settleAiBudgetWithUsage(pool: Pool, input: {
       throw new Error('AI_RESERVATION_NOT_PENDING');
     }
     const providerId = reservation.rows[0].provider_id;
+    // Re-read under the provider lock: concurrent reconciliation may settle
+    // the same reservation while this transaction waits for the lock.
     await client.query('SELECT id FROM ai_providers WHERE id=$1 FOR UPDATE', [providerId]);
+    const current = await client.query(
+      'SELECT status FROM ai_budget_reservations WHERE id=$1 FOR UPDATE',
+      [input.reservationId],
+    );
+    if (!current.rowCount || current.rows[0].status !== 'reserved') {
+      throw new Error('AI_RESERVATION_NOT_PENDING');
+    }
     const priceRows = await client.query(
       `SELECT pr.input_usd_per_million, pr.output_usd_per_million
          FROM ai_model_prices pr JOIN ai_models m ON m.id=pr.model_id
