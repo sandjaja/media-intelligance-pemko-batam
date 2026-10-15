@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
 import { loadAuthorizationContext } from './rbac.js';
+import { calculateAiManualBalanceStatus } from './ai-manual-balance-status.js';
 
 // Deliberately separate from infrastructure administration. No secrets, prices or
 // provider credentials are returned from this read-only operational endpoint.
@@ -204,16 +205,11 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
            WHERE provider_id=p.id ORDER BY id DESC LIMIT 1) s ON TRUE
         WHERE LOWER(p.code) IN ('openai','anthropic','claude')`);
       return {data:rows.map(row=>{
-        const balance=row.balance_usd==null?null:Number(row.balance_usd);
-        const committed=Number(row.committed_usd),baseline=Number(row.committed_baseline_usd||0);
-        const valid=balance!=null&&Number.isFinite(balance)&&balance>=0&&Number.isFinite(committed)&&Number.isFinite(baseline);
-        const used=valid?Math.max(0,committed-baseline):null;
-        const remaining=valid?Math.max(0,balance-used!):null;
-        const ratio=valid&&balance>0?used!/balance:null;
-        const status=!valid?'not_configured':remaining===0?'exhausted':ratio!=null&&ratio>=0.8?'near_limit':'available';
-        return {provider_code:row.provider_code,status,initial_balance_usd:balance,used_since_update_usd:used,usage_percent:ratio==null?null:Math.min(100,Math.round(ratio*1000)/10),remaining_budget_usd:remaining,
-          warning:status==='near_limit'?'Saldo AI berbayar telah digunakan 80% atau lebih. Hubungi Admin.':
-            status==='available'?null:'Saldo AI berbayar tidak tersedia atau habis. Hubungi Admin.'};
+        const calculated = calculateAiManualBalanceStatus(row.balance_usd, row.committed_usd, row.committed_baseline_usd);
+        const status = calculated.status;
+        return {provider_code:row.provider_code,...calculated,
+          warning:status==='near_limit'?'Saldo AI berbayar telah digunakan 80% atau lebih. Hubungi Superadmin.':
+            status==='available'?null:'Saldo AI berbayar tidak tersedia atau habis. Hubungi Superadmin.'};
       }),notice:'Saldo internal berdasarkan input manual Admin, bukan saldo API provider.'};
     }catch{return reply.code(503).send({error:'AI_BUDGET_STATUS_UNAVAILABLE'});}
   });
