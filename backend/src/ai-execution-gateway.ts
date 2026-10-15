@@ -110,7 +110,7 @@ export async function executeConfiguredAi(pool: Pool, input: {
     invoke: async () => {
       // Even budgeted Gemini routes consume the same per-model daily quota.
       // Reserve immediately before the outbound provider call, never for OpenAI/Claude.
-      if (input.provider === 'gemini') await reserveGeminiDailyRequest(pool, input.modelCode);
+      if (input.provider === 'gemini') await reserveGeminiDailyRequest(pool, input.modelCode, 'ai_gateway');
       return invokeAiProvider({
         provider: input.provider,
         model: input.modelCode,
