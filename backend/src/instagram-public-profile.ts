@@ -11,12 +11,13 @@ export type InstagramPublicProbeResult={
  profileSignals:boolean;
  title:string|null;
  description:string|null;
+ metricSources:{followers:string|null;following:string|null;posts:string|null};
  publicMetrics:{followers:number|null;following:number|null;posts:number|null;source:string|null};
  diagnostics:{jsonScriptCount:number;hasHandle:boolean;signals:Record<string,boolean>;candidateValues:Record<string,number|null>};
 };
 
 function decodeMeta(value:string|null|undefined){
- return value?value.replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'"):null;
+ return value?value.replace(/&#(x[0-9a-f]+|[0-9]+);/gi,(_,n)=>{const code=n[0].toLowerCase()==='x'?parseInt(n.slice(1),16):Number(n);return code>=0&&code<=0x10ffff?String.fromCodePoint(code):''}).replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#39;/g,"'"):null;
 }
 
 
@@ -56,29 +57,58 @@ function inspectPublicHtml(html:string,handle:string){
  return{jsonScriptCount,hasHandle:lower.includes(handle.toLowerCase()),signals,candidateValues};
 }
 
+export function parseInstagramProfileHtml(html:string, handle:string) {
+ const meta=(name:string)=>{
+  for(const tag of html.match(/<meta\b[^>]*>/gi)||[]){
+   const attrs=Object.fromEntries([...tag.matchAll(/([\w:-]+)=["']([^"']*)["']/g)].map(m=>[m[1].toLowerCase(),m[2]]));
+   if(attrs.property===name||attrs.name===name)return decodeMeta(attrs.content);
+  }
+  return null;
+ };
+ const title=meta('og:title'),description=meta('og:description')||meta('description');
+ const matchingDescription=description?.toLowerCase().includes('@'+handle.toLowerCase())?description:null;
+ const publicMetrics=parsePublicMetrics(matchingDescription);
+ const metricSources={followers:publicMetrics.followers==null?null:'meta_description',following:publicMetrics.following==null?null:'meta_description',posts:publicMetrics.posts==null?null:'meta_description'};
+ let user:Record<string,unknown>|null=null;
+ const visit=(value:unknown,depth=0):void=>{
+  if(!value||typeof value!=='object'||depth>35||user)return;
+  const obj=value as Record<string,unknown>;
+  if(typeof obj.username==='string'&&obj.username.toLowerCase()===handle.toLowerCase()&&typeof obj.follower_count==='number'){user=obj;return}
+  for(const child of Object.values(obj))visit(child,depth+1);
+ };
+ for(const match of html.matchAll(/<script\b[^>]*type=["']application\/json["'][^>]*>([\s\S]*?)<\/script>/gi)){
+  try{visit(JSON.parse(match[1]));}catch{/* Non-JSON scripts are not profile evidence. */}
+ }
+ const record=user as Record<string,unknown>|null;
+ for(const [field,key] of [['followers','follower_count'],['following','following_count'],['posts','media_count']] as const){
+  const value=record?.[key];
+  if(typeof value==='number'&&Number.isSafeInteger(value)&&value>=0){publicMetrics[field]=value;metricSources[field]='structured_profile';}
+ }
+ publicMetrics.source=Object.values(metricSources).some(x=>x==='structured_profile')?'structured_profile':publicMetrics.source;
+ return{title,description,publicMetrics,metricSources};
+}
+
 export async function probeInstagramPublicProfile(handleInput:string):Promise<InstagramPublicProbeResult>{
  const handle=String(handleInput||'').trim().replace(/^@/,'');
  if(!/^[A-Za-z0-9._]{1,30}$/.test(handle))throw new Error('INVALID_INSTAGRAM_HANDLE');
  const url='https://www.instagram.com/'+encodeURIComponent(handle)+'/';
- const response=await fetch(url,{redirect:'follow',headers:{
+ const response=await fetch(url,{redirect:'follow',signal:AbortSignal.timeout(15000),headers:{
   accept:'text/html,application/xhtml+xml',
   'accept-language':'id-ID,id;q=0.9,en;q=0.7',
-  'user-agent':'Mozilla/5.0 (compatible; MediaIntelligencePemkoBatam/1.0)'
+  'user-agent':'Mozilla/5.0'
  }});
- const html=await response.text();
- const lower=html.toLowerCase();
- const loginWall=lower.includes('accounts/login')||lower.includes('login • instagram')||lower.includes('log in • instagram');
- const challenge=lower.includes('/challenge/')||lower.includes('checkpoint_required');
+ const html=await response.text(),lower=html.toLowerCase();
+ // Login links can appear on a valid public profile; only the final route is a wall.
+ const loginWall=/\/accounts\/login(?:\/|\?|$)/i.test(response.url);
+ const challenge=/\/(?:challenge|checkpoint)\//i.test(response.url)||lower.includes('checkpoint_required');
  const blocked=response.status===403||response.status===429;
- const profileSignals=lower.includes(handle.toLowerCase())&&(lower.includes('follower')||lower.includes('instagram'));
- const description=decodeMeta(html.match(/<meta[^>]+(?:property|name)=["'](?:og:description|description)["'][^>]+content=["']([^"']*)/i)?.[1]);
- const title=decodeMeta(html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']*)/i)?.[1]);
- const publicMetrics=parsePublicMetrics(description);
- const diagnostics=inspectPublicHtml(html,handle);
- if(publicMetrics.followers==null&&diagnostics.candidateValues.follower_count!=null){publicMetrics.followers=diagnostics.candidateValues.follower_count;publicMetrics.source='structured_html'}
- if(publicMetrics.following==null&&diagnostics.candidateValues.following_count!=null){publicMetrics.following=diagnostics.candidateValues.following_count;publicMetrics.source='structured_html'}
- if(publicMetrics.posts==null&&diagnostics.candidateValues.media_count!=null){publicMetrics.posts=diagnostics.candidateValues.media_count;publicMetrics.source='structured_html'}
- const hasPublicMetrics=publicMetrics.followers!=null||publicMetrics.following!=null||publicMetrics.posts!=null;
- const status:InstagramPublicProbeStatus=blocked?'blocked':challenge?'challenge':loginWall&&!profileSignals?'login_wall':response.ok&&hasPublicMetrics?'public_metrics_available':response.ok&&profileSignals?'page_only':'unverified_html';
- return{status,httpStatus:response.status,finalUrl:response.url,htmlBytes:html.length,loginWall,challenge,blocked,profileSignals,title,description,publicMetrics,diagnostics};
+ const parsed=parseInstagramProfileHtml(html,handle);
+ const profileSignals=!!parsed.title?.toLowerCase().includes('@'+handle.toLowerCase());
+ if(loginWall||challenge||blocked||!response.ok){
+  parsed.publicMetrics={followers:null,following:null,posts:null,source:null};
+  parsed.metricSources={followers:null,following:null,posts:null};
+ }
+ const hasPublicMetrics=Object.values(parsed.metricSources).some(Boolean);
+ const status:InstagramPublicProbeStatus=blocked?'blocked':challenge?'challenge':loginWall?'login_wall':response.ok&&hasPublicMetrics?'public_metrics_available':response.ok&&profileSignals?'page_only':'unverified_html';
+ return{status,httpStatus:response.status,finalUrl:response.url,htmlBytes:html.length,loginWall,challenge,blocked,profileSignals,...parsed,diagnostics:inspectPublicHtml(html,handle)};
 }
