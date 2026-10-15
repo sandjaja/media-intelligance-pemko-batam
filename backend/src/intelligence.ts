@@ -64,7 +64,7 @@ async function providerBrief(pool: Pool, rows: IntelligenceArticle[]) {
   const model = models.rows[0].code as string;
   const input = rows.slice(0, 10).map((r, i) => ({ rank: i + 1, ...r }));
   const prompt = 'Anda adalah analis media intelligence pemerintah daerah. Buat executive brief singkat, faktual, tidak mengarang fakta, pisahkan fakta dan rekomendasi. Kembalikan JSON dengan keys headline, situation, implications, actions (array), key_message, priority. Priority hanya WATCH, MEDIUM, HIGH, IMMEDIATE.\\nDATA:\\n' + JSON.stringify(input);
-  await reserveGeminiDailyRequest(pool, model);
+  await reserveGeminiDailyRequest(pool, model, 'executive_brief');
   const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
