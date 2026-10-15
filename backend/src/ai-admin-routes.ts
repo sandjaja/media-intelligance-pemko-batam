@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyRequest } from 'fastify';
 import { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
+import { encryptIntegrationCredential, integrationCredentialHint } from './integration-credentials.js';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 
 declare module 'fastify' { interface FastifyRequest { aiAdminAuthz?: AuthorizationContext } }
@@ -21,6 +22,20 @@ export async function registerAiAdminRoutes(app:FastifyInstance,pool:Pool,jwtSec
   };
   const audit=async(request:FastifyRequest,action:string,id:any)=>{try{await pool.query('INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,$2,$3::jsonb)',[(request.aiAdminAuthz as any)?.userId||null,action,JSON.stringify({id})]);}catch{}};
 
+  app.get('/api/admin/ai/credentials/status',{preHandler:guard},async()=>({data:(await pool.query('SELECT p.code,c.credential_hint,c.updated_at FROM ai_providers p LEFT JOIN ai_provider_credentials c ON c.provider_id=p.id ORDER BY p.code')).rows}));
+  app.put('/api/admin/ai/credentials/:code',{preHandler:guard},async(request,reply)=>{
+    const code=z.enum(['gemini','openai','anthropic']).safeParse((request.params as any).code);
+    const body=z.object({credential:z.string().trim().min(8).max(10000)}).safeParse(request.body);
+    if(!code.success||!body.success)return reply.code(400).send({error:'INVALID_AI_CREDENTIAL'});
+    const provider=(await pool.query('SELECT id FROM ai_providers WHERE code=$1 LIMIT 1',[code.data])).rows[0];
+    if(!provider)return reply.code(404).send({error:'AI_PROVIDER_NOT_FOUND'});
+    let encrypted:string;
+    try{encrypted=encryptIntegrationCredential(body.data.credential);}catch{return reply.code(503).send({error:'CREDENTIAL_ENCRYPTION_UNAVAILABLE'});}
+    const hint=integrationCredentialHint(body.data.credential);
+    await pool.query('INSERT INTO ai_provider_credentials(provider_id,credential_ciphertext,credential_hint) VALUES($1,$2,$3) ON CONFLICT(provider_id) DO UPDATE SET credential_ciphertext=EXCLUDED.credential_ciphertext,credential_hint=EXCLUDED.credential_hint,updated_at=NOW()',[provider.id,encrypted,hint]);
+    await audit(request,'AI_CREDENTIAL_UPDATED',provider.id);
+    return{data:{code:code.data,credential_hint:hint}};
+  });
   app.get('/api/admin/ai/providers',{preHandler:guard},async()=>({data:(await pool.query('SELECT id,code,name,base_url,enabled,secret_reference,created_at,updated_at FROM ai_providers ORDER BY name,id')).rows}));
   app.post('/api/admin/ai/providers',{preHandler:guard},async(request,reply)=>{
     const p=z.object({code:z.string().trim().min(2).max(80).regex(/^[A-Za-z0-9_-]+$/),name:z.string().trim().min(2).max(150),baseUrl:z.string().trim().max(500).optional().nullable(),enabled:z.boolean().default(true),secretReference:z.string().trim().max(200).optional().nullable()}).safeParse(request.body);
