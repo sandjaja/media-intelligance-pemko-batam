@@ -27,8 +27,7 @@ export async function registerAiAdminRoutes(app:FastifyInstance,pool:Pool,jwtSec
     const code=z.enum(['gemini','openai','anthropic']).safeParse((request.params as any).code);
     const body=z.object({credential:z.string().trim().min(8).max(10000)}).safeParse(request.body);
     if(!code.success||!body.success)return reply.code(400).send({error:'INVALID_AI_CREDENTIAL'});
-    const provider=(await pool.query('SELECT id FROM ai_providers WHERE code=$1 LIMIT 1',[code.data])).rows[0];
-    if(!provider)return reply.code(404).send({error:'AI_PROVIDER_NOT_FOUND'});
+    const provider=(await pool.query(`INSERT INTO ai_providers(code,name,enabled) VALUES($1,$2,false) ON CONFLICT(code) DO UPDATE SET code=EXCLUDED.code RETURNING id`,[code.data,{gemini:'Gemini',openai:'OpenAI',anthropic:'Claude (Anthropic)'}[code.data]])).rows[0];
     let encrypted:string;
     try{encrypted=encryptIntegrationCredential(body.data.credential);}catch{return reply.code(503).send({error:'CREDENTIAL_ENCRYPTION_UNAVAILABLE'});}
     const hint=integrationCredentialHint(body.data.credential);
