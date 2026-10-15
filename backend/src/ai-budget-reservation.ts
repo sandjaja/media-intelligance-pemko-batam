@@ -88,3 +88,37 @@ export async function releaseAiBudget(pool: Pool, reservationId: string): Promis
   );
   if (!result.rowCount) throw new Error('AI_RESERVATION_NOT_PENDING');
 }
+
+export async function getAiModelPrice(pool: Pool, modelId: number): Promise<{
+  inputUsdPerMillion: number;
+  outputUsdPerMillion: number;
+}> {
+  if (!Number.isSafeInteger(modelId) || modelId <= 0) throw new Error('AI_MODEL_INVALID');
+  const { rows } = await pool.query(
+    `SELECT input_usd_per_million, output_usd_per_million
+       FROM ai_model_prices WHERE model_id=$1 AND effective_from<=NOW()
+       ORDER BY effective_from DESC LIMIT 1`, [modelId],
+  );
+  if (!rows.length) throw new Error('AI_MODEL_PRICE_NOT_CONFIGURED');
+  const inputUsdPerMillion = Number(rows[0].input_usd_per_million);
+  const outputUsdPerMillion = Number(rows[0].output_usd_per_million);
+  if (![inputUsdPerMillion, outputUsdPerMillion].every(v => Number.isFinite(v) && v >= 0)) {
+    throw new Error('AI_MODEL_PRICE_INVALID');
+  }
+  return { inputUsdPerMillion, outputUsdPerMillion };
+}
+
+export function calculateAiTokenCost(
+  inputTokens: number,
+  outputTokens: number,
+  price: { inputUsdPerMillion: number; outputUsdPerMillion: number },
+): number {
+  if (![inputTokens, outputTokens].every(v => Number.isSafeInteger(v) && v >= 0) ||
+      ![price.inputUsdPerMillion, price.outputUsdPerMillion].every(v => Number.isFinite(v) && v >= 0)) {
+    throw new Error('AI_TOKEN_USAGE_INVALID');
+  }
+  const cost = (inputTokens * price.inputUsdPerMillion + outputTokens * price.outputUsdPerMillion) / 1_000_000;
+  if (!Number.isFinite(cost)) throw new Error('AI_TOKEN_COST_INVALID');
+  // Database ledger has six decimal places; round up to avoid understating spend.
+  return Math.ceil(cost * 1_000_000 - 1e-9) / 1_000_000;
+}
