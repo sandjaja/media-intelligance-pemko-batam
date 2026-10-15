@@ -1,0 +1,52 @@
+import type { Pool } from 'pg';
+import { randomUUID } from 'node:crypto';
+import { reserveAiBudget, settleAiBudgetWithUsage } from './ai-budget-reservation.js';
+
+export type AiGatewayUsage = { inputTokens: number; outputTokens: number };
+export type AiGatewayResult<T> = { data: T; usage: AiGatewayUsage; actualUsd: number };
+
+// Caller supplies an authenticated user, selected DB model/task, and a provider
+// adapter. This helper does not invoke any provider until the budget reservation
+// commits. A failed/ambiguous provider response intentionally retains the
+// reservation for reconciliation; automatic release could undercount spend.
+export async function executeBudgetedAi<T>(pool: Pool, input: {
+  userId: number;
+  taskId: number;
+  providerId: number;
+  modelId: number;
+  estimatedUsd: number;
+  invoke: () => Promise<{ data: T; usage: AiGatewayUsage; latencyMs?: number }>;
+}): Promise<AiGatewayResult<T>> {
+  if (!Number.isSafeInteger(input.userId) || input.userId <= 0 ||
+      !Number.isSafeInteger(input.modelId) || input.modelId <= 0) {
+    throw new Error('AI_GATEWAY_INVALID_CONTEXT');
+  }
+  // Validate task/provider/model linkage before committing a budget reservation.
+  const { rows } = await pool.query(
+    `SELECT m.id FROM ai_models m
+       JOIN ai_providers p ON p.id=m.provider_id
+       JOIN ai_task_routes r ON r.model_id=m.id AND r.provider_id=p.id
+       JOIN ai_tasks t ON t.id=r.task_id
+      WHERE m.id=$1 AND p.id=$2 AND t.id=$3
+        AND m.enabled=TRUE AND p.enabled=TRUE AND t.enabled=TRUE AND r.enabled=TRUE
+      LIMIT 1`,
+    [input.modelId, input.providerId, input.taskId],
+  );
+  if (!rows.length) throw new Error('AI_GATEWAY_ROUTE_NOT_CONFIGURED');
+  const reservation = await reserveAiBudget(pool, {
+    providerId: input.providerId,
+    taskId: input.taskId,
+    requestKey: randomUUID(),
+    estimatedUsd: input.estimatedUsd,
+  });
+  const result = await input.invoke();
+  const { actualUsd } = await settleAiBudgetWithUsage(pool, {
+    reservationId: reservation.reservationId,
+    userId: input.userId,
+    modelId: input.modelId,
+    inputTokens: result.usage.inputTokens,
+    outputTokens: result.usage.outputTokens,
+    latencyMs: result.latencyMs,
+  });
+  return { data: result.data, usage: result.usage, actualUsd };
+}
