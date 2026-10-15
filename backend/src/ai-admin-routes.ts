@@ -132,5 +132,10 @@ export async function registerAiAdminRoutes(app:FastifyInstance,pool:Pool,jwtSec
   });
   app.delete('/api/admin/ai/routes/:id',{preHandler:guard},async(request,reply)=>{const id=z.coerce.number().int().positive().safeParse((request.params as any).id);if(!id.success)return reply.code(400).send({error:'INVALID_AI_ROUTE'});const r=await pool.query('DELETE FROM ai_task_routes WHERE id=$1 RETURNING id',[id.data]);if(!r.rows[0])return reply.code(404).send({error:'AI_ROUTE_NOT_FOUND'});await audit(request,'AI_ROUTE_DELETED',id.data);return{ok:true};});
 
+  app.get('/api/admin/ai/budgets',{preHandler:guard},async()=>{
+    const result=await pool.query(`SELECT p.id AS provider_id,p.code AS provider_code,p.name AS provider_name,b.id AS budget_id,b.period_start,b.period_end,b.limit_usd,b.enabled,COALESCE((SELECT SUM(CASE WHEN r.status='settled' THEN r.settled_usd WHEN r.status='reserved' THEN r.reserved_usd ELSE 0 END) FROM ai_budget_reservations r WHERE r.budget_id=b.id),0) AS committed_usd FROM ai_providers p LEFT JOIN ai_provider_budgets b ON b.provider_id=p.id AND CURRENT_DATE>=b.period_start AND CURRENT_DATE<b.period_end ORDER BY p.code,b.period_start DESC`);
+    return {data:result.rows};
+  });
+
   app.get('/api/admin/ai/usage',{preHandler:guard},async(request)=>{const q=z.object({limit:z.coerce.number().int().min(1).max(200).default(50)}).safeParse(request.query);const limit=q.success?q.data.limit:50;return{data:(await pool.query('SELECT l.id,l.status,l.latency_ms,l.input_tokens,l.output_tokens,l.error_code,l.created_at,t.code task_code,p.code provider_code,m.code model_code FROM ai_usage_logs l LEFT JOIN ai_tasks t ON t.id=l.task_id LEFT JOIN ai_providers p ON p.id=l.provider_id LEFT JOIN ai_models m ON m.id=l.model_id ORDER BY l.created_at DESC,l.id DESC LIMIT $1',[limit])).rows};});
 }
