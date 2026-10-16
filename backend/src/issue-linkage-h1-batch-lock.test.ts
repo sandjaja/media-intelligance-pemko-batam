@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
-import { h1Fingerprint, h1ClassifiedPlanFingerprint, isSafeH1Group, buildH1BoundedPlan, validateH1ExecutionPlan, inboxContextFingerprint, selectYesterdayWibEvidence, groupH1Evidence, publicationDateNeedsReview, claimIssueLinkageH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
+import { h1Fingerprint, h1ClassifiedPlanFingerprint, isSafeH1Group, buildH1BoundedPlan, validateH1ExecutionPlan, inboxContextFingerprint, selectYesterdayWibEvidence, groupH1Evidence, publicationDateNeedsReview, claimIssueLinkageH1Batch, claimAndReserveH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
 
 test('H-1 fingerprint is independent of evidence ordering and duplicate refs', () => {
   const a = [{ sourceType: 'online' as const, id: 7 }, { sourceType: 'social' as const, id: 3 }];
@@ -140,4 +140,44 @@ test('H-1 different fingerprint collision reports the active batch', async () =>
   } } as unknown as Pool;
   const result = await claimIssueLinkageH1Batch(pool, 1, '2026-10-15', 'new-fingerprint', 3);
   assert.deepEqual(result, { claimed: false, id: 88, status: 'another_batch_running' });
+});
+
+test('H-1 claim and reservation commits only after every evidence is reserved', async () => {
+  const queries: string[] = [];
+  const client = {
+    query: async (sql: string) => {
+      queries.push(sql);
+      if (sql.includes('INSERT INTO issue_linkage_h1_batches')) return { rows: [{ id: 19 }], rowCount: 1 };
+      if (sql.includes('INSERT INTO issue_linkage_h1_evidence_ledger')) return { rows: [{ id: 1 }, { id: 2 }], rowCount: 2 };
+      return { rows: [], rowCount: 0 };
+    },
+    release: () => { queries.push('RELEASE'); },
+  };
+  const pool = { connect: async () => client } as unknown as Pool;
+  const result = await claimAndReserveH1Batch(pool, 1, '2026-10-15', 'fp', [
+    { sourceType: 'online', id: 1 }, { sourceType: 'social', id: 2 },
+  ]);
+  assert.equal(result.claimed, true);
+  assert.deepEqual(queries.filter(q => ['BEGIN','COMMIT','ROLLBACK','RELEASE'].includes(q)),
+    ['BEGIN','COMMIT','RELEASE']);
+});
+
+test('H-1 reservation conflict rolls back batch claim', async () => {
+  const queries: string[] = [];
+  const client = {
+    query: async (sql: string) => {
+      queries.push(sql);
+      if (sql.includes('INSERT INTO issue_linkage_h1_batches')) return { rows: [{ id: 19 }], rowCount: 1 };
+      if (sql.includes('INSERT INTO issue_linkage_h1_evidence_ledger')) return { rows: [{ id: 1 }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
+    release: () => { queries.push('RELEASE'); },
+  };
+  const pool = { connect: async () => client } as unknown as Pool;
+  const result = await claimAndReserveH1Batch(pool, 1, '2026-10-15', 'fp', [
+    { sourceType: 'online', id: 1 }, { sourceType: 'social', id: 2 },
+  ]);
+  assert.deepEqual(result, { claimed: false, id: null, status: 'evidence_already_reserved' });
+  assert.deepEqual(queries.filter(q => ['BEGIN','COMMIT','ROLLBACK','RELEASE'].includes(q)),
+    ['BEGIN','ROLLBACK','RELEASE']);
 });
