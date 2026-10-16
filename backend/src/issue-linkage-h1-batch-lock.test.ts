@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
-import { h1Fingerprint, h1ClassifiedPlanFingerprint, isSafeH1Group, buildH1BoundedPlan, validateH1ExecutionPlan, inboxContextFingerprint, selectYesterdayWibEvidence, groupH1Evidence, publicationDateNeedsReview, claimIssueLinkageH1Batch, claimAndReserveH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
+import { h1Fingerprint, h1ClassifiedPlanFingerprint, isSafeH1Group, buildH1BoundedPlan, buildH1ContinuationPlan, validateH1ExecutionPlan, inboxContextFingerprint, selectYesterdayWibEvidence, groupH1Evidence, publicationDateNeedsReview, claimIssueLinkageH1Batch, claimAndReserveH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
 
 test('H-1 fingerprint is independent of evidence ordering and duplicate refs', () => {
   const a = [{ sourceType: 'online' as const, id: 7 }, { sourceType: 'social' as const, id: 3 }];
@@ -366,4 +366,22 @@ test('H-1 partial evidence reservation rolls back the batch claim atomically', a
   assert.equal(statements.includes('ROLLBACK'), true);
   assert.equal(statements.includes('COMMIT'), false);
   assert.equal(statements.at(-1), 'RELEASE');
+});
+
+test('H-1 continuation excludes reserved refs and advances to deferred groups', () => {
+  const now = new Date('2026-10-16T04:00:00Z');
+  const evidence = Array.from({ length: 7 }, (_, i) => [1, 2].map(id => ({
+    sourceType: 'online' as const, id: i * 10 + id,
+    occurredAt: '2026-10-15T08:00:00Z',
+    primaryKeyword: `topic-${i}`, opdId: 10,
+  }))).flat();
+  const first = buildH1BoundedPlan(evidence, now);
+  assert.equal(first.plannedGroupCount, 5);
+  const reserved = new Set(first.plannedGroups.flatMap(g => g.evidence.map(e => `${e.sourceType}:${e.id}`)));
+  const next = buildH1ContinuationPlan(evidence, reserved, now);
+  assert.equal(next.alreadyReservedCount, 10);
+  assert.equal(next.plannedGroupCount, 2);
+  assert.equal(next.deferredGroupCount, 0);
+  assert.equal(next.planCheck.valid, true);
+  assert.equal(next.plannedGroups.every(g => g.evidence.every(e => !reserved.has(`${e.sourceType}:${e.id}`))), true);
 });
