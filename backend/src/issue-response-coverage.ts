@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { listGeminiFallbackModels } from './ai-gemini-config.js';
+import { loadSelectedHumasGeminiModel } from './ai-gemini-config.js';
 import { reserveGeminiDailyRequest } from './ai-gemini-quota-reservation.js';
 import { recordGeminiExecution } from './ai-gemini-execution-log.js';
 export type CoverageAngle={key:string;label:string;claim?:string;confidence?:number;anchors?:string[];evidence:Array<{id:string;source:string;title:string|null}>};
@@ -46,7 +46,7 @@ export async function matchDynamicOfficialResponseCoverage(angles:CoverageAngle[
  if(!owned.length)return{status:'NO_RESPONSE',coverage:angles.map(a=>({key:a.key,label:a.label,claim:a.claim||a.label,status:'NOT_COVERED',matchScore:0,matchedOfficial:null,externalEvidenceCount:a.evidence.length})),officialResponseCount:0,mode:'dynamic'};
  if(!pool)return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback',fallbackReason:'GEMINI_DATABASE_POOL_MISSING'};
  if(!angles.some(a=>a.claim))return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback',fallbackReason:'NO_DYNAMIC_CLAIMS'};
- let models:Array<{key:string;model:string}>;try{models=await listGeminiFallbackModels(pool);if(!models.length)return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback',fallbackReason:'GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE'};}catch{return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback',fallbackReason:'GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE'};}
+ let models:Array<{key:string;model:string}>;try{models=[await loadSelectedHumasGeminiModel(pool,'gap_analysis')];if(!models.length)return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback',fallbackReason:'GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE'};}catch{return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback',fallbackReason:'GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE'};}
  const claims=angles.map((a,i)=>({claimId:String(i),claim:a.claim||a.label,angleType:a.key})),responses=owned.slice(0,20).map(o=>({responseId:String(o.id),title:o.title||'',content:String(o.content||'').slice(0,4000)}));
  for(let attempt=0;attempt<models.length;attempt++){
  const {key,model}=models[attempt];
