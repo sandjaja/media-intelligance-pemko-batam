@@ -3,7 +3,8 @@ import type { Pool, PoolClient } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
-import { selectYesterdayWibEvidence, h1Fingerprint, groupH1Evidence, publicationDateNeedsReview, validateH1ExecutionPlan, h1ClassifiedPlanFingerprint , buildH1BoundedPlan, buildH1ContinuationPlan } from './issue-linkage-h1-batch-lock.js';
+import { selectYesterdayWibEvidence, h1Fingerprint, groupH1Evidence, publicationDateNeedsReview, validateH1ExecutionPlan, h1ClassifiedPlanFingerprint , buildH1BoundedPlan, buildH1ContinuationPlan, claimAndReserveH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
+import { analyzeReservedH1Groups, persistH1GeminiGroupResult } from './issue-linkage-h1-gemini-executor.js';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { checkIssueEvidenceEligibility, type IssueEvidenceSource } from './issue-evidence-eligibility.js';
 import { matchExistingIssues } from './unified-existing-issue-matcher.js';
@@ -166,6 +167,94 @@ app.post('/api/intelligence/issue-linkage-inbox/batch-h1/validate',{preHandler:a
  return {data:{valid:true,date:plan.date,plannedFingerprint:plan.plannedFingerprint,
   plannedGroupCount:plan.plannedGroupCount,alreadyReservedCount:plan.alreadyReservedCount,evidenceCount:plan.plannedGroups.reduce((n,g)=>n+g.evidence.length,0),
   ready:false,reason:'EXECUTION_ENDPOINT_NOT_ENABLED'}};
+});
+app.post('/api/intelligence/issue-linkage-inbox/batch-h1/execute',{preHandler:auth},async(request,reply)=>{
+ const ctx=request.unifiedIssueAuth!;
+ if(!canManage(ctx))return reply.code(403).send({error:'ISSUE_LINKAGE_REQUIRES_HUMAS_OR_SUPER_ADMIN'});
+ const organizationId=await resolveOrganizationId(pool,ctx);
+ if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
+ const body=(request.body||{}) as {date?:unknown;plannedFingerprint?:unknown};
+ if(typeof body.date!=='string'||typeof body.plannedFingerprint!=='string')
+  return reply.code(400).send({error:'H1_PLAN_REQUIRED'});
+ // Explicitly disabled by default, including in Production. No provider or DB writes.
+ if(process.env.H1_GEMINI_EXECUTION_ENABLED!=='true'||process.env.NODE_ENV==='production')
+  return reply.code(503).send({error:'H1_GEMINI_EXECUTION_DISABLED',ready:false});
+ const rows=(await pool.query(`SELECT candidate_key,snapshot FROM unified_candidate_issues
+  WHERE organization_id=$1 AND status IN ('BELOW_THRESHOLD','MATCHED_ISSUE','PENDING','APPROVED','MERGED')
+  ORDER BY last_detected_at DESC LIMIT 300`,[organizationId])).rows;
+ const evidence=rows.flatMap((row:any)=>(Array.isArray(row.snapshot?.evidence)?row.snapshot.evidence:[])
+  .map((e:any)=>({sourceType:String(e.sourceType||''),id:Number(e.id),
+   occurredAt:e.occurredAt||null,title:e.title||null,summary:e.summary||null,
+   primaryKeyword:row.snapshot?.primaryKeyword||e.primaryKeyword||null,
+   opdId:e.opdId==null?(row.snapshot?.opdId==null?null:Number(row.snapshot.opdId)):Number(e.opdId)})));
+ // Ledger must be present before computing a continuation-aware fingerprint.
+ const ledger=(await pool.query(`SELECT to_regclass('public.issue_linkage_h1_batches') IS NOT NULL AND to_regclass('public.issue_linkage_h1_evidence_ledger') IS NOT NULL AS installed`)).rows[0];
+ if(!ledger?.installed)return reply.code(503).send({
+  error:'H1_BATCH_LEDGER_MIGRATION_REQUIRED',migrations:['160_issue_linkage_h1_batch_ledger.sql','161_issue_linkage_h1_evidence_ledger.sql'],ready:false,
+ });
+ const now=new Date();
+ const initial=buildH1BoundedPlan(evidence as any[],now);
+ const reservedRows=(await pool.query(`SELECT source_type,source_id FROM issue_linkage_h1_evidence_ledger
+  WHERE organization_id=$1 AND news_date=$2::date`,[organizationId,initial.date])).rows;
+ const reservedRefs=new Set<string>(reservedRows.map((e:any)=>`${e.source_type}:${e.source_id}`));
+ const plan=buildH1ContinuationPlan(evidence as any[],reservedRefs,now);
+ const check=validateH1ExecutionPlan(body.date,body.plannedFingerprint,plan.date,
+  plan.plannedGroups.flatMap(g=>g.evidence) as any[],plan.plannedFingerprint);
+ if(!check.valid)return reply.code(409).send({error:check.reason,date:plan.date,plannedFingerprint:plan.plannedFingerprint});
+ // Never report a usable plan when all remaining groups were already reserved
+ // or were excluded by the H-1 safety limits.
+ if(!plan.planCheck.valid)return reply.code(409).send({
+  error:plan.planCheck.reason||'H1_PLAN_SIZE_INVALID',date:plan.date,
+  plannedGroupCount:plan.plannedGroupCount,ready:false,
+ });
+ // A reservation created after this read must still be rejected atomically by claimAndReserveH1Batch.
+ const prior=(await pool.query(`SELECT id,status,request_count,started_at,finished_at
+  FROM issue_linkage_h1_batches
+  WHERE organization_id=$1 AND news_date=$2::date AND fingerprint=$3
+  LIMIT 1`,[organizationId,plan.date,plan.plannedFingerprint])).rows[0];
+ if(prior)return reply.code(409).send({
+  error:'H1_BATCH_ALREADY_RECORDED',batchStatus:prior.status,batchId:Number(prior.id),
+  ready:false,
+ });
+ // Completed and failed batches retain their reservations; continuation uses only unreserved refs.
+ // A running batch still blocks concurrent execution.
+ const activeBatch=(await pool.query(`SELECT id FROM issue_linkage_h1_batches
+  WHERE organization_id=$1 AND news_date=$2::date AND status='running'
+  LIMIT 1`,[organizationId,plan.date])).rows[0];
+ if(activeBatch)return reply.code(409).send({
+  error:'H1_ANOTHER_BATCH_RUNNING',batchId:Number(activeBatch.id),ready:false,
+ });
+ const groups=plan.plannedGroups;
+ const refs=groups.flatMap(g=>g.evidence.map(e=>({sourceType:e.sourceType,id:e.id})));
+ const claimed=await claimAndReserveH1Batch(pool,organizationId,plan.date,plan.plannedFingerprint,refs,groups);
+ if(!claimed.claimed||claimed.id===null)return reply.code(409).send({
+  error:'H1_BATCH_CLAIM_REJECTED',status:claimed.status,ready:false,
+ });
+ let completed=0;
+ try {
+  const results=await analyzeReservedH1Groups(pool,groups,async result=>{
+   await persistH1GeminiGroupResult(pool,{
+    batchId:claimed.id!,organizationId,userId:ctx.id,newsDate:plan.date,
+    groupIndex:result.groupIndex,primaryKeyword:result.primaryKeyword,
+    opdId:result.opdId,evidenceRefs:groups[result.groupIndex].evidence.map(e=>`${e.sourceType}:${e.id}`),
+    analysis:result.analysis,model:result.model,usage:result.usage,latencyMs:result.latencyMs,
+   });
+   completed++;
+  });
+  const finished=await finishIssueLinkageH1Batch(pool,claimed.id,'completed',completed);
+  if(!finished)throw new Error('H1_BATCH_FINISH_FAILED');
+  return {data:{executed:true,batchId:claimed.id,date:plan.date,
+   analyzedGroupCount:results.length,modelCodes:results.map(x=>x.model),
+   warning:'Evidence telah direservasi dan tidak akan diproses ulang otomatis.'}};
+ }catch(error){
+  const code=error instanceof Error?error.message:'H1_EXECUTION_FAILED';
+  try{await finishIssueLinkageH1Batch(pool,claimed.id,'failed',completed,code.slice(0,100));}
+  catch(finishError){request.log.error({finishError,batchId:claimed.id},'H1 finish failed');}
+  request.log.error({error,batchId:claimed.id},'H1 Gemini execution failed');
+  return reply.code(502).send({error:'H1_EXECUTION_FAILED',batchId:claimed.id,
+   completedGroups:completed,ready:false,
+   warning:'Evidence tetap terkunci. Jangan ulangi tanpa rekonsiliasi.'});
+ }
 });
 // Read-only continuation preview. Ledger reservations are authoritative, including failed/uncertain runs.
 // This does not authorize a second batch or consume AI quota.
