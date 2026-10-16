@@ -1,4 +1,4 @@
-import type { Pool } from 'pg';
+import type { Pool, PoolClient } from 'pg';
 import { createHash } from 'node:crypto';
 
 export type H1EvidenceRef = { sourceType: 'online' | 'print' | 'social' | 'owned'; id: number };
@@ -13,7 +13,7 @@ export const h1Fingerprint = (evidence: H1EvidenceRef[]): string =>
  * consumed before the worker died, so an operator must explicitly reconcile it.
  */
 export async function claimIssueLinkageH1Batch(
-  pool: Pool,
+  pool: Pool | PoolClient,
   organizationId: number,
   newsDate: string,
   fingerprint: string,
@@ -49,7 +49,7 @@ export async function claimIssueLinkageH1Batch(
  * Any duplicate means the entire batch must be rolled back before Gemini runs.
  */
 export async function reserveH1Evidence(
-  db: Pick<Pool, 'query'>,
+  db: Pool | PoolClient,
   organizationId: number,
   newsDate: string,
   batchId: number,
@@ -99,13 +99,13 @@ export async function claimAndReserveH1Batch(
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const claim = await claimIssueLinkageH1Batch(client as unknown as Pool,
+    const claim = await claimIssueLinkageH1Batch(client,
       organizationId,newsDate,fingerprint,evidence.length);
     if (!claim.claimed || claim.id === null) {
       await client.query('ROLLBACK');
       return claim;
     }
-    const reservation = await reserveH1Evidence(client as unknown as Pool,
+    const reservation = await reserveH1Evidence(client,
       organizationId,newsDate,claim.id,evidence);
     if (!reservation.reserved) {
       await client.query('ROLLBACK');
