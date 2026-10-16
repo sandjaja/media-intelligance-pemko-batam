@@ -402,7 +402,7 @@ export function buildH1GeminiGroupPrompt(group: {
   ];
   const serialize = () => [...parts, JSON.stringify({
     primaryKeyword: group.primaryKeyword, opdId: group.opdId, evidence: items,
-  })].join('\\n');
+  })].join('\n');
   let prompt = serialize();
   while (prompt.length > 12000 && items.some(e => e.title.length || e.summary.length)) {
     for (const item of items) {
