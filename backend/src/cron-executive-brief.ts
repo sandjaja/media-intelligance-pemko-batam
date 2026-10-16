@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Pool } from 'pg';
+import type { Pool as PoolType } from 'pg';
 import { runScheduledExecutiveBrief } from './executive-brief-runner.js';
 
 export const json = (res: ServerResponse, status: number, body: unknown) => {
@@ -18,7 +19,14 @@ export function isAuthorizedExecutiveBriefCron(method: string | undefined, autho
  * Authenticated CRON preflight ONLY.
  * No automatic registration and no Gemini call; production-safe while disabled.
  */
-export default async function handler(req: IncomingMessage, res: ServerResponse) {
+export function createExecutiveBriefCronHandler(dependencies: {
+  createPool: (databaseUrl: string) => Pick<PoolType, 'query' | 'end'>;
+  runDryRun: (pool: PoolType, now: Date) => Promise<unknown>;
+} = {
+  createPool: databaseUrl => new Pool({ connectionString: databaseUrl, max: 1 }),
+  runDryRun: (pool, now) => runScheduledExecutiveBrief(pool, now, { dryRun: true }),
+}) {
+return async function handler(req: IncomingMessage, res: ServerResponse) {
   if (req.method !== 'GET') return json(res, 405, { error: 'METHOD_NOT_ALLOWED' });
   const secret = process.env.CRON_SECRET;
   if (!isAuthorizedExecutiveBriefCron(req.method, req.headers.authorization, secret)) {
@@ -26,13 +34,16 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   }
   const databaseUrl = process.env.DATABASE_URL ?? process.env.POSTGRES_URL ?? '';
   if (!databaseUrl) return json(res, 503, { error: 'DATABASE_URL_REQUIRED' });
-  const pool = new Pool({ connectionString: databaseUrl, max: 1 });
+  const pool = dependencies.createPool(databaseUrl);
   try {
-    const result = await runScheduledExecutiveBrief(pool, new Date(), { dryRun: true });
+    const result = await dependencies.runDryRun(pool as PoolType, new Date());
     return json(res, 200, { data: result, scheduler_connected: false });
   } catch {
     return json(res, 503, { error: 'EXECUTIVE_BRIEF_CRON_PREFLIGHT_FAILED' });
   } finally {
     await pool.end();
   }
+};
 }
+
+export default createExecutiveBriefCronHandler();
