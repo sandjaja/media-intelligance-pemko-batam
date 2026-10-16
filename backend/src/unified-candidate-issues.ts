@@ -3,7 +3,7 @@ import type { Pool, PoolClient } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
-import { selectYesterdayWibEvidence, h1Fingerprint, groupH1Evidence, publicationDateNeedsReview, validateH1ExecutionPlan, h1ClassifiedPlanFingerprint , buildH1BoundedPlan } from './issue-linkage-h1-batch-lock.js';
+import { selectYesterdayWibEvidence, h1Fingerprint, groupH1Evidence, publicationDateNeedsReview, validateH1ExecutionPlan, h1ClassifiedPlanFingerprint , buildH1BoundedPlan, buildH1ContinuationPlan } from './issue-linkage-h1-batch-lock.js';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { checkIssueEvidenceEligibility, type IssueEvidenceSource } from './issue-evidence-eligibility.js';
 import { matchExistingIssues } from './unified-existing-issue-matcher.js';
@@ -171,6 +171,37 @@ app.post('/api/intelligence/issue-linkage-inbox/batch-h1/validate',{preHandler:a
  return {data:{valid:true,date:plan.date,plannedFingerprint:plan.plannedFingerprint,
   plannedGroupCount:plan.plannedGroupCount,evidenceCount:plan.plannedGroups.reduce((n,g)=>n+g.evidence.length,0),
   ready:false,reason:'EXECUTION_ENDPOINT_NOT_ENABLED'}};
+});
+// Read-only continuation preview. Ledger reservations are authoritative, including failed/uncertain runs.
+// This does not authorize a second batch or consume AI quota.
+app.get('/api/intelligence/issue-linkage-inbox/batch-h1/continuation-preview',{preHandler:auth},async(request,reply)=>{
+ const ctx=request.unifiedIssueAuth!;
+ if(!canManage(ctx))return reply.code(403).send({error:'ISSUE_LINKAGE_REQUIRES_HUMAS_OR_SUPER_ADMIN'});
+ const organizationId=await resolveOrganizationId(pool,ctx);
+ if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
+ const ledger=(await pool.query(`SELECT to_regclass('public.issue_linkage_h1_evidence_ledger') IS NOT NULL AS installed`)).rows[0];
+ if(!ledger?.installed)return reply.code(503).send({error:'H1_EVIDENCE_LEDGER_MIGRATION_REQUIRED',ready:false});
+ const rows=(await pool.query(`SELECT candidate_key,snapshot FROM unified_candidate_issues
+  WHERE organization_id=$1 AND status IN ('BELOW_THRESHOLD','MATCHED_ISSUE','PENDING','APPROVED','MERGED')
+  ORDER BY last_detected_at DESC LIMIT 300`,[organizationId])).rows;
+ const evidence=rows.flatMap((row:any)=>(Array.isArray(row.snapshot?.evidence)?row.snapshot.evidence:[])
+  .map((e:any)=>({sourceType:String(e.sourceType||''),id:Number(e.id),
+   occurredAt:e.occurredAt||null,title:e.title||null,summary:e.summary||null,
+   primaryKeyword:row.snapshot?.primaryKeyword||e.primaryKeyword||null,
+   opdId:e.opdId==null?(row.snapshot?.opdId==null?null:Number(row.snapshot.opdId)):Number(e.opdId)})));
+ const current=buildH1BoundedPlan(evidence as any[]);
+ const reserved=(await pool.query(`SELECT source_type,source_id FROM issue_linkage_h1_evidence_ledger
+  WHERE organization_id=$1 AND news_date=$2::date`,[organizationId,current.date])).rows;
+ const refs=new Set<string>(reserved.map((e:any)=>`${e.source_type}:${e.source_id}`));
+ const plan=buildH1ContinuationPlan(evidence as any[],refs);
+ return {data:{mode:'read-only-continuation-preview',date:plan.date,timezone:'Asia/Jakarta',
+  alreadyReservedCount:plan.alreadyReservedCount,plannedGroupCount:plan.plannedGroupCount,
+  deferredGroupCount:plan.deferredGroupCount,plannedFingerprint:plan.plannedFingerprint,
+  planValid:plan.planCheck.valid,
+  groups:plan.plannedGroups.map(g=>({primaryKeyword:g.primaryKeyword,opdId:g.opdId,
+   evidenceCount:g.evidence.length})),
+  ready:false,reason:'EXECUTION_ENDPOINT_NOT_ENABLED',
+  warning:'Pratinjau saja. Evidence yang telah direservasi tidak digunakan ulang, termasuk reservasi gagal atau belum pasti.'}};
 });
 // Safe, read-only simulation. Never reserves evidence, writes results, or invokes Gemini.
 app.post('/api/intelligence/issue-linkage-inbox/batch-h1/simulate',{preHandler:auth},async(request,reply)=>{
