@@ -37,7 +37,7 @@ function setupExecutiveBriefControl(){
  const section=document.createElement('details');
  section.id='aiExecutiveBriefSection';
  section.className='glass rounded-2xl p-5 space-y-3';
- section.innerHTML='<summary class="cursor-pointer font-bold text-lg">Pengujian Executive Brief (Manual)</summary><p class="text-xs text-slate-400 mt-2">Jadwal yang disarankan: 06.30 WIB. Scheduler otomatis belum diaktifkan. Membuka dashboard hanya membaca hasil tersimpan, tanpa menggunakan kuota Gemini.</p><div id="aiExecutiveBriefStatus" class="text-xs text-slate-400 mt-2">Memuat status...</div><div class="mt-3 flex flex-wrap items-center gap-2 text-xs"><label for="aiExecutiveBriefHour">Jam WIB</label><input id="aiExecutiveBriefHour" type="number" min="0" max="23" value="6" class="w-16 rounded border border-slate-600 bg-transparent px-2 py-1"><span>:</span><input id="aiExecutiveBriefMinute" type="number" min="0" max="59" value="30" aria-label="Menit WIB" class="w-16 rounded border border-slate-600 bg-transparent px-2 py-1"><button type="button" id="aiExecutiveBriefSave" class="rounded-lg border border-cyan-600 px-3 py-2 text-xs">Simpan Jam (Nonaktif)</button></div><div id="aiExecutiveBriefScheduleStatus" class="mt-2 text-xs text-slate-400">Jadwal belum dimuat</div><div class="mt-3 flex items-center gap-3 text-xs"><label class="flex items-center gap-2"><input type="checkbox" id="aiExecutiveBriefEnabled"> Aktifkan Executive Brief Otomatis</label><span id="aiExecutiveBriefActivationStatus" class="text-amber-400">Belum tersedia — penghubung cron belum diuji</span></div><button type="button" id="aiExecutiveBriefReload" class="mt-2 rounded-lg border border-slate-600 px-3 py-2 text-xs">Perbarui Status</button><button type="button" id="aiExecutiveBriefPreflight" class="mt-2 ml-2 rounded-lg border border-cyan-600 px-3 py-2 text-xs">Uji Jadwal (Tanpa AI)</button><div id="aiExecutiveBriefPreflightResult" class="mt-2 text-xs text-slate-400"></div><button type="button" id="aiExecutiveBriefRunOnce" class="mt-2 rounded-lg border border-amber-600 px-3 py-2 text-xs">Smoke Test AI Sekali (Manual)</button><div id="aiExecutiveBriefRunOnceResult" class="mt-2 text-xs text-slate-400"></div><p class="text-xs text-amber-400 mt-2">Smoke test manual memakai kuota AI dan dibatasi sekali per hari; jadwal otomatis tetap nonaktif.</p>';
+ section.innerHTML='<summary class="cursor-pointer font-bold text-lg">Pengujian Executive Brief (Manual)</summary><p class="text-xs text-slate-400 mt-2">Executive Brief otomatis diatur melalui checkbox Scheduler utama, pukul 08.10 WIB. Membuka dashboard hanya membaca hasil tersimpan.</p><div id="aiExecutiveBriefStatus" class="text-xs text-slate-400 mt-2">Memuat status...</div><div id="aiExecutiveBriefScheduleStatus" class="mt-2 text-xs text-slate-400">Jadwal belum dimuat</div><button type="button" id="aiExecutiveBriefReload" class="mt-2 rounded-lg border border-slate-600 px-3 py-2 text-xs">Perbarui Status</button><button type="button" id="aiExecutiveBriefPreflight" class="mt-2 ml-2 rounded-lg border border-cyan-600 px-3 py-2 text-xs">Uji Jadwal (Tanpa AI)</button><div id="aiExecutiveBriefPreflightResult" class="mt-2 text-xs text-slate-400"></div><button type="button" id="aiExecutiveBriefRunOnce" class="mt-2 rounded-lg border border-amber-600 px-3 py-2 text-xs">Smoke Test AI Sekali (Manual)</button><div id="aiExecutiveBriefRunOnceResult" class="mt-2 text-xs text-slate-400"></div><p class="text-xs text-amber-400 mt-2">Smoke test manual memakai kuota AI dan dibatasi sekali per hari.</p>';
  panel.appendChild(section);
  async function reload(){
   const status=section.querySelector('#aiExecutiveBriefStatus');
@@ -57,29 +57,9 @@ function setupExecutiveBriefControl(){
   try{
    const r=await fetch('/api/admin/executive-brief/schedule',{credentials:'include',cache:'no-store'});
    const j=await r.json();if(!r.ok)throw Error(j.error||'HTTP '+r.status);
-   section.querySelector('#aiExecutiveBriefHour').value=j.data.hour_wib;
-   section.querySelector('#aiExecutiveBriefMinute').value=j.data.minute_wib;
-   activation.checked=!!j.data.enabled;
-   status.textContent='Tersimpan: '+String(j.data.hour_wib).padStart(2,'0')+':'+String(j.data.minute_wib).padStart(2,'0')+' WIB · '+(j.data.enabled?'AKTIF':'NONAKTIF')+' · '+(j.scheduler_connected?'runner terhubung':'aktivasi otomatis belum tersedia')+'.';
+   status.textContent='Jadwal: 08.10 WIB · '+(j.data.enabled?'AKTIF':'NONAKTIF')+'. Aktivasi melalui checkbox Scheduler utama.';
   }catch(e){status.textContent='Pengaturan belum tersedia: '+e.message;}
  }
- const activation=section.querySelector('#aiExecutiveBriefEnabled');
- activation.disabled=true;
- activation.addEventListener('change',async()=>{
-  activation.checked=false;
-  section.querySelector('#aiExecutiveBriefActivationStatus').textContent='Belum dapat diaktifkan sebelum penghubung cron selesai diuji.';
- });
- section.querySelector('#aiExecutiveBriefSave').addEventListener('click',async()=>{
-  const btn=section.querySelector('#aiExecutiveBriefSave'),status=section.querySelector('#aiExecutiveBriefScheduleStatus');
-  const hour=Number(section.querySelector('#aiExecutiveBriefHour').value),minute=Number(section.querySelector('#aiExecutiveBriefMinute').value);
-  if(!Number.isInteger(hour)||hour<0||hour>23||!Number.isInteger(minute)||minute<0||minute>59){status.textContent='Jam tidak valid.';return;}
-  btn.disabled=true;
-  try{
-   const r=await fetch('/api/admin/executive-brief/schedule',{method:'PUT',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({hour_wib:hour,minute_wib:minute})});
-   const j=await r.json();if(!r.ok)throw Error(j.error||'HTTP '+r.status);
-   await loadSchedule();
-  }catch(e){status.textContent='Gagal menyimpan: '+e.message;}finally{btn.disabled=false;}
- });
  section.addEventListener('toggle',()=>{if(section.open){reload();loadSchedule();}});
  section.querySelector('#aiExecutiveBriefPreflight').addEventListener('click',async()=>{
   const status=section.querySelector('#aiExecutiveBriefPreflightResult');
