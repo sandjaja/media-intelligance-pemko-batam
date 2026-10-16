@@ -89,7 +89,7 @@ EVIDENCE:
 ${JSON.stringify(source)}`
   const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}}),signal:AbortSignal.timeout(10000)});
   if(!response.ok)throw new Error(`Gemini HTTP ${response.status}`);
-  const payload=await response.json() as any;await recordGeminiExecution(pool,{model,feature:'issue_claim_extraction',status:'success',startedAt,payload});const raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');
+  const payload=await response.json() as any;const raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');
   if(!raw)throw new Error('AI provider returned no text');
   const parsed=JSON.parse(raw),validIds=new Set(source.map(x=>x.evidenceId)),byId=new Map(evidence.map(e=>[ref(e),e]));
   const claims:DynamicClaim[]=(Array.isArray(parsed.claims)?parsed.claims:[]).slice(0,16).filter((c:any)=>c?.include===true).map((c:any)=>{
@@ -107,6 +107,6 @@ ${JSON.stringify(source)}`
    mentionedLocations:[...new Set<string>((Array.isArray(ga.mentionedLocations)?ga.mentionedLocations:[]).map((x:any)=>String(x).trim()).filter(Boolean))].slice(0,20),
    scopeEvidenceStatus:['SUPPORTED','PARTIAL','GENERIC','OUTSIDE_SCOPE'].includes(String(ga.scopeEvidenceStatus))?String(ga.scopeEvidenceStatus):'GENERIC'
   }:null;
-  return{angles:claims,claims,unclassified:[],totalEvidence:evidence.length,mode:'ai-dynamic' as const,fallbackReason:null,geographicAnalysis};
+  await recordGeminiExecution(pool,{model,feature:'issue_claim_extraction',status:'success',startedAt,payload});return{angles:claims,claims,unclassified:[],totalEvidence:evidence.length,mode:'ai-dynamic' as const,fallbackReason:null,geographicAnalysis};
  }catch(error:any){await recordGeminiExecution(pool,{model,feature:'issue_claim_extraction',status:'failed',startedAt,error:String(error?.message||error)});const reason=String(error?.message||error||'UNKNOWN').slice(0,180);console.warn('[communication-gap] dynamic claim fallback:',reason);return fallback(reason)}
 }
