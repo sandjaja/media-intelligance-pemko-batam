@@ -27,7 +27,7 @@ export async function generateDailyExecutiveBrief(
   }
 }
 
-function isValidBrief(brief: Record<string, unknown>): boolean {
+export function isValidBrief(brief: Record<string, unknown>): boolean {
   return typeof brief.headline === 'string' && brief.headline.trim().length > 0
     && typeof brief.situation === 'string' && brief.situation.trim().length > 0
     && typeof brief.implications === 'string'
