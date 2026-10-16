@@ -172,10 +172,14 @@ export function selectYesterdayWibEvidence<T extends H1EvidenceRef & { occurredA
     } else {
       const keyword = (value: T) => String((value as T & { primaryKeyword?: string | null }).primaryKeyword || '').trim();
       const opd = (value: T) => Number((value as T & { opdId?: number | null }).opdId || 0);
+      const hasKeyword = keyword(item) || keyword(previous);
+      const hasOpd = opd(item) > 0 || opd(previous) > 0;
+      // Preserve the original evidence shape for unclassified duplicates.
+      // Adding null metadata fields would change read-only selection results.
       selected.set(ref, {
         ...previous, ...item,
-        primaryKeyword: keyword(item) || keyword(previous) || null,
-        opdId: opd(item) > 0 ? opd(item) : opd(previous) > 0 ? opd(previous) : null,
+        ...(hasKeyword ? { primaryKeyword: keyword(item) || keyword(previous) } : {}),
+        ...(hasOpd ? { opdId: opd(item) > 0 ? opd(item) : opd(previous) } : {}),
       } as T);
     }
   }
