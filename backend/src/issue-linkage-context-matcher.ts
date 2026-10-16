@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
-import { prepareGeminiRequest } from './ai-gemini-config.js';
+import { listGeminiFallbackModels } from './ai-gemini-config.js';
+import { reserveGeminiDailyRequest } from './ai-gemini-quota-reservation.js';
 import { recordGeminiExecution } from './ai-gemini-execution-log.js';
 export type LinkageContextEvidence={sourceType:string;id:number;title?:string|null;summary?:string|null;occurredAt?:string|null;opdName?:string|null;accountName?:string|null};
 export type LinkageContextResult={mode:'ai-context'|'deterministic-fallback';fallbackReason:string|null;groups:Array<{groupId:string;label:string;reason:string;evidenceRefs:string[]}>};
@@ -10,8 +11,11 @@ const fallback=(evidence:LinkageContextEvidence[],reason:string):LinkageContextR
 export async function matchIssueLinkageContext(issue:{issueId:number;title?:string|null},primaryKeyword:string|null,evidence:LinkageContextEvidence[],pool?:Pool):Promise<LinkageContextResult>{
  if(evidence.length<2)return fallback(evidence,'INSUFFICIENT_EVIDENCE');
  if(!pool)return fallback(evidence,'GEMINI_DATABASE_POOL_MISSING');
- let key:string,model:string;try{({key,model}=await prepareGeminiRequest(pool,'issue_linkage_context'));}catch{return fallback(evidence,'GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}
+ let models:Array<{key:string;model:string}>;try{models=await listGeminiFallbackModels(pool);if(!models.length)return fallback(evidence,'GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}catch{return fallback(evidence,'GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}
  const source=evidence.slice(0,40).map(e=>({evidenceRef:ref(e),source:e.sourceType,title:String(e.title||'').slice(0,500),summary:String(e.summary||'').slice(0,1800),occurredAt:e.occurredAt||null,opd:e.opdName||null,account:e.accountName||null}));
+ for(let attempt=0;attempt<models.length;attempt++){
+ const {key,model}=models[attempt];
+ try{await reserveGeminiDailyRequest(pool,model,'issue_linkage_context');}catch{if(attempt+1<models.length)continue;return fallback(evidence,'GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}
  const startedAt=Date.now();
  try{
   const prompt=`Anda adalah pemeriksa konteks untuk Issue Linkage media pemerintah. Semua berita di bawah sudah lolos grouping deterministik dan direkomendasikan ke Existing Issue yang sama. Tugas Anda HANYA memeriksa apakah mereka membahas KASUS/PERISTIWA yang sama.
@@ -33,5 +37,7 @@ EVIDENCE: ${JSON.stringify(source)}`;
   for(const x of source)if(!seen.has(x.evidenceRef))groups.push({groupId:`single-${x.evidenceRef}`,label:x.title.slice(0,180)||x.evidenceRef,reason:'Tidak dikelompokkan AI dengan evidence lain.',evidenceRefs:[x.evidenceRef]});
   if(!groups.length)throw new Error('AI_RETURNED_NO_VALID_GROUPS');
   await recordGeminiExecution(pool,{model,feature:'issue_linkage_context',status:'success',startedAt,payload});return{mode:'ai-context',fallbackReason:null,groups};
- }catch(error:any){await recordGeminiExecution(pool,{model,feature:'issue_linkage_context',status:'failed',startedAt,error:String(error?.message||error)});const reason=String(error?.message||error||'UNKNOWN').slice(0,180);console.warn('[issue-linkage] context matcher fallback:',reason);return fallback(evidence,reason)}
+ }catch(error:any){await recordGeminiExecution(pool,{model,feature:'issue_linkage_context',status:'failed',startedAt,error:String(error?.message||error)});const reason=String(error?.message||error||'UNKNOWN').slice(0,180);if(/^Gemini HTTP (429|503)$/.test(reason)&&attempt+1<models.length)continue;console.warn('[issue-linkage] context matcher fallback:',reason);return fallback(evidence,reason)}
+ }
+ return fallback(evidence,'GEMINI_MODELS_UNAVAILABLE');
 }
