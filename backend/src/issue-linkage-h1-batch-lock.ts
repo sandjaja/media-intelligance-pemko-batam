@@ -78,6 +78,25 @@ export function selectYesterdayWibEvidence<T extends H1EvidenceRef & { occurredA
   return { date, evidence: [...selected.values()] };
 }
 
+/** Flag suspect dates for human review; never rewrite publication timestamps.
+ * Only explicit ISO dates near the start of a title/summary are considered.
+ */
+export function publicationDateNeedsReview(
+  occurredAt: string | null | undefined,
+  title: string | null | undefined,
+  summary: string | null | undefined,
+): boolean {
+  if (!occurredAt) return false;
+  const stored = new Date(occurredAt);
+  if (!Number.isFinite(stored.getTime())) return false;
+  const head = [title || '', (summary || '').slice(0,180)].join(' ');
+  const match = head.match(/\\b(20\\d{2})-(\\d{2})-(\\d{2})\\b/);
+  if (!match) return false;
+  const embedded = new Date(`${match[1]}-${match[2]}-${match[3]}T00:00:00Z`);
+  return Number.isFinite(embedded.getTime()) &&
+    Math.abs(stored.getTime() - embedded.getTime()) > 2 * 86400000;
+}
+
 /** Must match the existing Issue Linkage inbox cache lookup exactly.
  * Unlike the batch claim SHA-256, this includes the primary keyword.
  */
