@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readExecutiveBriefSchedule, saveExecutiveBriefScheduleTime, isExecutiveBriefDue } from './executive-brief-schedule.js';
+import { readExecutiveBriefSchedule, saveExecutiveBriefScheduleTime, isExecutiveBriefDue, executiveBriefDateWib } from './executive-brief-schedule.js';
 
 test('schedule defaults to 06:30 WIB and disabled when no row exists', async () => {
   const db = { query: async () => ({ rows: [] }) };
@@ -48,4 +48,9 @@ test('schedule rejects invalid timezone and clock settings', () => {
   const now = new Date('2026-10-16T23:30:00Z');
   assert.equal(isExecutiveBriefDue({ enabled: true, hour_wib: 25, minute_wib: 30, timezone: 'Asia/Jakarta' }, now), false);
   assert.equal(isExecutiveBriefDue({ enabled: true, hour_wib: 6, minute_wib: 30, timezone: 'UTC' as 'Asia/Jakarta' }, now), false);
+});
+
+test('daily deduplication date follows WIB across UTC midnight', () => {
+  assert.equal(executiveBriefDateWib(new Date('2026-10-16T23:30:00Z')), '2026-10-17');
+  assert.equal(executiveBriefDateWib(new Date('2026-10-16T16:59:00Z')), '2026-10-16');
 });
