@@ -120,6 +120,12 @@ app.post('/api/intelligence/issue-linkage-inbox/batch-h1/validate',{preHandler:a
  const plan=buildH1BoundedPlan(evidence as any[]);
  const check=validateH1ExecutionPlan(body.date,body.plannedFingerprint,plan.date,
   plan.plannedGroups.flatMap(g=>g.evidence) as any[],plan.plannedFingerprint);
+ // Never claim or execute until migration 160 is installed.
+ const ledger=(await pool.query(`SELECT to_regclass('public.issue_linkage_h1_batches') IS NOT NULL AS installed`)).rows[0];
+ if(!ledger?.installed)return reply.code(503).send({
+  error:'H1_BATCH_LEDGER_MIGRATION_REQUIRED',migration:'160_issue_linkage_h1_batch_ledger.sql',
+  ready:false,
+ });
  if(!check.valid)return reply.code(409).send({error:check.reason,date:plan.date,plannedFingerprint:plan.plannedFingerprint});
  return {data:{valid:true,date:plan.date,plannedFingerprint:plan.plannedFingerprint,
   plannedGroupCount:plan.plannedGroupCount,evidenceCount:plan.plannedGroups.reduce((n,g)=>n+g.evidence.length,0),
