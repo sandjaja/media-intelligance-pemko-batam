@@ -220,3 +220,35 @@ test('H-1 transaction never commits an invalid duplicate evidence plan', async (
   assert.equal(steps.some(q => q.includes('INSERT INTO issue_linkage_h1_evidence_ledger')), false);
   assert.deepEqual(steps, []);
 });
+
+test('H-1 atomic claim accepts matching classified keyword/OPD fingerprint', async () => {
+  const evidence = [{ sourceType: 'online' as const, id: 11 }, { sourceType: 'social' as const, id: 12 }];
+  const groups = [{ primaryKeyword: 'sampah', opdId: 9, evidence }];
+  const steps: string[] = [];
+  const client = {
+    query: async (sql: string) => {
+      steps.push(sql);
+      if (sql.includes('INSERT INTO issue_linkage_h1_batches')) return { rows: [{ id: 81 }], rowCount: 1 };
+      if (sql.includes('INSERT INTO issue_linkage_h1_evidence_ledger')) return { rows: [{ id: 1 }, { id: 2 }], rowCount: 2 };
+      return { rows: [], rowCount: 0 };
+    },
+    release: () => { steps.push('RELEASE'); },
+  };
+  const pool = { connect: async () => client } as unknown as Pool;
+  const result = await claimAndReserveH1Batch(pool, 1, '2026-10-15',
+    h1ClassifiedPlanFingerprint(groups), evidence, groups);
+  assert.equal(result.claimed, true);
+  assert.equal(steps.includes('COMMIT'), true);
+});
+
+test('H-1 atomic claim rejects altered keyword/OPD before opening transaction', async () => {
+  const evidence = [{ sourceType: 'online' as const, id: 11 }, { sourceType: 'social' as const, id: 12 }];
+  const original = [{ primaryKeyword: 'sampah', opdId: 9, evidence }];
+  const altered = [{ primaryKeyword: 'banjir', opdId: 10, evidence }];
+  let connected = false;
+  const pool = { connect: async () => { connected = true; throw new Error('unexpected_connect'); } } as unknown as Pool;
+  const result = await claimAndReserveH1Batch(pool, 1, '2026-10-15',
+    h1ClassifiedPlanFingerprint(original), evidence, altered);
+  assert.equal(result.status, 'invalid_evidence_plan');
+  assert.equal(connected, false);
+});
