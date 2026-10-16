@@ -64,7 +64,7 @@ export async function analyzeReservedH1Groups(
       try {
         await reserveGeminiDailyRequest(pool, model, 'issue_linkage_h1');
       } catch (error) {
-        if (attempt + 1 < models.length) continue;
+        if (error instanceof Error && error.message === 'AI_GEMINI_DAILY_QUOTA_EXCEEDED_OR_DISABLED' && attempt + 1 < models.length) continue;
         throw error;
       }
       try {
