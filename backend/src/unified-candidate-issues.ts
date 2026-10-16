@@ -217,13 +217,20 @@ app.post('/api/intelligence/issue-linkage-inbox/batch-h1/simulate',{preHandler:a
    occurredAt:e.occurredAt||null,title:e.title||null,summary:e.summary||null,
    primaryKeyword:row.snapshot?.primaryKeyword||e.primaryKeyword||null,
    opdId:e.opdId==null?(row.snapshot?.opdId==null?null:Number(row.snapshot.opdId)):Number(e.opdId)})));
- const plan=buildH1BoundedPlan(evidence as any[]);
+ const installed=(await pool.query(`SELECT to_regclass('public.issue_linkage_h1_evidence_ledger') IS NOT NULL AS installed`)).rows[0]?.installed===true;
+ if(!installed)return reply.code(503).send({error:'H1_EVIDENCE_LEDGER_MIGRATION_REQUIRED',ready:false});
+ const now=new Date();
+ const initial=buildH1BoundedPlan(evidence as any[],now);
+ const reserved=(await pool.query(`SELECT source_type,source_id FROM issue_linkage_h1_evidence_ledger
+  WHERE organization_id=$1 AND news_date=$2::date`,[organizationId,initial.date])).rows;
+ const reservedRefs=new Set<string>(reserved.map((e:any)=>`${e.source_type}:${e.source_id}`));
+ const plan=buildH1ContinuationPlan(evidence as any[],reservedRefs,now);
  const check=validateH1ExecutionPlan(body.date,body.plannedFingerprint,plan.date,
   plan.plannedGroups.flatMap(g=>g.evidence) as any[],plan.plannedFingerprint);
  if(!check.valid)return reply.code(409).send({error:check.reason,date:plan.date,plannedFingerprint:plan.plannedFingerprint});
  // Simulated responses deliberately contain no generated content or AI usage.
  return {data:{mode:'simulation',ready:false,executed:false,geminiCalls:0,quotaUsed:0,
-  date:plan.date,plannedFingerprint:plan.plannedFingerprint,
+  date:plan.date,plannedFingerprint:plan.plannedFingerprint,alreadyReservedCount:plan.alreadyReservedCount,
   groups:plan.plannedGroups.map(g=>({primaryKeyword:g.primaryKeyword,opdId:g.opdId,
    evidenceRefs:g.evidence.map(e=>`${e.sourceType}:${e.id}`),simulatedStatus:'would_analyze'})),
   warning:'Simulasi saja. Tidak ada analisis Gemini, reservasi evidence, atau perubahan database.'}};
