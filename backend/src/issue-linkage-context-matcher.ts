@@ -27,11 +27,11 @@ PRIMARY KEYWORD: ${JSON.stringify(primaryKeyword)}
 EVIDENCE: ${JSON.stringify(source)}`;
   const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}}),signal:AbortSignal.timeout(10000)});
   if(!response.ok)throw new Error(`Gemini HTTP ${response.status}`);
-  const payload=await response.json() as any;await recordGeminiExecution(pool,{model,feature:'issue_linkage_context',status:'success',startedAt,payload});const raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('Gemini returned no text');
+  const payload=await response.json() as any;const raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('Gemini returned no text');
   const parsed=JSON.parse(raw),valid=new Set(source.map(x=>x.evidenceRef)),seen=new Set<string>(),groups:any[]=[];
   for(const g of (Array.isArray(parsed.groups)?parsed.groups:[]).slice(0,8)){const refs=[...new Set<string>((Array.isArray(g.evidenceRefs)?g.evidenceRefs:[]).map(String).filter((x:string)=>valid.has(x)&&!seen.has(x)))];if(!refs.length)continue;refs.forEach(x=>seen.add(x));groups.push({groupId:String(g.groupId||groups.length+1).slice(0,40),label:String(g.label||'Konteks').slice(0,180),reason:String(g.reason||'').slice(0,400),evidenceRefs:refs});}
   for(const x of source)if(!seen.has(x.evidenceRef))groups.push({groupId:`single-${x.evidenceRef}`,label:x.title.slice(0,180)||x.evidenceRef,reason:'Tidak dikelompokkan AI dengan evidence lain.',evidenceRefs:[x.evidenceRef]});
   if(!groups.length)return fallback(evidence,'AI_RETURNED_NO_VALID_GROUPS');
-  return{mode:'ai-context',fallbackReason:null,groups};
+  await recordGeminiExecution(pool,{model,feature:'issue_linkage_context',status:'success',startedAt,payload});return{mode:'ai-context',fallbackReason:null,groups};
  }catch(error:any){await recordGeminiExecution(pool,{model,feature:'issue_linkage_context',status:'failed',startedAt,error:String(error?.message||error)});const reason=String(error?.message||error||'UNKNOWN').slice(0,180);console.warn('[issue-linkage] context matcher fallback:',reason);return fallback(evidence,reason)}
 }
