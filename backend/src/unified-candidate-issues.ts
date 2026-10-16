@@ -173,9 +173,10 @@ app.post('/api/intelligence/issue-linkage-inbox/batch-h1/execute',{preHandler:au
  if(!canManage(ctx))return reply.code(403).send({error:'ISSUE_LINKAGE_REQUIRES_HUMAS_OR_SUPER_ADMIN'});
  const organizationId=await resolveOrganizationId(pool,ctx);
  if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
- const body=(request.body||{}) as {date?:unknown;plannedFingerprint?:unknown};
+ const body=(request.body||{}) as {date?:unknown;plannedFingerprint?:unknown;confirmQuotaUsage?:unknown};
  if(typeof body.date!=='string'||typeof body.plannedFingerprint!=='string')
   return reply.code(400).send({error:'H1_PLAN_REQUIRED'});
+ if(body.confirmQuotaUsage!==true)return reply.code(400).send({error:'H1_QUOTA_CONFIRMATION_REQUIRED'});
  // Explicitly disabled by default, including in Production. No provider or DB writes.
  if(process.env.H1_GEMINI_EXECUTION_ENABLED!=='true'||process.env.NODE_ENV==='production')
   return reply.code(503).send({error:'H1_GEMINI_EXECUTION_DISABLED',ready:false});
