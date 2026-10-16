@@ -95,7 +95,16 @@ SELECT id,keyword,role,priority FROM ranked WHERE (role='PRIMARY' AND rn=1) OR (
     WHERE w.issue_id=$1 AND s.organization_id=$2 AND w.workflow_status<>'CLOSED'
     ORDER BY w.cycle_number DESC,w.id DESC LIMIT 1`,[issueId,organizationId])).rows[0];
   if(savedGap){
-    return {...savedGap.result,workflow:{id:Number(savedGap.workflow_id),cycleNumber:Number(savedGap.cycle_number)},snapshot:{analyzedAt:savedGap.analyzed_at}};
+    const prior=typeof savedGap.signature==='string'?JSON.parse(savedGap.signature):savedGap.signature;
+    const counts=(await pool.query(`SELECT
+      (SELECT COUNT(*)::int FROM issue_articles WHERE issue_id=$1) online_count,
+      (SELECT COUNT(*)::int FROM issue_print_articles WHERE issue_id=$1 AND linkage_status='linked') print_count,
+      (SELECT COUNT(*)::int FROM social_mention_issues WHERE issue_id=$1) social_count`,[issueId])).rows[0];
+    const linkedNow=Number(counts.online_count)+Number(counts.print_count)+Number(counts.social_count);
+    const stale=prior?.external!==undefined&&prior?.owned!==undefined
+      ?linkedNow!==Number(prior.external)+Number(prior.owned)
+      :true;
+    return {...savedGap.result,workflow:{id:Number(savedGap.workflow_id),cycleNumber:Number(savedGap.cycle_number)},snapshot:{analyzedAt:savedGap.analyzed_at,stale,refreshRequired:stale}};
   }
   // Never start a paid analysis from an ordinary page read.
   const gapProviderOnRead=(await pool.query("SELECT p.code FROM ai_humas_model_selections s JOIN ai_models m ON m.id=s.model_id JOIN ai_providers p ON p.id=m.provider_id WHERE s.task_code='gap_analysis' LIMIT 1")).rows[0]?.code;
