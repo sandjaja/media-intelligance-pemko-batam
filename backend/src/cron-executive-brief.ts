@@ -36,6 +36,25 @@ export function createExecutiveBriefCronHandler(dependencies: {
     if (String(main.run_time).slice(0,5) !== '08:00') {
       return { status: 'not_due', reason: 'MAIN_SCHEDULER_TIME_MISMATCH' };
     }
+    // Only consume AI quota after today's scheduled collection has completed.
+    // A missing, running, or failed collection must not produce a stale brief.
+    const dateWib = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(now);
+    const { rows: collectionRuns } = await pool.query(
+      `SELECT status FROM collection_scheduler_runs
+       WHERE trigger_type='SCHEDULED'
+         AND (started_at AT TIME ZONE 'Asia/Jakarta')::date=$1::date
+       ORDER BY started_at DESC LIMIT 1`,
+      [dateWib],
+    );
+    const collectionStatus = collectionRuns[0]?.status;
+    if (!collectionStatus || collectionStatus === 'RUNNING') {
+      return { status: 'not_due', reason: 'COLLECTION_NOT_FINISHED' };
+    }
+    if (collectionStatus !== 'SUCCESS') {
+      return { status: 'not_due', reason: 'COLLECTION_NOT_SUCCESSFUL' };
+    }
     return runScheduledExecutiveBrief(pool, now, {
       dryRun: false, execute: executeAuthorizedExecutiveBrief,
     });
