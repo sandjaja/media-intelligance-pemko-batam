@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readExecutiveBriefSchedule, saveExecutiveBriefScheduleTime, isExecutiveBriefDue, executiveBriefDateWib } from './executive-brief-schedule.js';
+import { readExecutiveBriefSchedule, saveExecutiveBriefScheduleTime, isExecutiveBriefDue, executiveBriefDateWib, inspectExecutiveBriefSchedule } from './executive-brief-schedule.js';
 
 test('schedule defaults to 06:30 WIB and disabled when no row exists', async () => {
   const db = { query: async () => ({ rows: [] }) };
@@ -53,4 +53,37 @@ test('schedule rejects invalid timezone and clock settings', () => {
 test('daily deduplication date follows WIB across UTC midnight', () => {
   assert.equal(executiveBriefDateWib(new Date('2026-10-16T23:30:00Z')), '2026-10-17');
   assert.equal(executiveBriefDateWib(new Date('2026-10-16T16:59:00Z')), '2026-10-16');
+});
+
+test('schedule preflight stays read-only and disabled by default', async () => {
+  let calls = 0;
+  const db = { query: async (sql: string) => {
+    calls++;
+    assert.match(sql, /^SELECT/);
+    return { rows: [{ enabled: false, hour_wib: 6, minute_wib: 30, timezone: 'Asia/Jakarta' }] };
+  } };
+  const decision = await inspectExecutiveBriefSchedule(db as never, new Date('2026-10-16T23:30:00Z'));
+  assert.deepEqual(decision, { due: false, date: '2026-10-17', reason: 'disabled' });
+  assert.equal(calls, 1);
+});
+
+test('schedule preflight refuses duplicate daily claim', async () => {
+  const db = { query: async (sql: string) => {
+    assert.match(sql, /^SELECT/);
+    if (sql.includes('executive_brief_daily_cache')) return { rows: [{ status: 'failed' }] };
+    return { rows: [{ enabled: true, hour_wib: 6, minute_wib: 30, timezone: 'Asia/Jakarta' }] };
+  } };
+  const decision = await inspectExecutiveBriefSchedule(db as never, new Date('2026-10-16T23:30:00Z'));
+  assert.equal(decision.reason, 'already_recorded');
+  assert.equal(decision.due, false);
+});
+
+test('schedule preflight identifies due run without creating a claim', async () => {
+  const db = { query: async (sql: string) => {
+    assert.match(sql, /^SELECT/);
+    if (sql.includes('executive_brief_daily_cache')) return { rows: [] };
+    return { rows: [{ enabled: true, hour_wib: 6, minute_wib: 30, timezone: 'Asia/Jakarta' }] };
+  } };
+  const decision = await inspectExecutiveBriefSchedule(db as never, new Date('2026-10-16T23:30:00Z'));
+  assert.deepEqual(decision, { due: true, date: '2026-10-17', reason: 'due' });
 });
