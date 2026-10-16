@@ -77,8 +77,11 @@ const groups:any[]=[];for(const g of consolidatedGroups){if(g.linkedIssue?.issue
  const rows=(await pool.query(`SELECT candidate_key,snapshot FROM unified_candidate_issues
   WHERE organization_id=$1 AND status IN ('BELOW_THRESHOLD','MATCHED_ISSUE','PENDING','APPROVED','MERGED')
   ORDER BY last_detected_at DESC LIMIT 300`,[organizationId])).rows;
- const evidence=rows.flatMap((row:any)=>Array.isArray(row.snapshot?.evidence)?row.snapshot.evidence:[])
-  .map((e:any)=>({sourceType:String(e.sourceType||''),id:Number(e.id),occurredAt:e.occurredAt||null,primaryKeyword:e.primaryKeyword||null,opdId:e.opdId==null?null:Number(e.opdId)}));
+ const evidence=rows.flatMap((row:any)=>(Array.isArray(row.snapshot?.evidence)?row.snapshot.evidence:[])
+  .map((e:any)=>({sourceType:String(e.sourceType||''),id:Number(e.id),
+   occurredAt:e.occurredAt||null,
+   primaryKeyword:row.snapshot?.primaryKeyword||e.primaryKeyword||null,
+   opdId:e.opdId==null?(row.snapshot?.opdId==null?null:Number(row.snapshot.opdId)):Number(e.opdId)})));
  const selected=selectYesterdayWibEvidence(evidence as any[]);
  const fingerprint=h1Fingerprint(selected.evidence as any[]);
  const groups=groupH1Evidence(selected.evidence as any[]);
