@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
-import { h1Fingerprint, inboxContextFingerprint, selectYesterdayWibEvidence, groupH1Evidence, claimIssueLinkageH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
+import { h1Fingerprint, inboxContextFingerprint, selectYesterdayWibEvidence, groupH1Evidence, publicationDateNeedsReview, claimIssueLinkageH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
 
 test('H-1 fingerprint is independent of evidence ordering and duplicate refs', () => {
   const a = [{ sourceType: 'online' as const, id: 7 }, { sourceType: 'social' as const, id: 3 }];
@@ -64,4 +64,13 @@ test('H-1 grouping isolates OPDs, deduplicates and keeps missing keywords separa
   assert.equal(groups.find(g => g.key === 'sampah|opd:4')?.evidence.length, 2);
   assert.equal(groups.find(g => g.key === 'sampah|opd:5')?.evidence.length, 1);
   assert.equal(groups.find(g => g.key === 'unclassified|owned:4')?.evidence.length, 1);
+});
+
+test('publication-date review recognizes Indonesian dates without rewriting stored timestamps', () => {
+  assert.equal(publicationDateNeedsReview('2026-10-16T09:38:53Z',
+    'DPR minta investasi AI', 'Sabtu, 10 Oktober 2026 09:26 WIB'), true);
+  assert.equal(publicationDateNeedsReview('2026-10-16T09:38:53Z',
+    'Berita terbaru', 'Jumat, 16 Oktober 2026'), false);
+  assert.equal(publicationDateNeedsReview('2026-10-16T09:38:53Z',
+    'Berita terbaru', '31 Februari 2026'), false);
 });
