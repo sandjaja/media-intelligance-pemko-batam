@@ -85,7 +85,12 @@ export async function claimAndReserveH1Batch(
   evidence: H1EvidenceRef[],
   classifiedGroups?: Array<{primaryKeyword:string;opdId:number|null;evidence:H1EvidenceRef[]}>,
 ): Promise<{ claimed: boolean; id: number | null; status: string }> {
-  // Reject invalid/empty plans before acquiring a DB connection or creating a batch.
+  // Reject invalid dates and malformed plans before any DB connection or ledger write.
+  if (!/^20\d{2}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/.test(newsDate) ||
+      !Number.isFinite(new Date(`${newsDate}T00:00:00Z`).getTime()) ||
+      new Date(`${newsDate}T00:00:00Z`).toISOString().slice(0, 10) !== newsDate) {
+    return { claimed:false,id:null,status:'invalid_news_date' };
+  }
   const unique = new Set(evidence.map(item => `${item.sourceType}:${item.id}`));
   if (!evidence.length || unique.size !== evidence.length ||
       evidence.some(item => !['online','print','social','owned'].includes(item.sourceType) ||
