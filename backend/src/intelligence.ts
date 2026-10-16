@@ -75,7 +75,7 @@ async function providerBrief(pool: Pool, rows: IntelligenceArticle[]) {
   const payload = await response.json() as any;
   const raw = payload.candidates?.[0]?.content?.parts?.map((x: any) => x.text || '').join('');
   if (!raw) throw new Error('Gemini returned no text');
-  return { mode: 'ai', ...JSON.parse(raw) };
+  return { ...JSON.parse(raw), mode: 'ai', model_code: model, source_count: input.length };
 }
 
 export async function getExecutiveBrief(pool: Pool, opdId: string | null = null) {
