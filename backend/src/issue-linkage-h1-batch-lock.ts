@@ -402,3 +402,32 @@ export function buildH1GeminiGroupPrompt(group: {
   if (prompt.length > 12000) throw new Error('H1_GEMINI_PROMPT_TOO_LONG');
   return prompt;
 }
+
+/** Validate Gemini JSON against the exact reserved group; reject invented evidence refs. */
+export function validateH1GeminiGroupResult(
+  group: { evidence: H1EvidenceRef[] },
+  value: unknown,
+): { summary: string; issueSignals: string[]; riskFactors: string[]; suggestedAction: string; evidenceRefs: string[] } {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('H1_GEMINI_INVALID_RESULT');
+  const data = value as Record<string, unknown>;
+  const safeText = (v: unknown, max: number): string => {
+    if (typeof v !== 'string' || !v.trim() || v.length > max) throw new Error('H1_GEMINI_INVALID_RESULT');
+    return v.trim();
+  };
+  const safeList = (v: unknown, max: number): string[] => {
+    if (!Array.isArray(v) || v.length > max) throw new Error('H1_GEMINI_INVALID_RESULT');
+    return v.map(x => safeText(x, 250));
+  };
+  const allowed = new Set(group.evidence.map(e => `${e.sourceType}:${e.id}`));
+  const refs = safeList(data.evidenceRefs, 40);
+  if (!refs.length || new Set(refs).size !== refs.length || refs.some(ref => !allowed.has(ref))) {
+    throw new Error('H1_GEMINI_INVALID_EVIDENCE_REFS');
+  }
+  return {
+    summary: safeText(data.summary, 1800),
+    issueSignals: safeList(data.issueSignals, 10),
+    riskFactors: safeList(data.riskFactors, 10),
+    suggestedAction: safeText(data.suggestedAction, 1000),
+    evidenceRefs: refs,
+  };
+}
