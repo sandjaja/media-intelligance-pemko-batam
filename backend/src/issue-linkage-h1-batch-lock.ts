@@ -90,11 +90,20 @@ export function publicationDateNeedsReview(
   const stored = new Date(occurredAt);
   if (!Number.isFinite(stored.getTime())) return false;
   const head = [title || '', (summary || '').slice(0,180)].join(' ');
-  const match = head.match(/\\b(20\\d{2})-(\\d{2})-(\\d{2})\\b/);
-  if (!match) return false;
-  const embedded = new Date(`${match[1]}-${match[2]}-${match[3]}T00:00:00Z`);
-  return Number.isFinite(embedded.getTime()) &&
-    Math.abs(stored.getTime() - embedded.getTime()) > 2 * 86400000;
+  const iso = head.match(/\\b(20\\d{2})-(\\d{2})-(\\d{2})\\b/);
+  const months: Record<string, number> = {
+    januari:1, februari:2, maret:3, april:4, mei:5, juni:6,
+    juli:7, agustus:8, september:9, oktober:10, november:11, desember:12,
+  };
+  const indonesian = head.toLowerCase().match(/\\b(\\d{1,2})\\s+(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\\s+(20\\d{2})\\b/);
+  const year = iso ? Number(iso[1]) : indonesian ? Number(indonesian[3]) : 0;
+  const month = iso ? Number(iso[2]) : indonesian ? months[indonesian[2]] : 0;
+  const day = iso ? Number(iso[3]) : indonesian ? Number(indonesian[1]) : 0;
+  if (!year || month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const embedded = new Date(Date.UTC(year, month - 1, day));
+  if (embedded.getUTCFullYear() !== year || embedded.getUTCMonth() !== month - 1 ||
+      embedded.getUTCDate() !== day) return false;
+  return Math.abs(stored.getTime() - embedded.getTime()) > 2 * 86400000;
 }
 
 /** Must match the existing Issue Linkage inbox cache lookup exactly.
