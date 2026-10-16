@@ -37,7 +37,7 @@ export function matchOfficialResponseCoverage(angles:CoverageAngle[],owned:Owned
   return{key:angle.key,label:angle.label,status,matchScore:Math.round(score*100),matchedOfficial:status==='NOT_COVERED'?null:best&&{id:best.id,title:best.title,account:best.account,sharedAnchors:best.shared,sharedConcepts:best.sharedConcepts},externalEvidenceCount:angle.evidence.length};
  });
  const aggregate=coverage.length===0?'UNASSESSED':owned.length===0?'NO_RESPONSE':coverage.every(x=>x.status==='COVERED')?'ADDRESSED':coverage.some(x=>x.status==='COVERED'||x.status==='PARTIAL')?'PARTIAL_RESPONSE':'NO_RESPONSE';
- await recordGeminiExecution(pool,{model,feature:'issue_response_coverage',status:'success',startedAt,payload});return{status:aggregate,coverage,officialResponseCount:owned.length};
+ return{status:aggregate,coverage,officialResponseCount:owned.length};
 }
 
 
@@ -54,9 +54,9 @@ export async function matchDynamicOfficialResponseCoverage(angles:CoverageAngle[
   const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}}),signal:AbortSignal.timeout(10000)});
   if(!response.ok)throw new Error(`Gemini HTTP ${response.status}`);
   const payload=await response.json() as any;const raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('Gemini returned no text');
-  const parsed=JSON.parse(raw),rows=Array.isArray(parsed.coverage)?parsed.coverage:[],byClaim=new Map(rows.map((x:any)=>[String(x.claimId),x])),byResponse=new Map(responses.map(x=>[x.responseId,x]));
+  const parsed=JSON.parse(raw),rows=Array.isArray(parsed.coverage)?parsed.coverage:[];if(!rows.length)throw new Error('AI_RETURNED_NO_COVERAGE');const byClaim=new Map(rows.map((x:any)=>[String(x.claimId),x])),byResponse=new Map(responses.map(x=>[x.responseId,x]));
   const coverage=angles.map((a,i)=>{const x:any=byClaim.get(String(i))||{},score=Math.max(0,Math.min(100,Math.round(Number(x.score)||0))),status=score===100?'COVERED':score>0?'PARTIAL':'NOT_COVERED',r=byResponse.get(String(x.responseId));return{key:a.key,label:a.label,claim:a.claim||a.label,status,matchScore:score,reason:String(x.reason||'').slice(0,500),matchedOfficial:status==='NOT_COVERED'?null:(r?{id:r.responseId,title:r.title,account:null}:null),externalEvidenceCount:a.evidence.length}});
   const aggregate=coverage.every(x=>x.status==='COVERED')?'ADDRESSED':coverage.some(x=>x.status==='COVERED'||x.status==='PARTIAL')?'PARTIAL_RESPONSE':'NO_RESPONSE';
-  return{status:aggregate,coverage,officialResponseCount:owned.length,mode:'ai-dynamic',fallbackReason:null};
+  await recordGeminiExecution(pool,{model,feature:'issue_response_coverage',status:'success',startedAt,payload});return{status:aggregate,coverage,officialResponseCount:owned.length,mode:'ai-dynamic',fallbackReason:null};
  }catch(error:any){await recordGeminiExecution(pool,{model,feature:'issue_response_coverage',status:'failed',startedAt,error:String(error?.message||error)});const reason=String(error?.message||error||'UNKNOWN').slice(0,180);console.warn('[communication-gap] response coverage fallback:',reason);return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback',fallbackReason:reason}}
 }
