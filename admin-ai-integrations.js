@@ -132,5 +132,29 @@ function setupGeminiQuotas(){
  });
  loadGeminiQuotas();
 }
-document.addEventListener('DOMContentLoaded',()=>{setupReconciliation();setupManualBalances();setupGeminiQuotas();setupGeminiFeatureUsage();load();});
+function setupExecutiveBriefControl(){
+ const panel=document.getElementById('aiAdminPanel');
+ if(!panel||document.getElementById('aiExecutiveBriefSection'))return;
+ const section=document.createElement('details');
+ section.id='aiExecutiveBriefSection';
+ section.className='border-t border-slate-700 pt-4 mt-4';
+ section.innerHTML='<summary class="cursor-pointer font-bold">Executive Brief Harian</summary><p class="text-xs text-slate-400 mt-2">Jadwal yang disarankan: 06.30 WIB. Scheduler otomatis belum diaktifkan. Membuka dashboard hanya membaca hasil tersimpan, tanpa menggunakan kuota Gemini.</p><div id="aiExecutiveBriefStatus" class="text-xs text-slate-400 mt-2">Memuat status...</div><button type="button" id="aiExecutiveBriefReload" class="mt-2 rounded-lg border border-slate-600 px-3 py-2 text-xs">Perbarui Status</button><p class="text-xs text-amber-400 mt-2">Pembuatan analisis manual belum dibuka melalui UI sampai smoke test pengaman kuota selesai.</p>';
+ panel.appendChild(section);
+ async function reload(){
+  const status=section.querySelector('#aiExecutiveBriefStatus');
+  status.textContent='Memuat status...';
+  try{
+   const r=await fetch('/api/executive-brief/cached',{credentials:'include',cache:'no-store'});
+   const j=await r.json();
+   if(!r.ok)throw Error(j.error||'HTTP '+r.status);
+   const b=j.data;
+   status.textContent=b?.status==='ready'
+    ?'Analisis terakhir: '+String(b.generated_at||b.brief_date)+' · tersimpan di database.'
+    :'Belum ada Executive Brief harian tersimpan. Scheduler otomatis NONAKTIF.';
+  }catch(e){status.textContent='Status tidak tersedia: '+e.message;}
+ }
+ section.addEventListener('toggle',()=>{if(section.open)reload();});
+ section.querySelector('#aiExecutiveBriefReload').addEventListener('click',reload);
+}
+document.addEventListener('DOMContentLoaded',()=>{setupReconciliation();setupManualBalances();setupGeminiQuotas();setupGeminiFeatureUsage();setupExecutiveBriefControl();load();});
 })();
