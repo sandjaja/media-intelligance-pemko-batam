@@ -90,7 +90,7 @@ async function providerBrief(pool: Pool, rows: IntelligenceArticle[]) {
   return { ...(parsed as Record<string, unknown>), mode: 'ai', model_code: model, source_count: input.length };
 }
 
-export async function getExecutiveBrief(pool: Pool, opdId: string | null = null) {
+export async function getExecutiveBrief(pool: Pool, opdId: string | null = null): Promise<Record<string, unknown>> {
   const params: unknown[] = [];
   const where: string[] = [];
   if (opdId) { params.push(opdId); where.push(`a.opd_id=$${params.length}`); }
