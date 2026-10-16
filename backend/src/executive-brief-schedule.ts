@@ -33,3 +33,19 @@ export async function saveExecutiveBriefScheduleTime(
   if (!rows[0]) throw new Error('EXECUTIVE_BRIEF_SCHEDULE_MISSING');
   return rows[0];
 }
+
+/** Pure scheduler decision: never triggers network, AI, or DB writes. */
+export function isExecutiveBriefDue(schedule: ExecutiveBriefSchedule, now: Date): boolean {
+  if (!schedule.enabled || !Number.isFinite(now.getTime())) return false;
+  if (!Number.isInteger(schedule.hour_wib) || !Number.isInteger(schedule.minute_wib)) return false;
+  if (schedule.hour_wib < 0 || schedule.hour_wib > 23 ||
+      schedule.minute_wib < 0 || schedule.minute_wib > 59 ||
+      schedule.timezone !== 'Asia/Jakarta') return false;
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Jakarta', hour: '2-digit', minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const hour = Number(parts.find(p => p.type === 'hour')?.value);
+  const minute = Number(parts.find(p => p.type === 'minute')?.value);
+  return hour === schedule.hour_wib && minute === schedule.minute_wib;
+}
