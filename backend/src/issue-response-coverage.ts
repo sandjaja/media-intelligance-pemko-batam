@@ -1,4 +1,6 @@
 import type { Pool } from 'pg';
+import { executeConfiguredAi } from './ai-execution-gateway.js';
+import type { AiProvider } from './ai-provider-adapters.js';
 import { loadSelectedHumasGeminiModel } from './ai-gemini-config.js';
 import { reserveGeminiDailyRequest } from './ai-gemini-quota-reservation.js';
 import { recordGeminiExecution } from './ai-gemini-execution-log.js';
@@ -41,12 +43,16 @@ export function matchOfficialResponseCoverage(angles:CoverageAngle[],owned:Owned
 }
 
 
-export async function matchDynamicOfficialResponseCoverage(angles:CoverageAngle[],owned:OwnedResponse[],pool?:Pool){
+export async function matchDynamicOfficialResponseCoverage(angles:CoverageAngle[],owned:OwnedResponse[],pool?:Pool,userId?:number){
  if(!angles.length)return{status:'UNASSESSED',coverage:[],officialResponseCount:owned.length,mode:'dynamic'};
  if(!owned.length)return{status:'NO_RESPONSE',coverage:angles.map(a=>({key:a.key,label:a.label,claim:a.claim||a.label,status:'NOT_COVERED',matchScore:0,matchedOfficial:null,externalEvidenceCount:a.evidence.length})),officialResponseCount:0,mode:'dynamic'};
  if(!pool)return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback',fallbackReason:'GEMINI_DATABASE_POOL_MISSING'};
  if(!angles.some(a=>a.claim))return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback',fallbackReason:'NO_DYNAMIC_CLAIMS'};
- let models:Array<{key:string;model:string}>;try{models=[await loadSelectedHumasGeminiModel(pool,'gap_analysis')];if(!models.length)return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback',fallbackReason:'GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE'};}catch{return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback',fallbackReason:'GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE'};}
+ const selection=(await pool.query("SELECT p.code AS provider,m.code AS model FROM ai_humas_model_selections s JOIN ai_models m ON m.id=s.model_id JOIN ai_providers p ON p.id=m.provider_id WHERE s.task_code='gap_analysis' LIMIT 1")).rows[0];
+ if(!selection)throw new Error('AI_GAP_MODEL_SELECTION_MISSING');
+ const paid=selection.provider!=='gemini';
+ if(paid&&(!Number.isSafeInteger(userId)||!userId||userId<=0))throw new Error('AI_GATEWAY_INVALID_CONTEXT');
+ const models:Array<{key:string;model:string}>=paid?[{key:'',model:String(selection.model)}]:[await loadSelectedHumasGeminiModel(pool,'gap_analysis')];
  const basePromptRows=await pool.query("SELECT prompt_text FROM ai_humas_task_prompts WHERE task_code='gap_analysis' LIMIT 1");
  const basePrompt=String(basePromptRows.rows[0]?.prompt_text||'').trim();
  if(!basePrompt)throw new Error('AI_GAP_PROMPT_NOT_CONFIGURED');
@@ -59,15 +65,25 @@ export async function matchDynamicOfficialResponseCoverage(angles:CoverageAngle[
 
 INSTRUKSI TEKNIS SUBANALISIS (wajib mengikuti arahan dasar di atas):\nAnda adalah evaluator Communication Gap pemerintah. Nilai SEBERAPA JAUH substansi inti setiap external claim benar-benar dijawab oleh respons resmi. Ini bukan similarity/topic matching. Kesamaan nama isu, kata, aktor, lokasi, atau pengakuan bahwa masalah ada TIDAK cukup untuk skor tinggi.\n\nATURAN UTAMA:\n1. Identifikasi terlebih dahulu inti yang diminta claim: misalnya siapa yang bertanggung jawab, kapan selesai/dibayar, berapa/apa hasilnya, mengapa terjadi, bagaimana dampaknya, atau tindakan konkret apa yang sudah menghasilkan penyelesaian.\n2. Bedakan PROSES dari HASIL. Pernyataan seperti akan menelusuri, akan berkoordinasi, membentuk tim, mengawal, mengupayakan, mengimbau, sedang membahas, atau berjanji mencari solusi hanya membuktikan proses. Jangan anggap itu menjawab kepastian hasil, pihak bertanggung jawab, pembayaran, jadwal penyelesaian, atau outcome konkret kecuali respons memang menyebut jawabannya.\n3. Jika claim memiliki beberapa unsur, nilai hanya unsur yang benar-benar dijawab. Jangan memberi kredit untuk detail respons yang relevan dengan isu tetapi tidak menjawab unsur claim.\n4. Gunakan evidence respons yang tertulis; jangan mengasumsikan hasil di masa depan.\n\nANCHOR SCORE:\n0 = tidak menjawab substansi inti sama sekali.\n1-25 = hanya mengakui masalah/konteks atau respons sangat periferal.\n26-50 = ada tindakan/proses/mitigasi relevan, tetapi inti pertanyaan/hasil masih belum jelas.\n51-75 = sebagian besar substansi dijawab, tetapi masih ada unsur penting seperti kepastian, hasil, pihak, nilai, atau waktu yang belum terjawab.\n76-99 = hampir seluruh substansi inti dijawab dan hanya detail minor yang tersisa. Jangan gunakan rentang ini bila outcome utama masih belum diketahui.\n100 = seluruh substansi inti claim dijawab eksplisit dan tidak ada elemen material yang tersisa.\n\nContoh prinsip: claim 'belum jelas siapa yang bertanggung jawab' + respons 'Pemko membentuk tim untuk menelusuri pihak yang bertanggung jawab' = proses relevan tetapi identitas pihak masih belum diketahui; skor tidak boleh tinggi. Claim 'gaji belum dibayar dan meminta kepastian pembayaran' + respons 'pemerintah akan mengawal hak pekerja' = relevan tetapi belum memberi kepastian pembayaran konkret; jangan beri skor tinggi.\n\nStatus mengikuti score: 0 NOT_COVERED; 1-99 PARTIAL; 100 COVERED. responseId harus berasal dari daftar atau null. reason harus menjelaskan tepat bagian yang sudah dijawab dan bagian material yang masih kosong. Output JSON {"coverage":[{"claimId":"0","status":"COVERED|PARTIAL|NOT_COVERED","score":0,"responseId":"1","reason":"..."}]}.\n\nDATA:\n${JSON.stringify({claims,responses})}`;
   if(prompt.length>12000)throw new Error('AI_GAP_PROMPT_TOO_LARGE');
-  try{await reserveGeminiDailyRequest(pool,model,'issue_response_coverage');}catch{if(attempt+1<models.length)continue;return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback',fallbackReason:'GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE'};}
-  const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}}),signal:AbortSignal.timeout(10000)});
-  if(!response.ok)throw new Error(`Gemini HTTP ${response.status}`);
-  const payload=await response.json() as any;const raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('Gemini returned no text');
+  try{if(!paid)await reserveGeminiDailyRequest(pool,model,'issue_response_coverage');}catch{if(attempt+1<models.length)continue;return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback',fallbackReason:'GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE'};}
+  let payload:any;
+  let raw:string;
+  if(paid){
+    const result=await executeConfiguredAi(pool,{userId:userId!,taskCode:'gap_analysis',provider:selection.provider as AiProvider,modelCode:model,prompt});
+    raw=JSON.stringify(result.data);
+    payload={gatewayUsage:result.usage};
+  }else{
+    const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}}),signal:AbortSignal.timeout(10000)});
+    if(!response.ok)throw new Error(`Gemini HTTP ${response.status}`);
+    payload=await response.json();
+    raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('')||'';
+  }
+  if(!raw)throw new Error('AI_PROVIDER_EMPTY_RESPONSE');
   const parsed=JSON.parse(raw),rows=Array.isArray(parsed.coverage)?parsed.coverage:[];if(!rows.length)throw new Error('AI_RETURNED_NO_COVERAGE');const byClaim=new Map(rows.map((x:any)=>[String(x.claimId),x])),byResponse=new Map(responses.map(x=>[x.responseId,x]));
   const coverage=angles.map((a,i)=>{const x:any=byClaim.get(String(i))||{},score=Math.max(0,Math.min(100,Math.round(Number(x.score)||0))),status=score===100?'COVERED':score>0?'PARTIAL':'NOT_COVERED',r=byResponse.get(String(x.responseId));return{key:a.key,label:a.label,claim:a.claim||a.label,status,matchScore:score,reason:String(x.reason||'').slice(0,500),matchedOfficial:status==='NOT_COVERED'?null:(r?{id:r.responseId,title:r.title,account:null}:null),externalEvidenceCount:a.evidence.length}});
   const aggregate=coverage.every(x=>x.status==='COVERED')?'ADDRESSED':coverage.some(x=>x.status==='COVERED'||x.status==='PARTIAL')?'PARTIAL_RESPONSE':'NO_RESPONSE';
-  await recordGeminiExecution(pool,{model,feature:'issue_response_coverage',status:'success',startedAt,payload});return{status:aggregate,coverage,officialResponseCount:owned.length,mode:'ai-dynamic',fallbackReason:null};
- }catch(error:any){await recordGeminiExecution(pool,{model,feature:'issue_response_coverage',status:'failed',startedAt,error:String(error?.message||error)});const reason=String(error?.message||error||'UNKNOWN').slice(0,180);if(/^Gemini HTTP (429|503)$/.test(reason)&&attempt+1<models.length)continue;console.warn('[communication-gap] response coverage fallback:',reason);return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback',fallbackReason:reason}}
+  if(!paid)await recordGeminiExecution(pool,{model,feature:'issue_response_coverage',status:'success',startedAt,payload});return{status:aggregate,coverage,officialResponseCount:owned.length,mode:'ai-dynamic',fallbackReason:null};
+ }catch(error:any){if(paid)throw error;await recordGeminiExecution(pool,{model,feature:'issue_response_coverage',status:'failed',startedAt,error:String(error?.message||error)});const reason=String(error?.message||error||'UNKNOWN').slice(0,180);if(/^Gemini HTTP (429|503)$/.test(reason)&&attempt+1<models.length)continue;console.warn('[communication-gap] response coverage fallback:',reason);return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback',fallbackReason:reason}}
  }
  return{...matchOfficialResponseCoverage(angles,owned),mode:'deterministic-fallback',fallbackReason:'GEMINI_MODELS_UNAVAILABLE'};
 }
