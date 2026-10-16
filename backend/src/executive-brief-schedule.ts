@@ -59,3 +59,25 @@ export function executiveBriefDateWib(now: Date): string {
   const value = (type: string) => parts.find(p => p.type === type)?.value;
   return `${value('year')}-${value('month')}-${value('day')}`;
 }
+
+export type ExecutiveBriefScheduleDecision = {
+  due: boolean;
+  date: string;
+  reason: 'disabled' | 'not_due' | 'already_recorded' | 'due';
+};
+
+/** Read-only preflight. A due result does not authorize execution by itself. */
+export async function inspectExecutiveBriefSchedule(
+  pool: Pick<Pool, 'query'>, now: Date,
+): Promise<ExecutiveBriefScheduleDecision> {
+  const schedule = await readExecutiveBriefSchedule(pool);
+  const date = executiveBriefDateWib(now);
+  if (!schedule.enabled) return { due: false, date, reason: 'disabled' };
+  if (!isExecutiveBriefDue(schedule, now)) return { due: false, date, reason: 'not_due' };
+  const { rows } = await pool.query(
+    'SELECT status FROM executive_brief_daily_cache WHERE brief_date=$1::date AND scope_key=$2 LIMIT 1',
+    [date, 'city'],
+  );
+  if (rows.length) return { due: false, date, reason: 'already_recorded' };
+  return { due: true, date, reason: 'due' };
+}
