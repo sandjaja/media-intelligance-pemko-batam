@@ -128,6 +128,22 @@ app.post('/api/intelligence/issue-linkage-inbox/batch-h1/validate',{preHandler:a
   ready:false,
  });
 
+ // A previous reservation (including uncertain work) must never be silently reused.
+ // Check each planned source ref; same-day evidence may belong to a different fingerprint.
+ const plannedRefs=plan.plannedGroups.flatMap(g=>g.evidence);
+ if(plannedRefs.length){
+  const reserved=(await pool.query(`SELECT source_type,source_id,status,batch_id
+   FROM issue_linkage_h1_evidence_ledger
+   WHERE organization_id=$1 AND news_date=$2::date
+     AND (source_type,source_id) IN (
+       SELECT * FROM unnest($3::text[],$4::bigint[])
+     ) LIMIT 1`,[organizationId,plan.date,
+    plannedRefs.map(e=>e.sourceType),plannedRefs.map(e=>e.id)])).rows[0];
+  if(reserved)return reply.code(409).send({
+   error:'H1_EVIDENCE_ALREADY_RESERVED',batchId:Number(reserved.batch_id),
+   reservationStatus:reserved.status,ready:false,
+  });
+ }
  const prior=(await pool.query(`SELECT id,status,request_count,started_at,finished_at
   FROM issue_linkage_h1_batches
   WHERE organization_id=$1 AND news_date=$2::date AND fingerprint=$3
