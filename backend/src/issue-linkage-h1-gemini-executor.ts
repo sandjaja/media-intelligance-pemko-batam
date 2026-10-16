@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
-import { prepareGeminiRequest } from './ai-gemini-config.js';
+import { listGeminiFallbackModels } from './ai-gemini-config.js';
+import { reserveGeminiDailyRequest } from './ai-gemini-quota-reservation.js';
 import { invokeAiProvider } from './ai-provider-adapters.js';
 import {
   buildH1GeminiGroupPrompt,
@@ -52,11 +53,35 @@ export async function analyzeReservedH1Groups(
   }
   const results = [];
   for (let i = 0; i < groups.length; i++) {
-    // Atomic daily quota reservation, database-configured Gemini model/key.
-    const { key, model } = await prepareGeminiRequest(pool, 'issue_linkage_h1');
-    const response = await invokeAiProvider({
-      provider: 'gemini', model, apiKey: key, prompt: prompts[i], timeoutMs: 60000,
-    });
+    // Match Executive Brief: primary, then at most one enabled fallback model.
+    // Only an explicit 429/503 response (or quota reservation failure) permits failover.
+    // Network timeouts, malformed responses and uncertain requests are never replayed.
+    const models = await listGeminiFallbackModels(pool);
+    if (!models.length) throw new Error('AI_GEMINI_DATABASE_CONFIG_MISSING');
+    let selected: { model: string; response: Awaited<ReturnType<typeof invokeAiProvider>> } | null = null;
+    for (let attempt = 0; attempt < Math.min(2, models.length); attempt++) {
+      const { model, key } = models[attempt];
+      try {
+        await reserveGeminiDailyRequest(pool, model, 'issue_linkage_h1');
+      } catch (error) {
+        if (attempt + 1 < models.length) continue;
+        throw error;
+      }
+      try {
+        const response = await invokeAiProvider({
+          provider: 'gemini', model, apiKey: key, prompt: prompts[i], timeoutMs: 60000,
+        });
+        selected = { model, response };
+        break;
+      } catch (error) {
+        const code = error instanceof Error ? error.message : '';
+        if ((code === 'AI_PROVIDER_HTTP_429' || code === 'AI_PROVIDER_HTTP_503') &&
+            attempt + 1 < models.length) continue;
+        throw error;
+      }
+    }
+    if (!selected) throw new Error('H1_GEMINI_MODELS_EXHAUSTED');
+    const { model, response } = selected;
     const analysis = validateH1GeminiGroupResult(groups[i], response.data);
     const validated = {
       primaryKeyword: groups[i].primaryKeyword,
