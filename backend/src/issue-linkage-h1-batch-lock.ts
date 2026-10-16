@@ -381,7 +381,7 @@ export function groupH1Evidence<T extends H1EvidenceRef & {
 export function buildH1GeminiGroupPrompt(group: {
   primaryKeyword: string;
   opdId: number | null;
-  evidence: Array<H1EvidenceRef & { title?: string | null; summary?: string | null }>;
+  evidence: Array<H1EvidenceRef & { opdId?: number | null; title?: string | null; summary?: string | null }>;
 }): string {
   if (!isSafeH1Group(group)) throw new Error('H1_UNSAFE_GEMINI_GROUP');
   const items = group.evidence.map(e => ({
