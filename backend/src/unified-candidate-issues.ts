@@ -235,7 +235,8 @@ app.post('/api/intelligence/issue-linkage-inbox/batch-h1/execute',{preHandler:au
  if(activeBatch)return reply.code(409).send({
   error:'H1_ANOTHER_BATCH_RUNNING',batchId:Number(activeBatch.id),ready:false,
  });
- const groups=plan.plannedGroups;
+ // One Gemini group per HTTP request; the ledger excludes it from the next plan.
+ const groups=plan.plannedGroups.slice(0,1);
  const refs=groups.flatMap(g=>g.evidence.map(e=>({sourceType:e.sourceType,id:e.id})));
  const claimed=await claimAndReserveH1Batch(pool,organizationId,plan.date,plan.plannedFingerprint,refs,groups);
  if(!claimed.claimed||claimed.id===null)return reply.code(409).send({
