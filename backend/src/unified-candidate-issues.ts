@@ -140,6 +140,12 @@ app.post('/api/intelligence/issue-linkage-inbox/batch-h1/validate',{preHandler:a
  const check=validateH1ExecutionPlan(body.date,body.plannedFingerprint,plan.date,
   plan.plannedGroups.flatMap(g=>g.evidence) as any[],plan.plannedFingerprint);
  if(!check.valid)return reply.code(409).send({error:check.reason,date:plan.date,plannedFingerprint:plan.plannedFingerprint});
+ // Never report a usable plan when all remaining groups were already reserved
+ // or were excluded by the H-1 safety limits.
+ if(!plan.planCheck.valid)return reply.code(409).send({
+  error:plan.planCheck.reason||'H1_PLAN_SIZE_INVALID',date:plan.date,
+  plannedGroupCount:plan.plannedGroupCount,ready:false,
+ });
  // A reservation created after this read must still be rejected atomically by claimAndReserveH1Batch.
  const prior=(await pool.query(`SELECT id,status,request_count,started_at,finished_at
   FROM issue_linkage_h1_batches
