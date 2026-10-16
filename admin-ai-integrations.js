@@ -138,7 +138,7 @@ function setupExecutiveBriefControl(){
  const section=document.createElement('details');
  section.id='aiExecutiveBriefSection';
  section.className='border-t border-slate-700 pt-4 mt-4';
- section.innerHTML='<summary class="cursor-pointer font-bold">Executive Brief Harian</summary><p class="text-xs text-slate-400 mt-2">Jadwal yang disarankan: 06.30 WIB. Scheduler otomatis belum diaktifkan. Membuka dashboard hanya membaca hasil tersimpan, tanpa menggunakan kuota Gemini.</p><div id="aiExecutiveBriefStatus" class="text-xs text-slate-400 mt-2">Memuat status...</div><button type="button" id="aiExecutiveBriefReload" class="mt-2 rounded-lg border border-slate-600 px-3 py-2 text-xs">Perbarui Status</button><p class="text-xs text-amber-400 mt-2">Pembuatan analisis manual belum dibuka melalui UI sampai smoke test pengaman kuota selesai.</p>';
+ section.innerHTML='<summary class="cursor-pointer font-bold">Executive Brief Harian</summary><p class="text-xs text-slate-400 mt-2">Jadwal yang disarankan: 06.30 WIB. Scheduler otomatis belum diaktifkan. Membuka dashboard hanya membaca hasil tersimpan, tanpa menggunakan kuota Gemini.</p><div id="aiExecutiveBriefStatus" class="text-xs text-slate-400 mt-2">Memuat status...</div><div class="mt-3 flex flex-wrap items-center gap-2 text-xs"><label for="aiExecutiveBriefHour">Jam WIB</label><input id="aiExecutiveBriefHour" type="number" min="0" max="23" value="6" class="w-16 rounded border border-slate-600 bg-transparent px-2 py-1"><span>:</span><input id="aiExecutiveBriefMinute" type="number" min="0" max="59" value="30" aria-label="Menit WIB" class="w-16 rounded border border-slate-600 bg-transparent px-2 py-1"><button type="button" id="aiExecutiveBriefSave" class="rounded-lg border border-cyan-600 px-3 py-2 text-xs">Simpan Jam (Nonaktif)</button></div><div id="aiExecutiveBriefScheduleStatus" class="mt-2 text-xs text-slate-400">Jadwal belum dimuat</div><button type="button" id="aiExecutiveBriefReload" class="mt-2 rounded-lg border border-slate-600 px-3 py-2 text-xs">Perbarui Status</button><p class="text-xs text-amber-400 mt-2">Pembuatan analisis manual belum dibuka melalui UI sampai smoke test pengaman kuota selesai.</p>';
  panel.appendChild(section);
  async function reload(){
   const status=section.querySelector('#aiExecutiveBriefStatus');
@@ -153,7 +153,28 @@ function setupExecutiveBriefControl(){
     :'Belum ada Executive Brief harian tersimpan. Scheduler otomatis NONAKTIF.';
   }catch(e){status.textContent='Status tidak tersedia: '+e.message;}
  }
- section.addEventListener('toggle',()=>{if(section.open)reload();});
+ async function loadSchedule(){
+  const status=section.querySelector('#aiExecutiveBriefScheduleStatus');
+  try{
+   const r=await fetch('/api/admin/executive-brief/schedule',{credentials:'include',cache:'no-store'});
+   const j=await r.json();if(!r.ok)throw Error(j.error||'HTTP '+r.status);
+   section.querySelector('#aiExecutiveBriefHour').value=j.data.hour_wib;
+   section.querySelector('#aiExecutiveBriefMinute').value=j.data.minute_wib;
+   status.textContent='Tersimpan: '+String(j.data.hour_wib).padStart(2,'0')+':'+String(j.data.minute_wib).padStart(2,'0')+' WIB · NONAKTIF · cron belum terhubung.';
+  }catch(e){status.textContent='Pengaturan belum tersedia: '+e.message;}
+ }
+ section.querySelector('#aiExecutiveBriefSave').addEventListener('click',async()=>{
+  const btn=section.querySelector('#aiExecutiveBriefSave'),status=section.querySelector('#aiExecutiveBriefScheduleStatus');
+  const hour=Number(section.querySelector('#aiExecutiveBriefHour').value),minute=Number(section.querySelector('#aiExecutiveBriefMinute').value);
+  if(!Number.isInteger(hour)||hour<0||hour>23||!Number.isInteger(minute)||minute<0||minute>59){status.textContent='Jam tidak valid.';return;}
+  btn.disabled=true;
+  try{
+   const r=await fetch('/api/admin/executive-brief/schedule',{method:'PUT',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({hour_wib:hour,minute_wib:minute})});
+   const j=await r.json();if(!r.ok)throw Error(j.error||'HTTP '+r.status);
+   await loadSchedule();
+  }catch(e){status.textContent='Gagal menyimpan: '+e.message;}finally{btn.disabled=false;}
+ });
+ section.addEventListener('toggle',()=>{if(section.open){reload();loadSchedule();}});
  section.querySelector('#aiExecutiveBriefReload').addEventListener('click',reload);
 }
 document.addEventListener('DOMContentLoaded',()=>{setupReconciliation();setupManualBalances();setupGeminiQuotas();setupGeminiFeatureUsage();setupExecutiveBriefControl();load();});
