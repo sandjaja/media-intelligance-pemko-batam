@@ -59,9 +59,13 @@ export function selectYesterdayWibEvidence<T extends H1EvidenceRef & { occurredA
   evidence: T[],
   now: Date = new Date(),
 ): { date: string; evidence: T[] } {
-  const day = (date: Date) => new Intl.DateTimeFormat('en-CA', {
+  const formatter = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(date);
+  });
+  const day = (value: Date) => {
+    const parts = Object.fromEntries(formatter.formatToParts(value).map(part => [part.type, part.value]));
+    return `${parts.year}-${parts.month}-${parts.day}`;
+  };
   const date = day(new Date(now.getTime() - 86400000));
   const selected = new Map<string, T>();
   for (const item of evidence) {
