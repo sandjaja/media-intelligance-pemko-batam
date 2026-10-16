@@ -18,18 +18,18 @@ root.querySelectorAll('[data-view-issue]').forEach(b=>b.addEventListener('click'
   const message='Persiapan H-1 ('+String(plan.date||'-')+' WIB): '+count+
    ' kelompok, '+Number(plan.evidenceCount||0)+' evidence, '+
    Number(plan.alreadyReservedCount||0)+' evidence telah direservasi. Perkiraan minimal '+
-   Number(plan.estimatedMinimumGeminiCalls||0)+' permintaan Gemini.\\n\\n'+
-   'Analisis menggunakan kuota Gemini. Gunakan secara bijaksana.\\n'+
+   Number(plan.estimatedMinimumGeminiCalls||0)+' permintaan Gemini.\n\n'+
+   'Analisis menggunakan kuota Gemini. Gunakan secara bijaksana.\n'+
    'Tahap ini hanya memeriksa rencana dan tidak memakai kuota.';
-  if(!plan.planValid||!count){window.alert(message+'\\n\\nTidak ada kelompok yang siap diproses.');return}
+  if(!plan.planValid||!count){window.alert(message+'\n\nTidak ada kelompok yang siap diproses.');return}
   const preflight=await api('/intelligence/issue-linkage-inbox/batch-h1/validate',{
    method:'POST',body:JSON.stringify({date:plan.date,plannedFingerprint:plan.plannedFingerprint}),
   });
   if(preflight.ready!==true&&preflight.data?.ready!==true){
-   window.alert(message+'\\n\\nValidasi selesai, tetapi eksekusi belum diizinkan.');
+   window.alert(message+'\n\nValidasi selesai, tetapi eksekusi belum diizinkan.');
    return;
   }
-  window.alert(message+'\\n\\nValidasi berhasil. Eksekusi Gemini tetap belum diaktifkan dari tombol ini.');
+  window.alert(message+'\n\nValidasi berhasil. Eksekusi Gemini tetap belum diaktifkan dari tombol ini.');
  }catch(error){window.toast?.('Validasi H-1 gagal: '+error.message,false)}
  finally{busy(btn,false)}
 });root.querySelector('[data-refresh]')?.addEventListener('click',async e=>{const b=e.currentTarget;busy(b,true,'MEMUAT...');await load(null,true)});root.querySelectorAll('[data-kpi-filter]').forEach(b=>b.addEventListener('click',()=>{statusFilter=statusFilter===b.dataset.kpiFilter?'ALL':b.dataset.kpiFilter;page=1;render();window.toast?.(statusFilter==='ALL'?'Filter Issue Linkage: Semua':('Filter Issue Linkage: '+(statusFilter==='UNDECIDED'?'Perlu Keputusan':statusFilter))) }));const searchBox=root.querySelector('[data-search-linkage]');if(searchBox)searchBox.addEventListener('input',e=>{searchTerm=e.target.value;page=1;const pos=e.target.selectionStart;render();const next=section().querySelector('[data-search-linkage]');if(next){next.focus({preventScroll:true});try{next.setSelectionRange(pos,pos)}catch(_){}}});root.querySelector('[data-prev]')?.addEventListener('click',()=>{page--;render()});root.querySelector('[data-next]')?.addEventListener('click',()=>{page++;render()});
