@@ -181,3 +181,43 @@ test('H-1 reservation conflict rolls back batch claim', async () => {
   assert.deepEqual(queries.filter(q => ['BEGIN','COMMIT','ROLLBACK','RELEASE'].includes(q)),
     ['BEGIN','ROLLBACK','RELEASE']);
 });
+
+test('H-1 transaction rolls back and releases connection on database failure', async () => {
+  const steps: string[] = [];
+  const client = {
+    query: async (sql: string) => {
+      steps.push(sql);
+      if (sql.includes('INSERT INTO issue_linkage_h1_batches')) return { rows: [{ id: 71 }], rowCount: 1 };
+      if (sql.includes('INSERT INTO issue_linkage_h1_evidence_ledger')) throw new Error('database_write_failed');
+      return { rows: [], rowCount: 0 };
+    },
+    release: () => { steps.push('RELEASE'); },
+  };
+  const pool = { connect: async () => client } as unknown as Pool;
+  await assert.rejects(
+    claimAndReserveH1Batch(pool, 1, '2026-10-15', 'fp', [{ sourceType: 'online', id: 1 }]),
+    /database_write_failed/,
+  );
+  assert.deepEqual(steps.filter(q => ['BEGIN','COMMIT','ROLLBACK','RELEASE'].includes(q)),
+    ['BEGIN','ROLLBACK','RELEASE']);
+});
+
+test('H-1 transaction never commits an invalid duplicate evidence plan', async () => {
+  const steps: string[] = [];
+  const client = {
+    query: async (sql: string) => {
+      steps.push(sql);
+      if (sql.includes('INSERT INTO issue_linkage_h1_batches')) return { rows: [{ id: 72 }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
+    release: () => { steps.push('RELEASE'); },
+  };
+  const pool = { connect: async () => client } as unknown as Pool;
+  const result = await claimAndReserveH1Batch(pool, 1, '2026-10-15', 'fp', [
+    { sourceType: 'online', id: 1 }, { sourceType: 'online', id: 1 },
+  ]);
+  assert.equal(result.status, 'evidence_already_reserved');
+  assert.equal(steps.some(q => q.includes('INSERT INTO issue_linkage_h1_evidence_ledger')), false);
+  assert.deepEqual(steps.filter(q => ['BEGIN','COMMIT','ROLLBACK','RELEASE'].includes(q)),
+    ['BEGIN','ROLLBACK','RELEASE']);
+});
