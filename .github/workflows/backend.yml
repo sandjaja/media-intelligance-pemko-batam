@@ -7,6 +7,7 @@ on:
       - 'backend/**'
       - 'app.js'
       - 'admin-ai-integrations.js'
+      - 'admin-ai.js'
       - 'phase3-outcome-ui.js'
       - 'issue-management-v2.js'
       - 'social-intelligence.js'
@@ -24,6 +25,7 @@ on:
       - 'phase3-outcome-ui.js'
       - 'app.js'
       - 'admin-ai-integrations.js'
+      - 'admin-ai.js'
       - '.github/workflows/backend.yml'
 
 jobs:
@@ -42,6 +44,7 @@ jobs:
         run: |
           node --check app.js
           node --check admin-ai-integrations.js
+          node --check admin-ai.js
           node --check phase3-outcome-ui.js
           node --check issue-management-v2.js
           node --check social-intelligence.js
