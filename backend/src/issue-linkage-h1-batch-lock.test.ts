@@ -74,3 +74,15 @@ test('publication-date review recognizes Indonesian dates without rewriting stor
   assert.equal(publicationDateNeedsReview('2026-10-16T09:38:53Z',
     'Berita terbaru', '31 Februari 2026'), false);
 });
+
+test('duplicate H-1 snapshots preserve the primary keyword and OPD', () => {
+  const result = selectYesterdayWibEvidence([
+    { sourceType: 'online' as const, id: 1133, occurredAt: '2026-10-15T05:00:00Z',
+      primaryKeyword: 'pekerja', opdId: 15 },
+    { sourceType: 'online' as const, id: 1133, occurredAt: '2026-10-15T05:00:00Z',
+      primaryKeyword: null, opdId: null },
+  ], new Date('2026-10-16T12:00:00Z'));
+  assert.equal(result.evidence.length, 1);
+  assert.equal(result.evidence[0].primaryKeyword, 'pekerja');
+  assert.equal(result.evidence[0].opdId, 15);
+});
