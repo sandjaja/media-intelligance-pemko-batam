@@ -37,8 +37,8 @@ export async function executeBudgetedAi<T>(pool: Pool, input: {
         AND m.enabled=TRUE AND p.enabled=TRUE AND t.enabled=TRUE
         AND (
           EXISTS(SELECT 1 FROM ai_task_routes r WHERE r.task_id=t.id AND r.provider_id=p.id AND r.model_id=m.id AND r.enabled=TRUE)
-          OR EXISTS(SELECT 1 FROM ai_humas_model_selections s WHERE s.task_code=t.code AND s.model_id=m.id
-            AND t.code IN ('gap_analysis','strakom_analysis','publication_analysis','monitoring_analysis','content_studio_prompting'))
+          OR EXISTS(SELECT 1 FROM ai_humas_model_selections s WHERE s.task_code=CASE WHEN t.code='evaluation_analysis' THEN 'monitoring_analysis' ELSE t.code END AND s.model_id=m.id
+            AND t.code IN ('gap_analysis','strakom_analysis','publication_analysis','monitoring_analysis','content_studio_prompting','evaluation_analysis'))
         )
       LIMIT 1`,
     [input.modelId, input.providerId, input.taskId],
@@ -82,8 +82,8 @@ export async function executeConfiguredAi(pool: Pool, input: {
         AND t.enabled=TRUE AND p.enabled=TRUE AND m.enabled=TRUE
         AND (
           EXISTS(SELECT 1 FROM ai_task_routes r WHERE r.task_id=t.id AND r.provider_id=p.id AND r.model_id=m.id AND r.enabled=TRUE)
-          OR EXISTS(SELECT 1 FROM ai_humas_model_selections s WHERE s.task_code=t.code AND s.model_id=m.id
-            AND t.code IN ('gap_analysis','strakom_analysis','publication_analysis','monitoring_analysis','content_studio_prompting'))
+          OR EXISTS(SELECT 1 FROM ai_humas_model_selections s WHERE s.task_code=CASE WHEN t.code='evaluation_analysis' THEN 'monitoring_analysis' ELSE t.code END AND s.model_id=m.id
+            AND t.code IN ('gap_analysis','strakom_analysis','publication_analysis','monitoring_analysis','content_studio_prompting','evaluation_analysis'))
         )
       LIMIT 1`,
     [input.taskCode, input.provider, input.modelCode],

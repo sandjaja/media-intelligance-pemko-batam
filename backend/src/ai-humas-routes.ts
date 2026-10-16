@@ -159,7 +159,7 @@ export async function registerAiHumasRoutes(app: FastifyInstance, pool: Pool, jw
             AND l.user_id = $2
           GROUP BY t.code, p.code, m.code
           ORDER BY t.code, p.code, m.code`,
-        [HUMAS_AI_TASKS,payload.sub],
+        [[...HUMAS_AI_TASKS,'evaluation_analysis'],payload.sub],
       );
       // Remaining credit cannot be inferred from usage totals.
       // Explicitly return null rather than fabricating remaining tokens or credit.

@@ -9,7 +9,7 @@ const originalFetch=globalThis.fetch;
 const originalKey=process.env.INTEGRATION_CREDENTIAL_KEY;
 afterEach(()=>{globalThis.fetch=originalFetch;if(originalKey===undefined)delete process.env.INTEGRATION_CREDENTIAL_KEY;else process.env.INTEGRATION_CREDENTIAL_KEY=originalKey;});
 const tasks:HumasAiTask[]=['gap_analysis','strakom_analysis','publication_analysis','monitoring_analysis','content_studio_prompting'];
-function db(provider='gemini',options:{missing?:boolean;disabled?:boolean;prompt?:string;budget?:boolean;quota?:boolean}={}){
+function db(provider='gemini',options:{missing?:boolean;disabled?:boolean;prompt?:string;budget?:boolean;quota?:boolean;evaluation?:boolean;evaluationMissing?:boolean}={}){
   process.env.INTEGRATION_CREDENTIAL_KEY='test-only-humas-encryption-key';
   const ciphertext=encryptIntegrationCredential('test-only-provider-key');
   const statements:Array<{sql:string;params:any[]}>=[];
@@ -17,9 +17,10 @@ function db(provider='gemini',options:{missing?:boolean;disabled?:boolean;prompt
     statements.push({sql,params});
     const result=(rows:any[])=>({rows,rowCount:rows.length});
     if(['BEGIN','COMMIT','ROLLBACK'].includes(sql))return result([]);
-    if(sql.includes('FROM ai_humas_model_selections s'))return result(options.missing?[]:[{task_id:3,task_enabled:true,provider_id:2,provider,provider_enabled:!options.disabled,model_id:4,model:'selected-model',model_enabled:true,prompt_text:options.prompt??'Arahan terbaru Humas. Keluarkan JSON.',prompt_version:7}]);
-    if(sql.includes('SELECT m.id FROM ai_models'))return result([{id:4}]);
-    if(sql.includes('FROM ai_task_routes r'))return result([{task_id:3,provider_id:2,model_id:4}]);
+    if(sql.includes('FROM ai_humas_model_selections s')&&!sql.includes('FROM ai_models m'))return result(options.missing?[]:[{task_id:3,task_enabled:true,provider_id:2,provider,provider_enabled:!options.disabled,model_id:4,model:'selected-model',model_enabled:true,prompt_text:options.prompt??'Arahan terbaru Humas. Keluarkan JSON.',prompt_version:7}]);
+    if(sql.includes('SELECT m.id FROM ai_models')){if(options.evaluation)assert.equal(params[2],16);return result([{id:4}]);}
+    if(sql.includes('FROM ai_task_routes r')){if(options.evaluation){assert.equal(params[0],'evaluation_analysis');assert.ok(sql.includes("CASE WHEN t.code='evaluation_analysis' THEN 'monitoring_analysis'"));}return result([{task_id:options.evaluation?16:3,provider_id:2,model_id:4}]);}
+    if(sql.includes('SELECT id FROM ai_tasks'))return result(options.evaluationMissing?[]:[{id:16}]);
     if(sql.includes('FROM ai_provider_credentials'))return result([{credential_ciphertext:ciphertext}]);
     if(sql.includes('ai_model_prices'))return result([{input_usd_per_million:1,output_usd_per_million:2}]);
     if(sql.includes('INSERT INTO ai_free_tier_daily_usage'))return result(options.quota===false?[]:[{model_id:4}]);
@@ -29,7 +30,7 @@ function db(provider='gemini',options:{missing?:boolean;disabled?:boolean;prompt
     if(sql.includes('FROM ai_provider_balance_snapshots'))return result([{balance_usd:10,committed_baseline_usd:0}]);
     if(sql.includes('SUM(CASE'))return result([{usd:0}]);
     if(sql.includes('INSERT INTO ai_budget_reservations'))return result([{id:7}]);
-    if(sql.includes('SELECT r.task_id'))return result([{task_id:3,status:'reserved',provider_id:2}]);
+    if(sql.includes('SELECT r.task_id'))return result([{task_id:options.evaluation?16:3,status:'reserved',provider_id:2}]);
     if(sql.includes('SELECT status FROM ai_budget_reservations'))return result([{status:'reserved'}]);
     if(sql.includes('UPDATE ai_budget_reservations'))return result([{id:7}]);
     if(sql.includes('INSERT INTO ai_usage_logs'))return result([{id:8}]);
@@ -133,4 +134,22 @@ test('Gemini provider failure keeps quota consumed and records failed usage',asy
  assert.equal(x.statements.filter(q=>q.sql.includes('INSERT INTO ai_free_tier_daily_usage')).length,1);
  const failure=x.statements.find(q=>q.sql.includes("'failed'"));assert.equal(failure?.params[5],'AI_PROVIDER_HTTP_503');
  assert.ok(!x.statements.some(q=>q.sql.includes("'success'")));
+});
+
+for(const provider of ['gemini','openai','anthropic'])test(`evaluation uses Monitoring configuration but attributes ${provider} tokens, quota and budget to its own task`,async()=>{
+ const x=db(provider,{evaluation:true});let calls=0;
+ globalThis.fetch=async()=>{calls++;return Response.json(response(provider));};
+ const config=await loadHumasAiTask(x.pool,'monitoring_analysis');
+ const data=await executeHumasAi(x.pool,{userId:99,taskCode:'evaluation_analysis',config,prompt:config.prompt+' Ringkas evaluasi siklus.'});
+ assert.deepEqual(data,{ok:true});assert.equal(calls,1);
+ const logs=x.statements.filter(q=>q.sql.includes('INSERT INTO ai_usage_logs'));
+ assert.equal(logs.length,1);assert.equal(logs[0].params[0],16);
+ if(provider==='gemini')assert.equal(x.statements.find(q=>q.sql.includes('INSERT INTO ai_gemini_quota_feature_audit'))?.params[1],'evaluation_analysis');
+ else assert.equal(x.statements.find(q=>q.sql.includes('INSERT INTO ai_budget_reservations'))?.params[1],16);
+});
+test('missing evaluation task fails before consuming Gemini quota or calling a provider',async()=>{
+ const x=db('gemini',{evaluationMissing:true});let calls=0;globalThis.fetch=async()=>{calls++;throw Error('Unexpected provider call');};
+ const config=await loadHumasAiTask(x.pool,'monitoring_analysis');
+ await assert.rejects(executeHumasAi(x.pool,{userId:99,taskCode:'evaluation_analysis',config,prompt:config.prompt}),/AI_EVALUATION_TASK_NOT_CONFIGURED/);
+ assert.equal(calls,0);assert.ok(!x.statements.some(q=>q.sql.includes('INSERT INTO ai_free_tier_daily_usage')));
 });

@@ -50,10 +50,12 @@ async function fixture(options:{role?:string;foreign?:boolean;noMonitoring?:bool
   if(sql.includes('INSERT INTO issue_workflow_events')){
    const e={id:seq++,event_type:params[4],metadata:JSON.parse(params[6]),created_at:'2026-10-17T00:00:00Z',actor_user_id:params[2]};events.push(e);return row([e]);
   }
+  if(sql.includes('SELECT id FROM ai_tasks')){assert.deepEqual(params,['evaluation_analysis']);return row([{id:16}]);}
   if(sql.includes('FROM ai_humas_model_selections')){assert.deepEqual(params,['monitoring_analysis']);return row([{task_id:3,task_enabled:true,provider_id:2,provider:'gemini',provider_enabled:true,model_id:4,model:'selected-monitoring-model',model_enabled:true,prompt_text:'Arahan Monitoring dari database.',prompt_version:1}]);}
   if(sql.includes('FROM ai_provider_credentials'))return row([{credential_ciphertext:encryptIntegrationCredential('mock-only-key')}]);
   if(sql.includes('INSERT INTO ai_free_tier_daily_usage'))return row([{model_id:4}]);
-  if(sql.includes('INSERT INTO ai_gemini_quota_feature_audit')||sql.includes('INSERT INTO ai_usage_logs'))return row([{id:1}]);
+  if(sql.includes('INSERT INTO ai_gemini_quota_feature_audit')){assert.equal(params[1],'evaluation_analysis');return row([{id:1}]);}
+  if(sql.includes('INSERT INTO ai_usage_logs')){assert.equal(params[0],16);return row([{id:1}]);}
   throw Error('UNEXPECTED_SQL: '+sql);
  };
  const app=Fastify();await app.register(cookie);await registerKnowledgeEvaluationRoutes(app,{query,connect:async()=>({query,release(){}})} as unknown as Pool,secret);await app.ready();
@@ -109,7 +111,7 @@ for(const failed of [false,true])test(`optional AI summarizes only saved results
  globalThis.fetch=async(url,init)=>{calls++;assert.ok(String(url).includes('selected-monitoring-model'));const text=JSON.parse(String(init?.body)).contents[0].parts[0].text;assert.match(text,/HASIL ANALISIS SIKLUS YANG SUDAH TERSIMPAN/);assert.match(text,/Kesimpulan monitoring tersimpan/);return failed?new Response('',{status:503}):Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify(evaluation)}]}}],usageMetadata:{promptTokenCount:600,candidatesTokenCount:100}});};
  try{
   const r=await x.app.inject({method:'POST',url:'/api/knowledge/cycles/10/summarize',headers,payload:{expectedVersion:null}});assert.equal(r.statusCode,failed?503:200,r.body);assert.equal(calls,1);
-  assert.equal(x.events().length,failed?0:1);if(!failed){assert.equal(r.json().data.status,'DRAFT');assert.equal(r.json().data.ai.model,'selected-monitoring-model');}
+  assert.equal(x.events().length,failed?0:1);if(!failed){assert.equal(r.json().data.status,'DRAFT');assert.equal(r.json().data.ai.model,'selected-monitoring-model');assert.equal(r.json().data.ai.taskCode,'evaluation_analysis');assert.equal(r.json().data.ai.configurationTaskCode,'monitoring_analysis');}
   assert.ok(!x.queries.some(q=>q.sql.includes('INSERT INTO issue_communication_gap_snapshots')||q.sql.includes('INSERT INTO issue_monitoring_analysis_snapshots')));
  }finally{await x.app.close();}
 });

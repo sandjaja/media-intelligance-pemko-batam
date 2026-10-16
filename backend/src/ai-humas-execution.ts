@@ -32,7 +32,7 @@ export async function loadHumasAiTask(pool: Pool, taskCode: HumasAiTask): Promis
 }
 
 export async function executeHumasAi(pool: Pool, input: {
-  userId: number; taskCode: HumasAiTask; config: HumasAiConfig;
+  userId: number; taskCode: HumasAiTask | 'evaluation_analysis'; config: HumasAiConfig;
   prompt: string; mediaParts?: AiMediaPart[];
 }): Promise<any> {
   if (!Number.isSafeInteger(input.userId) || input.userId <= 0) throw new Error('AI_GATEWAY_INVALID_CONTEXT');
@@ -41,6 +41,12 @@ export async function executeHumasAi(pool: Pool, input: {
   if (config.provider !== 'gemini') {
     return (await executeConfiguredAi(pool, { userId: input.userId, taskCode: input.taskCode,
       provider: config.provider, modelCode: config.model, prompt: input.prompt, mediaParts: input.mediaParts })).data;
+  }
+  let taskId=config.taskId;
+  if(input.taskCode==='evaluation_analysis'){
+    const task=await pool.query('SELECT id FROM ai_tasks WHERE code=$1 AND enabled=TRUE',[input.taskCode]);
+    if(!task.rows.length)throw Error('AI_EVALUATION_TASK_NOT_CONFIGURED');
+    taskId=Number(task.rows[0].id);
   }
   const credentials = await pool.query('SELECT credential_ciphertext FROM ai_provider_credentials WHERE provider_id=$1', [config.providerId]);
   if (!credentials.rows[0]) throw new Error('AI_GATEWAY_CREDENTIAL_NOT_CONFIGURED');
@@ -55,13 +61,13 @@ export async function executeHumasAi(pool: Pool, input: {
     const code=error instanceof Error&&/^AI_[A-Z0-9_]+$/.test(error.message)?error.message:'AI_PROVIDER_REQUEST_FAILED';
     try {
       await pool.query(`INSERT INTO ai_usage_logs(task_id,provider_id,model_id,user_id,status,latency_ms,error_code)
-        VALUES($1,$2,$3,$4,'failed',$5,$6)`,[config.taskId,config.providerId,config.modelId,input.userId,Date.now()-startedAt,code]);
+        VALUES($1,$2,$3,$4,'failed',$5,$6)`,[taskId,config.providerId,config.modelId,input.userId,Date.now()-startedAt,code]);
     } catch { /* keep the original provider failure; quota remains reserved */ }
     throw error;
   }
   const logged = await pool.query(`INSERT INTO ai_usage_logs(task_id,provider_id,model_id,user_id,status,latency_ms,input_tokens,output_tokens)
     VALUES($1,$2,$3,$4,'success',$5,$6,$7) RETURNING id`,
-    [config.taskId,config.providerId,config.modelId,input.userId,result.latencyMs,result.usage.inputTokens,result.usage.outputTokens]);
+    [taskId,config.providerId,config.modelId,input.userId,result.latencyMs,result.usage.inputTokens,result.usage.outputTokens]);
   if (!logged.rowCount) throw new Error('AI_USAGE_LOG_FAILED');
   return result.data;
 }
