@@ -116,8 +116,11 @@ SELECT id,keyword,role,priority FROM ranked WHERE (role='PRIMARY' AND rn=1) OR (
   if(!gapModel)return reply.code(409).send({error:'AI_GAP_MODEL_SELECTION_MISSING'});
   if(!gapModel.provider_enabled || !gapModel.model_enabled)
     return reply.code(409).send({error:'AI_GAP_SELECTED_MODEL_DISABLED'});
-  if(gapModel && gapModel.provider_code!=='gemini')
+  if(gapModel.provider_code!=='gemini')
     return reply.code(409).send({error:'AI_GAP_SELECTED_MODEL_RUNTIME_NOT_READY'});
+  const configuredGapPrompt=await pool.query("SELECT prompt_text FROM ai_humas_task_prompts WHERE task_code='gap_analysis' LIMIT 1");
+  if(!String(configuredGapPrompt.rows[0]?.prompt_text||'').trim())
+    return reply.code(409).send({error:'AI_GAP_PROMPT_NOT_CONFIGURED'});
   const angleResult=await extractDynamicIssueClaims(validExternal,{issueTitle:issue.title,geographicScope:issue.geographic_scope||null,districts:Array.isArray(issue.districts)?issue.districts:[]},pool);
   const coverageResult=await matchDynamicOfficialResponseCoverage(angleResult.angles,owned,pool);
   const ts=(v:any)=>{const n=v?new Date(v).getTime():NaN;return Number.isFinite(n)?n:null},first=(xs:any[])=>xs.map(x=>ts(x.published_at)).filter((x:number|null):x is number=>x!==null).sort((a,b)=>a-b)[0]??null;
