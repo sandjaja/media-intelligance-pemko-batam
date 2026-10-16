@@ -64,20 +64,29 @@ async function providerBrief(pool: Pool, rows: IntelligenceArticle[]) {
   const model = models.rows[0].code as string;
   const input = rows.slice(0, 10).map((r, i) => ({ rank: i + 1, ...r }));
   const prompt = 'Anda adalah analis media intelligence pemerintah daerah. Buat executive brief singkat, faktual, tidak mengarang fakta, pisahkan fakta dan rekomendasi. Kembalikan JSON dengan keys headline, situation, implications, actions (array), key_message, priority. Priority hanya WATCH, MEDIUM, HIGH, IMMEDIATE.\nDATA:\\n' + JSON.stringify(input);
-  await reserveGeminiDailyRequest(pool, model, 'executive_brief');
-  const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
-    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json' } }),
-    signal: AbortSignal.timeout(15000),
-  });
-  if (!response.ok) {
+  // Only retry transient upstream failures; each HTTP attempt reserves its own daily quota.
+  // Keep the total execution bounded for Vercel Hobby and never retry auth/4xx failures.
+  let response: Response | undefined;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await reserveGeminiDailyRequest(pool, model, 'executive_brief');
+    response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json' } }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (response.ok) break;
+    if (response.status === 503 && attempt === 0) {
+      await new Promise(resolve => setTimeout(resolve, 750));
+      continue;
+    }
     const category = response.status === 401 || response.status === 403 ? 'AUTH'
       : response.status === 404 ? 'MODEL_NOT_FOUND'
       : response.status === 429 ? 'RATE_LIMIT'
       : response.status >= 500 ? 'UPSTREAM' : 'REQUEST_REJECTED';
     throw new Error('GEMINI_' + category + '_' + response.status);
   }
+  if (!response?.ok) throw new Error('GEMINI_UPSTREAM_503');
   const payload = await response.json() as any;
   const raw = payload.candidates?.[0]?.content?.parts?.map((x: any) => x.text || '').join('').trim();
   if (!raw) throw new Error('GEMINI_EMPTY_RESPONSE');
