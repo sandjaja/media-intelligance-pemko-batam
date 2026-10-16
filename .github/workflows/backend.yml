@@ -7,6 +7,7 @@ on:
       - 'backend/**'
       - 'app.js'
       - 'knowledge-evaluation-ui.js'
+      - 'knowledge-evaluation-print.js'
       - 'admin-ai-integrations.js'
       - 'admin-ai.js'
       - 'admin-ai-usage.js'
@@ -28,6 +29,7 @@ on:
       - 'phase3-outcome-ui.js'
       - 'app.js'
       - 'knowledge-evaluation-ui.js'
+      - 'knowledge-evaluation-print.js'
       - 'admin-ai-integrations.js'
       - 'admin-ai.js'
       - 'admin-ai-usage.js'
@@ -50,6 +52,7 @@ jobs:
         run: |
           node --check app.js
           node --check knowledge-evaluation-ui.js
+          node --check knowledge-evaluation-print.js
           node --check admin-ai-integrations.js
           node --check admin-ai.js
           node --check admin-ai-usage.js

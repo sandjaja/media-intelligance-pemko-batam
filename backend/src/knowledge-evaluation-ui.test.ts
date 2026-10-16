@@ -38,3 +38,39 @@ test('buttons show loading, reject duplicate actions and restore original disabl
  await assert.rejects(x.buttonAction(x.button,'Memuat…',async()=>{throw Error('Network failed');}),/Network failed/);
  assert.equal(x.button.innerHTML,'Tombol');assert.equal(x.button.disabled,false);assert.equal(x.root.attributes['aria-busy'],undefined);
 });
+
+function printFixture(fetcher:(path:string)=>Promise<Response>){
+ const writes:string[]=[],requests:string[]=[];let printed=0,opened=0;
+ const popup={closed:false,document:{images:[],open(){},write(html:string){writes.push(html);},close(){}},focus(){},print(){printed++;}};
+ const window:any={MEDIA_BRANDING:{government_name:'Pemerintah Kota Batam',short_name:'Pemko Batam',logo_url:'https://example.invalid/logo.png'},open(){opened++;return popup;}};
+ vm.runInNewContext(readFileSync(new URL('../../knowledge-evaluation-print.js',import.meta.url),'utf8'),{window,URLSearchParams,setTimeout:()=>0,fetch:async(path:string)=>{requests.push(path);return fetcher(path);}});
+ return {window,writes,requests,popup,printed:()=>printed,opened:()=>opened};
+}
+const printEntry=(id:number)=>({workflowId:String(id),issueId:String(id),cycleNumber:1,title:'Isu '+id,leadOpd:'Kesbangpol',evaluation:{version:String(id),status:'APPROVED',summary:'Ringkasan <script>alert(1)</script>',lessons:['Pelajaran khusus isu '+id],strengths:['Pesan konsisten'],weaknesses:['Bukti terbatas'],recommendations:['Verifikasi kondisi terbaru'],tags:['organisasi'],metrics:{cycleHours:11.5,evidenceTotal:0,evidenceSufficiency:'INSUFFICIENT',conclusion:'Bukti belum memadai.'}}});
+
+test('print all includes approved lessons beyond the visible page, retains search and uses official branding',async()=>{
+ const x=printFixture(async(path)=>{
+  const u=new URL(path,'https://example.invalid');assert.equal(u.searchParams.get('view'),'library');assert.equal(u.searchParams.get('q'),'organisasi');
+  return Response.json({data:u.searchParams.get('page')==='1'?Array.from({length:20},(_,i)=>printEntry(i+1)):[printEntry(21),{...printEntry(22),evaluation:{status:'DRAFT'}}],total:22});
+ });
+ const pending=x.window.printKnowledgeLibrary({query:'organisasi'});assert.equal(x.opened(),1);await pending;
+ assert.equal(x.requests.length,2);assert.equal(x.printed(),1);
+ const html=x.writes.at(-1)!;
+ for(const value of ['Isu 21','Pelajaran khusus isu 21','Kesbangpol','Pemerintah Kota Batam','logo.png','@page{size:A4 portrait','0 berita','Verifikasi kondisi terbaru'])assert.ok(html.includes(value),value);
+ assert.ok(!html.includes('Isu 22'));assert.ok(!html.includes('<script>'));assert.ok(html.includes('&lt;script&gt;'));
+ assert.equal((html.match(/<article class="page">/g)||[]).length,21);
+});
+
+test('single issue print reads the approved library version and rejects unapproved drafts',async()=>{
+ for(const status of ['APPROVED','DRAFT']){
+  const row=printEntry(9),x=printFixture(async(path)=>{assert.equal(path,'/api/knowledge/cycles/9?view=library');return Response.json({data:{source:{workflow:{id:9,issue_id:9,cycle_number:2,issue_title:'MTQ',lead_opd_name:'Kesra'}},saved:{version:'9',status,evaluation:row.evaluation,metrics:row.evaluation.metrics}}});});
+  if(status==='DRAFT'){await assert.rejects(x.window.printKnowledgeLibrary({workflowId:9}),/disetujui Humas/);assert.equal(x.printed(),0);}
+  else{await x.window.printKnowledgeLibrary({workflowId:9});assert.equal(x.printed(),1);assert.ok(x.writes.at(-1)!.includes('Kesra'));}
+ }
+});
+
+test('blocked popup and failed API do not produce a misleading printed report',async()=>{
+ const x=printFixture(async()=>new Response('',{status:503}));
+ x.window.open=()=>null;await assert.rejects(x.window.printKnowledgeLibrary(),/Popup cetak diblokir/);assert.equal(x.requests.length,0);
+ x.window.open=()=>x.popup;await assert.rejects(x.window.printKnowledgeLibrary(),/belum dapat dimuat/);assert.equal(x.printed(),0);assert.ok(x.writes.at(-1)!.includes('Cetak belum berhasil'));
+});
