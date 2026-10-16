@@ -96,3 +96,42 @@ test('existing /connect pairing still commits and sends its confirmation',async(
  const app=Fastify();await app.register(cookie);await registerNotificationPairingRoutes(app,pool,'test-jwt');
  try{const r=await app.inject({method:'POST',url:'/api/notifications/telegram/webhook',headers:{'x-telegram-bot-api-secret-token':'test-secret'},payload:{message:{chat:{id:123,type:'private'},from:{id:123,first_name:'Pengguna'},text:'/connect AABBCCDDEEFF'}}});assert.equal(r.statusCode,200,r.body);assert.ok(queries.includes('COMMIT'));assert.ok(queries.some(q=>q.includes('INSERT INTO user_notification_channels')));assert.match(sent[0].text,/berhasil terhubung/);assert.match(sent[0].text,/bantuan/);}finally{await app.close();}
 });
+
+test('all workflow stages and the approved learning library have distinct deterministic intents',()=>{
+ for(const [question,domain] of [['Ringkasan Gap isu MTQ','gap'],['Status Content Studio organisasi masyarakat','content'],['Riwayat siklus MTQ','history'],['Evaluasi siklus MTQ','evaluation'],['Pelajaran dari pustaka pembelajaran MTQ','library'],['Berita media internal kemarin','owned'],['Daftar kandidat isu','candidate']])assert.equal(telegramAskIntent(question).domain,domain);
+ assert.equal(telegramAskIntent('Ringkasan Gap MTQ siklus 1').cycle,1);
+ assert.equal(telegramAskIntent('Ringkasan Strakom MTQ').details,true);
+});
+
+test('approved library searches lessons/tags across historical closed cycles without exposing drafts',async()=>{
+ const x=db([{title:'MTQ',cycle_number:1,total:1,evaluation_status:'KNOWLEDGE_EVALUATION_APPROVED',evaluation_metadata:{evaluation:{summary:'Evaluasi tersimpan.',lessons:['Pelajaran terverifikasi.'],recommendations:['Perbaiki monitoring.']}}}]);
+ const answer=await answerTelegramAsk(x.pool,user(),'Pelajaran pustaka pembelajaran MTQ siklus 1');
+ for(const value of ['Disetujui Humas','Pelajaran terverifikasi.','Perbaiki monitoring.','siklus #1'])assert.ok(answer.includes(value));
+ const q=x.queries.at(-1)!;assert.match(q.sql,/JOIN issue_workflows w ON w.issue_id=i.id/);assert.match(q.sql,/w.workflow_status='CLOSED'/);assert.match(q.sql,/AND x.event_type='KNOWLEDGE_EVALUATION_APPROVED'/);assert.match(q.sql,/metadata->'evaluation'->'lessons'/);assert.ok(q.params.includes(1));assert.ok(q.params.includes('%mtq%'));
+});
+for(const role of ['humas','executive','opd','district'])test(`${role} evaluation keeps the same scope and explicit draft approval rules`,async()=>{
+ const x=db();await answerTelegramAsk(x.pool,user(role),'Evaluasi siklus MTQ');const q=x.queries.at(-1)!;
+ assert.match(q.sql,/i.organization_id=\$1/);assert.match(q.sql,/w.workflow_status='CLOSED'/);
+ if(role==='humas')assert.ok(!q.sql.includes("AND x.event_type='KNOWLEDGE_EVALUATION_APPROVED'"));else assert.ok(q.sql.includes("AND x.event_type='KNOWLEDGE_EVALUATION_APPROVED'"));
+ if(role==='opd')assert.match(q.sql,/w.lead_opd_id=\$2/);if(role==='district')assert.match(q.sql,/d.district_id=\$2/);
+});
+test('Gap, publication, strategy and monitoring read the stored text instead of generating new analysis',async()=>{
+ const rows=[{title:'MTQ',cycle_number:1,total:1,strategy_status:'APPROVED',executive_summary:'Strategi tersimpan.',key_messages:['Pesan resmi.'],published_at:'2026-10-16',gap_result:{data:{semanticAssessment:{status:'NO_RESPONSE',coverage:[{claim:'Klaim eksternal tersimpan.'}]}}},publication_result:{executionAssessment:{assessment:'Publikasi tersimpan.'}},monitoring_analyzed_at:'2026-10-16',monitoring_result:{analysis:{focusAssessment:{cycleConclusion:'Kesimpulan tersimpan.'}}}}];
+ let calls=0;globalThis.fetch=async()=>{calls++;throw Error('No network allowed');};
+ for(const [question,expected] of [['Ringkasan Gap MTQ siklus 1','Klaim eksternal tersimpan.'],['Ringkasan Strakom MTQ','Strategi tersimpan.'],['Hasil analisis publikasi MTQ','Publikasi tersimpan.'],['Kesimpulan monitoring MTQ','Kesimpulan tersimpan.']]){const x=db(rows);const answer=await answerTelegramAsk(x.pool,user(),question);assert.ok(answer.includes(expected),answer);assert.ok(!x.queries.some(q=>/INSERT|UPDATE|DELETE|ai_provider|ai_usage|ai_free_tier/.test(q.sql)));}
+ assert.equal(calls,0);
+});
+test('Content Studio and candidate reads remain restricted to managers',async()=>{
+ for(const role of ['executive','opd','district'])for(const question of ['Content Studio MTQ','Daftar kandidat isu']){
+  const x=db();const answer=await answerTelegramAsk(x.pool,user(role),question);assert.match(answer,/Humas\/Super Admin/);assert.equal(x.queries.length,0);
+ }
+ const x=db([{title:'MTQ',content_status:'COMPLETED',item_count:2,ready_count:2,total:1}]);const answer=await answerTelegramAsk(x.pool,user(),'Content Studio MTQ');assert.match(answer,/2\/2 prompt siap/);assert.match(x.queries.at(-1)!.sql,/FROM content_projects/);
+});
+test('history reads closed cycles and explicitly distinguishes skipped stages',async()=>{
+ const x=db([{title:'MTQ',cycle_number:1,total:2,workflow_status:'CLOSED'},{title:'MTQ',cycle_number:2,total:2,workflow_status:'CLOSED'}]);const answer=await answerTelegramAsk(x.pool,user(),'Riwayat siklus MTQ');
+ assert.match(answer,/siklus #1/);assert.match(answer,/siklus #2/);assert.match(answer,/publikasi tidak dilalui/);assert.match(answer,/pembelajaran belum disetujui/);
+});
+test('Media Internal reads approved owned posts with organization and unit boundaries',async()=>{
+ const x=db([{title:'Publikasi resmi',channel:'owned',risk_score:0,total:1}]);const answer=await answerTelegramAsk(x.pool,user('opd'),'Berita media internal kemarin');assert.match(answer,/Media Internal/);const q=x.queries.at(-1)!;
+ assert.match(q.sql,/source_kind='owned'/);assert.match(q.sql,/curation_status,'approved'/);assert.match(q.sql,/COALESCE\(sm.opd_id,osa.opd_id\)=\$2/);assert.match(q.sql,/organization_id=\$1/);assert.ok(!q.sql.includes("source_kind='external'"));
+});
