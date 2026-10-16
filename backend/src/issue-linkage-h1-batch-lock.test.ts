@@ -291,3 +291,21 @@ test('H-1 simulation: duplicate completed batch cannot reserve evidence or invok
   assert.deepEqual(statements.filter(sql => ['BEGIN', 'COMMIT', 'ROLLBACK', 'RELEASE'].includes(sql)),
     ['BEGIN', 'ROLLBACK', 'RELEASE']);
 });
+
+
+test('H-1 simulation: 41 evidence in one group is excluded rather than partially analyzed', () => {
+  const items = Array.from({ length: 41 }, (_, i) => ({
+    sourceType: 'online' as const, id: i + 1, occurredAt: '2026-10-15T12:00:00Z',
+    primaryKeyword: 'sampah', opdId: 15, title: 'Simulasi', summary: '',
+  }));
+  const plan = buildH1BoundedPlan(items, new Date('2026-10-16T12:00:00Z'));
+  assert.equal(plan.plannedGroupCount, 0);
+  assert.equal(plan.oversizedGroupCount, 1);
+  assert.equal(plan.planCheck.valid, false);
+});
+test('H-1 simulation: changing OPD or keyword invalidates prepared classified plan', () => {
+  const evidence = [{ sourceType: 'online' as const, id: 1 }, { sourceType: 'social' as const, id: 2 }];
+  const original = h1ClassifiedPlanFingerprint([{ primaryKeyword: 'sampah', opdId: 15, evidence }]);
+  const modified = h1ClassifiedPlanFingerprint([{ primaryKeyword: 'banjir', opdId: 15, evidence }]);
+  assert.equal(validateH1ExecutionPlan('2026-10-15', original, '2026-10-15', evidence, modified).reason, 'H1_PLAN_CHANGED');
+});
