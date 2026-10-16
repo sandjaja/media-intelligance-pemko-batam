@@ -61,3 +61,28 @@ export async function failExecutiveBriefDay(
     [date,scopeKey,errorCode.slice(0,80)],
   );
 }
+
+/** One explicit manual retry after a failed daily run. Retains the first failure code. */
+export async function claimExecutiveBriefRetry(pool: Pick<Pool, 'query'>, date: string): Promise<boolean> {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('INVALID_BRIEF_DATE');
+  const { rows } = await pool.query(
+    `UPDATE executive_brief_daily_cache
+     SET status='running',error_code='RETRY_RUNNING:'||COALESCE(error_code,'UNKNOWN'),
+         locked_until=now()+interval '2 minutes',updated_at=now()
+     WHERE brief_date=$1::date AND scope_key='city' AND status='failed'
+       AND COALESCE(error_code,'') NOT LIKE 'RETRY_%'
+     RETURNING brief_date`, [date],
+  );
+  return rows.length === 1;
+}
+
+export async function failExecutiveBriefRetry(pool: Pick<Pool, 'query'>, date: string, code: string): Promise<void> {
+  await pool.query(
+    `UPDATE executive_brief_daily_cache
+     SET status='failed',
+         error_code=LEFT('RETRY_FAILED:'||SUBSTRING(COALESCE(error_code,'UNKNOWN') FROM 15)||':'||$2,80),
+         locked_until=NULL,updated_at=now()
+     WHERE brief_date=$1::date AND scope_key='city' AND status='running'
+       AND error_code LIKE 'RETRY_RUNNING:%'`, [date,code],
+  );
+}
