@@ -21,7 +21,6 @@ const concepts=(v:any)=>{const t=norm(v);return Object.entries(CONCEPTS).filter(
 
 export function matchOfficialResponseCoverage(angles:CoverageAngle[],owned:OwnedResponse[]){
  const official=owned.map(o=>{const raw=[o.title,o.content].filter(Boolean).join(' ');return{id:String(o.id),title:o.title??null,account:o.owned_account_name??null,text:tokens(raw),concepts:concepts(raw)}});
- if(!rows.length)throw new Error('AI_RETURNED_NO_COVERAGE');
   const coverage=angles.map(angle=>{
   const anchors=angle.anchors?.length?[...new Set(angle.anchors)]:[...new Set(angle.evidence.flatMap(e=>tokens(e.title)))];
   const angleRaw=angle.evidence.map(e=>e.title||'').join(' ')+' '+anchors.join(' '),angleConcepts=concepts(angleRaw);
