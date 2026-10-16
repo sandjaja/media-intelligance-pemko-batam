@@ -67,14 +67,14 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
     const limit = bind(parsed.data.limit);
 
     const onlineSql =
-      "SELECT 'online'::text source_type,a.id,a.title,a.summary::text summary,a.url::text url,a.published_at,a.sentiment,a.risk_score::float,a.risk_level::text,a.importance_score::float,a.impact_score::float,ms.name::text source_name,a.opd_id,a.district_id " +
+      "SELECT 'online'::text source_type,a.id,a.title,COALESCE(NULLIF(BTRIM(a.summary),''),NULLIF(BTRIM(a.content),''),a.title)::text summary,a.url::text url,a.published_at,a.sentiment,a.risk_score::float,a.risk_level::text,a.importance_score::float,a.impact_score::float,ms.name::text source_name,a.opd_id,a.district_id " +
       "FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id " +
       "WHERE a.news_classification='UTAMA' AND a.sentiment IS NOT NULL AND COALESCE(a.risk_score,0)>0 " +
       "AND (SELECT al.action FROM audit_logs al WHERE al.action IN ('ARTICLE_CLASSIFICATION_VERIFIED','ARTICLE_CLASSIFICATION_REOPENED') AND al.metadata->>'articleId'=a.id::text ORDER BY al.created_at DESC,al.id DESC LIMIT 1)='ARTICLE_CLASSIFICATION_VERIFIED'" +
       (onlineScope ? ' AND ' + onlineScope : '');
 
     const printSql =
-      "SELECT 'print'::text source_type,pa.id,pa.title,pa.summary::text summary,NULL::text url,pe.edition_date::timestamptz published_at,pa.sentiment,pa.risk_score::float," +
+      "SELECT 'print'::text source_type,pa.id,pa.title,COALESCE(NULLIF(BTRIM(pa.summary),''),pa.title)::text summary,NULL::text url,pe.edition_date::timestamptz published_at,pa.sentiment,pa.risk_score::float," +
       "COALESCE(NULLIF(pa.ai_metadata->'intelligence'->>'riskLevel',''),CASE WHEN pa.risk_score>=80 THEN 'critical' WHEN pa.risk_score>=60 THEN 'high' WHEN pa.risk_score>=35 THEN 'medium' ELSE 'low' END)::text risk_level," +
       "pa.importance_score::float,NULLIF(pa.ai_metadata->'intelligence'->>'impactScore','')::float impact_score,ms.name::text source_name,pa.opd_id,pa.district_id " +
       "FROM print_articles pa JOIN print_editions pe ON pe.id=pa.edition_id JOIN media_sources ms ON ms.id=pe.source_id " +
@@ -84,7 +84,7 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
       (printScope ? ' AND ' + printScope : '');
 
     const socialSql =
-      "SELECT CASE WHEN sm.source_kind='owned' THEN 'owned' ELSE 'social' END::text source_type,sm.id,COALESCE(sm.title,left(sm.content,240)) title,left(sm.content,1200) summary,sm.canonical_url::text url," +
+      "SELECT CASE WHEN sm.source_kind='owned' THEN 'owned' ELSE 'social' END::text source_type,sm.id,COALESCE(sm.title,left(sm.content,240)) title,COALESCE(NULLIF(BTRIM(left(sm.content,1200)),''),NULLIF(BTRIM(sm.title),''),'Ringkasan belum tersedia') summary,sm.canonical_url::text url," +
       "COALESCE(sm.published_at,sm.captured_at) published_at,sm.sentiment,sm.risk_score::float,sm.risk_level::text,sm.importance_score::float,sm.influence_score::float impact_score," +
       "COALESCE(osa.account_name,sm.author_name,sm.platform)::text source_name,sm.opd_id,sm.district_id " +
       "FROM social_mentions sm LEFT JOIN owned_social_accounts osa ON osa.id=sm.owned_account_id " +
@@ -111,7 +111,7 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
       ownedDist ? 'sm.district_id=' + ownedDist : '',
     ].filter(Boolean).join(' AND ');
     const ownedSql =
-      "SELECT sm.id,COALESCE(sm.title,left(sm.content,240)) title,left(sm.content,1200) summary,sm.canonical_url::text url," +
+      "SELECT sm.id,COALESCE(sm.title,left(sm.content,240)) title,COALESCE(NULLIF(BTRIM(left(sm.content,1200)),''),NULLIF(BTRIM(sm.title),''),'Ringkasan belum tersedia') summary,sm.canonical_url::text url," +
       "COALESCE(sm.published_at,sm.captured_at) published_at,sm.sentiment,sm.risk_score::float,sm.risk_level::text,sm.importance_score::float,sm.influence_score::float impact_score," +
       "COALESCE(osa.account_name,sm.author_name,sm.platform)::text source_name,sm.opd_id,sm.district_id " +
       "FROM social_mentions sm LEFT JOIN owned_social_accounts osa ON osa.id=sm.owned_account_id " +
@@ -165,12 +165,12 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
     const socialScope = [op ? 'sm.opd_id=' + op : '', dist ? 'sm.district_id=' + dist : ''].filter(Boolean).join(' AND ');
 
     const onlineSql =
-      "SELECT 'online'::text source_type,a.id,a.title,a.summary::text summary,a.url::text url,a.published_at,a.sentiment,a.risk_score::float,a.risk_level::text,ms.name::text source_name," +
+      "SELECT 'online'::text source_type,a.id,a.title,COALESCE(NULLIF(BTRIM(a.summary),''),NULLIF(BTRIM(a.content),''),a.title)::text summary,a.url::text url,a.published_at,a.sentiment,a.risk_score::float,a.risk_level::text,ms.name::text source_name," +
       "NULL::bigint evidence_file_id,NULL::text evidence_mime_type FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id WHERE a.news_classification='UTAMA' AND a.sentiment IS NOT NULL AND COALESCE(a.risk_score,0)>0 " +
       "AND (SELECT al.action FROM audit_logs al WHERE al.action IN ('ARTICLE_CLASSIFICATION_VERIFIED','ARTICLE_CLASSIFICATION_REOPENED') AND al.metadata->>'articleId'=a.id::text ORDER BY al.created_at DESC,al.id DESC LIMIT 1)='ARTICLE_CLASSIFICATION_VERIFIED' " +
       "AND (a.published_at AT TIME ZONE 'Asia/Jakarta')::date=" + day + "::date" + (onlineScope ? ' AND ' + onlineScope : '');
     const printSql =
-      "SELECT 'print'::text source_type,pa.id,pa.title,pa.summary::text summary,NULL::text url,pe.edition_date::timestamptz published_at,pa.sentiment,pa.risk_score::float," +
+      "SELECT 'print'::text source_type,pa.id,pa.title,COALESCE(NULLIF(BTRIM(pa.summary),''),pa.title)::text summary,NULL::text url,pe.edition_date::timestamptz published_at,pa.sentiment,pa.risk_score::float," +
       "COALESCE(NULLIF(pa.ai_metadata->'intelligence'->>'riskLevel',''),CASE WHEN pa.risk_score>=80 THEN 'critical' WHEN pa.risk_score>=60 THEN 'high' WHEN pa.risk_score>=35 THEN 'medium' ELSE 'low' END)::text risk_level,ms.name::text source_name," +
       "(SELECT (f->>'id')::bigint FROM evidence_sources es CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(es.metadata->'files')='array' THEN es.metadata->'files' ELSE '[]'::jsonb END) f WHERE es.print_article_id=pa.id AND es.source_type='print' ORDER BY COALESCE((f->>'order')::int,999),es.id LIMIT 1) evidence_file_id," +
       "(SELECT f->>'mimeType' FROM evidence_sources es CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(es.metadata->'files')='array' THEN es.metadata->'files' ELSE '[]'::jsonb END) f WHERE es.print_article_id=pa.id AND es.source_type='print' ORDER BY COALESCE((f->>'order')::int,999),es.id LIMIT 1) evidence_mime_type " +
@@ -178,7 +178,7 @@ export async function registerCommandCenterScopeRoutes(app: FastifyInstance, poo
       "AND pa.ai_metadata->'v16Routing'->>'routingStatus'='ROUTED' AND COALESCE(pa.ai_metadata->'v16Routing'->>'keywordId','')<>'' AND pa.ai_metadata->'v16Routing'->>'keywordVerification'='ACCEPTED' " +
       "AND pa.ai_metadata->'intelligence'->>'riskStatus'='FINAL' AND pa.sentiment IS NOT NULL AND COALESCE(pa.risk_score,0)>0 AND pe.edition_date=" + day + "::date" + (printScope ? ' AND ' + printScope : '');
     const socialSql =
-      "SELECT CASE WHEN sm.source_kind='owned' THEN 'owned' ELSE 'social' END::text source_type,sm.id,COALESCE(sm.title,left(sm.content,240)) title,left(sm.content,1200) summary,sm.canonical_url::text url," +
+      "SELECT CASE WHEN sm.source_kind='owned' THEN 'owned' ELSE 'social' END::text source_type,sm.id,COALESCE(sm.title,left(sm.content,240)) title,COALESCE(NULLIF(BTRIM(left(sm.content,1200)),''),NULLIF(BTRIM(sm.title),''),'Ringkasan belum tersedia') summary,sm.canonical_url::text url," +
       "COALESCE(sm.published_at,sm.captured_at) published_at,sm.sentiment,sm.risk_score::float,sm.risk_level::text,COALESCE(osa.account_name,sm.author_name,sm.platform)::text source_name " +
       ",NULL::bigint evidence_file_id,NULL::text evidence_mime_type FROM social_mentions sm LEFT JOIN owned_social_accounts osa ON osa.id=sm.owned_account_id WHERE sm.sentiment IS NOT NULL AND COALESCE(sm.risk_score,0)>0 AND (" +
       "(sm.source_kind='external' AND sm.metadata->'v16Routing'->>'newsClassification'='UTAMA' AND sm.metadata->'v16Routing'->>'routingStatus'='ROUTED' AND sm.opd_id IS NOT NULL AND (sm.metadata->'socialVerification'->>'status'='LOCKED' OR sm.metadata->'manualClassification'->>'locked'='true') AND sm.metadata->'intelligence'->>'riskStatus'='FINAL') OR " +
