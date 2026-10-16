@@ -29,7 +29,9 @@ export async function generateDailyExecutiveBrief(
     }
     const brief = await getExecutiveBrief(pool, null);
     if (brief.mode !== 'ai' || !isValidBrief(brief)) {
-      await failExecutiveBriefDay(pool, date, 'city', 'AI_UNAVAILABLE_OR_FALLBACK');
+      const code = typeof brief.provider_error_code === 'string' && /^GEMINI_[A-Z_0-9]{1,65}$/.test(brief.provider_error_code)
+        ? brief.provider_error_code : 'AI_UNAVAILABLE_OR_FALLBACK';
+      await failExecutiveBriefDay(pool, date, 'city', code);
       return { status: 'failed', date };
     }
     const saved = await completeExecutiveBriefDay(
