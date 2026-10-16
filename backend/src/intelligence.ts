@@ -71,10 +71,16 @@ async function providerBrief(pool: Pool, rows: IntelligenceArticle[]) {
     body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json' } }),
     signal: AbortSignal.timeout(15000),
   });
-  if (!response.ok) throw new Error('Gemini HTTP ' + response.status);
+  if (!response.ok) {
+    const category = response.status === 401 || response.status === 403 ? 'AUTH'
+      : response.status === 404 ? 'MODEL_NOT_FOUND'
+      : response.status === 429 ? 'RATE_LIMIT'
+      : response.status >= 500 ? 'UPSTREAM' : 'REQUEST_REJECTED';
+    throw new Error('GEMINI_' + category + '_' + response.status);
+  }
   const payload = await response.json() as any;
   const raw = payload.candidates?.[0]?.content?.parts?.map((x: any) => x.text || '').join('');
-  if (!raw) throw new Error('Gemini returned no text');
+  if (!raw) throw new Error('GEMINI_EMPTY_RESPONSE');
   return { ...JSON.parse(raw), mode: 'ai', model_code: model, source_count: input.length };
 }
 
@@ -85,5 +91,11 @@ export async function getExecutiveBrief(pool: Pool, opdId: string | null = null)
   params.push(20);
   const { rows } = await pool.query(`SELECT a.id,a.title,a.summary,a.published_at,a.sentiment,a.importance_score,a.impact_score,a.velocity_score,a.risk_score,a.risk_level,ms.name source_name,o.name opd_name FROM articles a LEFT JOIN media_sources ms ON ms.id=a.source_id LEFT JOIN opd o ON o.id=a.opd_id ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY a.risk_score DESC,a.impact_score DESC,a.importance_score DESC,a.published_at DESC NULLS LAST LIMIT $${params.length}`, params);
   const data = rows.map(r => ({ ...r, id: String(r.id), importance_score: num(r.importance_score), impact_score: num(r.impact_score), velocity_score: num(r.velocity_score), risk_score: num(r.risk_score) })) as IntelligenceArticle[];
-  try { return await providerBrief(pool, data) ?? fallbackBrief(data); } catch { return { ...fallbackBrief(data), mode: 'deterministic-fallback', provider_error: true }; }
+  try { return await providerBrief(pool, data) ?? { ...fallbackBrief(data), provider_error_code: 'GEMINI_NOT_CONFIGURED' }; }
+  catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    const code = /^GEMINI_(?:AUTH|MODEL_NOT_FOUND|RATE_LIMIT|UPSTREAM|REQUEST_REJECTED)_\\d{3}$/.test(message)
+      || message === 'GEMINI_EMPTY_RESPONSE' ? message : 'GEMINI_PROVIDER_ERROR';
+    return { ...fallbackBrief(data), provider_error: true, provider_error_code: code };
+  }
 }
