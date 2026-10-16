@@ -82,7 +82,16 @@ const groups:any[]=[];for(const g of consolidatedGroups){if(g.linkedIssue?.issue
    occurredAt:e.occurredAt||null,title:e.title||null,summary:e.summary||null,
    primaryKeyword:row.snapshot?.primaryKeyword||e.primaryKeyword||null,
    opdId:e.opdId==null?(row.snapshot?.opdId==null?null:Number(row.snapshot.opdId)):Number(e.opdId)})));
- const plan=buildH1BoundedPlan(evidence as any[]);
+ const now=new Date();
+ const initial=buildH1BoundedPlan(evidence as any[],now);
+ // Use the same ledger-based continuation view as the read-only preview.
+ // Missing ledger tables must not silently permit repeat analysis.
+ const ledgerInstalled=(await pool.query(`SELECT to_regclass('public.issue_linkage_h1_evidence_ledger') IS NOT NULL AS installed`)).rows[0]?.installed===true;
+ if(!ledgerInstalled)return reply.code(503).send({error:'H1_EVIDENCE_LEDGER_MIGRATION_REQUIRED',ready:false});
+ const reservedRows=(await pool.query(`SELECT source_type,source_id FROM issue_linkage_h1_evidence_ledger
+  WHERE organization_id=$1 AND news_date=$2::date`,[organizationId,initial.date])).rows;
+ const reservedRefs=new Set<string>(reservedRows.map((e:any)=>`${e.source_type}:${e.source_id}`));
+ const plan=buildH1ContinuationPlan(evidence as any[],reservedRefs,now);
  // Preparation is read-only: no Gemini, no quota reservation, no ledger claim.
  // The eventual execution endpoint must revalidate this fingerprint before claiming.
  return {data:{
@@ -92,7 +101,7 @@ const groups:any[]=[];for(const g of consolidatedGroups){if(g.linkedIssue?.issue
   oversizedGroupCount:plan.oversizedGroupCount,
   estimatedMinimumGeminiCalls:plan.estimatedMinimumGeminiCalls,
   maximumGroupsPerRun:plan.maximumGroupsPerRun,plannedGroupCount:plan.plannedGroupCount,
-  deferredGroupCount:plan.deferredGroupCount,plannedFingerprint:plan.plannedFingerprint,
+  deferredGroupCount:plan.deferredGroupCount,alreadyReservedCount:plan.alreadyReservedCount,plannedFingerprint:plan.plannedFingerprint,
   planValid:plan.planCheck.valid,planValidationReason:plan.planCheck.reason,
   publicationDateReviewCount:plan.publicationDateReviewCount,
   excludedFromAnalysisCount:plan.excludedFromAnalysisCount,
