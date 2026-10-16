@@ -22,3 +22,8 @@ test('Preparing a Content Studio prompt does not invoke a model or consume token
   assert.match(preparation, /executionReady:false/);
   assert.doesNotMatch(preparation, /executeConfiguredAi\(|generateContent|invokeAiProvider\(/);
 });
+
+test('Content Studio fails closed when the database base prompt is missing', () => {
+  assert.match(source, /AI_CONTENT_STUDIO_BASE_PROMPT_NOT_CONFIGURED/);
+  assert.doesNotMatch(source, /task_code='content_studio_prompting' LIMIT 1"\)\.catch\(/);
+});
