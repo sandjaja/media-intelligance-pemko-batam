@@ -42,7 +42,8 @@ export async function completeExecutiveBriefDay(
   const { rows } = await pool.query(
     `UPDATE executive_brief_daily_cache
        SET status='ready',brief_json=$3::jsonb,model_code=$4,source_count=$5,
-           generated_at=now(),locked_until=NULL,updated_at=now()
+           generated_at=now(),locked_until=NULL,updated_at=now(),
+           error_code=CASE WHEN error_code LIKE 'RETRY_RUNNING:%' THEN LEFT('RETRY_SUCCESS:'||SUBSTRING(error_code FROM 15),80) ELSE error_code END
      WHERE brief_date=$1::date AND scope_key=$2 AND status='running'
        AND locked_until > now()
      RETURNING brief_date`,
