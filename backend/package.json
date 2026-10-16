@@ -15,7 +15,8 @@
     "db:seed": "tsx src/seed.ts",
     "db:setup": "npm run db:migrate && npm run db:seed",
     "test:apify-ledger-preview": "node --import tsx --test src/apify-cost-concurrency.integration.test.ts src/apify-unknown-reconciliation.integration.test.ts",
-    "test:ai-quota-preview": "node --import tsx --test src/ai-gemini-quota-preview.integration.test.ts src/ai-gemini-quota-concurrency.integration.test.ts"
+    "test:ai-quota-preview": "node --import tsx --test src/ai-gemini-quota-preview.integration.test.ts src/ai-gemini-quota-concurrency.integration.test.ts",
+    "test:h1": "node --import tsx --test src/issue-linkage-h1-batch-lock.test.ts"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",
