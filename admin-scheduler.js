@@ -95,7 +95,7 @@ function setupExecutiveBriefControl(){
   const btn=section.querySelector('#aiExecutiveBriefRunOnce'),status=section.querySelector('#aiExecutiveBriefRunOnceResult');
   btn.disabled=true;status.textContent='Memproses analisis AI...';
   try{
-   const r=await fetch('/api/admin/executive-brief/generate',{method:'POST',credentials:'include',headers:{'content-type':'application/json'}});
+   const r=await fetch('/api/admin/executive-brief/generate',{method:'POST',credentials:'include'});
    const j=await r.json();if(!r.ok)throw Error(j.error||'HTTP '+r.status);
    status.textContent='Respons server: '+JSON.stringify(j.data).slice(0,600)+' · Periksa hasil tersimpan dan riwayat AI.';
    await reload();await loadSchedule();
