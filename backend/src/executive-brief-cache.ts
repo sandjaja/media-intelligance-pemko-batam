@@ -44,6 +44,7 @@ export async function completeExecutiveBriefDay(
        SET status='ready',brief_json=$3::jsonb,model_code=$4,source_count=$5,
            generated_at=now(),locked_until=NULL,updated_at=now()
      WHERE brief_date=$1::date AND scope_key=$2 AND status='running'
+       AND locked_until > now()
      RETURNING brief_date`,
     [date,scopeKey,JSON.stringify(brief),modelCode,sourceCount],
   );
