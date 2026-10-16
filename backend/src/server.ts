@@ -15,6 +15,7 @@ import { ingestEnabledSources } from './ingestion.js';
 import { registerAskIntelligence } from './ask-intelligence.js';
 import { readLatestExecutiveBrief } from './executive-brief-cache.js';
 import { generateDailyExecutiveBrief } from './executive-brief-daily.js';
+import { readExecutiveBriefSchedule, saveExecutiveBriefScheduleTime } from './executive-brief-schedule.js';
 import { registerCollectionSchedulerRoutes } from './collection-scheduler-routes.js';
 import { registerAdminRoutes } from './admin-routes.js';
 import { registerDistrictRoutes } from './district-routes.js';
@@ -447,8 +448,7 @@ app.post('/api/incidents/:id/escalate',{preHandler:[requireAuth,requireRole('adm
 // Schedule configuration is informational until an audited scheduler runner is wired.
 app.get('/api/admin/executive-brief/schedule',{preHandler:[requireAuth,requireRole('admin')]},async(_request,reply)=>{
   try{
-    const {rows}=await pool.query('SELECT enabled,hour_wib,minute_wib,timezone,updated_at FROM executive_brief_schedule_settings WHERE id=1');
-    return {data:rows[0]??{enabled:false,hour_wib:6,minute_wib:30,timezone:'Asia/Jakarta'},scheduler_connected:false};
+    return {data:await readExecutiveBriefSchedule(pool),scheduler_connected:false};
   }catch{
     return reply.code(503).send({error:'EXECUTIVE_BRIEF_SCHEDULE_UNAVAILABLE'});
   }
@@ -457,11 +457,7 @@ app.put('/api/admin/executive-brief/schedule',{preHandler:[requireAuth,requireRo
   const parsed=z.object({hour_wib:z.number().int().min(0).max(23),minute_wib:z.number().int().min(0).max(59)}).strict().safeParse(request.body);
   if(!parsed.success)return reply.code(400).send({error:'INVALID_SCHEDULE_TIME'});
   try{
-    const {rows}=await pool.query(
-      'UPDATE executive_brief_schedule_settings SET hour_wib=$1,minute_wib=$2,enabled=FALSE,updated_at=now() WHERE id=1 RETURNING enabled,hour_wib,minute_wib,timezone,updated_at',
-      [parsed.data.hour_wib,parsed.data.minute_wib],
-    );
-    return {data:rows[0],scheduler_connected:false};
+    return {data:await saveExecutiveBriefScheduleTime(pool,parsed.data.hour_wib,parsed.data.minute_wib),scheduler_connected:false};
   }catch{
     return reply.code(503).send({error:'EXECUTIVE_BRIEF_SCHEDULE_UNAVAILABLE'});
   }
