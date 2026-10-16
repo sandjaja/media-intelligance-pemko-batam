@@ -239,6 +239,14 @@ app.post('/api/intelligence/issue-linkage-inbox/batch-h1/execute',{preHandler:au
     opdId:result.opdId,evidenceRefs:groups[result.groupIndex].evidence.map(e=>`${e.sourceType}:${e.id}`),
     analysis:result.analysis,model:result.model,usage:result.usage,latencyMs:result.latencyMs,
    });
+   // A successful checkpoint makes only this group's evidence completed.
+   // Other reserved groups remain locked until their own outcome is known.
+   const groupRefs=groups[result.groupIndex].evidence;
+   await pool.query(`UPDATE issue_linkage_h1_evidence_ledger
+    SET status='completed',completed_at=now()
+    WHERE batch_id=$1 AND status='reserved'
+      AND (source_type,source_id) IN (SELECT * FROM unnest($2::text[],$3::bigint[]))`,
+    [claimed.id,groupRefs.map(e=>e.sourceType),groupRefs.map(e=>e.id)]);
    completed++;
   });
   const finished=await finishIssueLinkageH1Batch(pool,claimed.id,'completed',completed);
@@ -248,7 +256,12 @@ app.post('/api/intelligence/issue-linkage-inbox/batch-h1/execute',{preHandler:au
    warning:'Evidence telah direservasi dan tidak akan diproses ulang otomatis.'}};
  }catch(error){
   const code=error instanceof Error?error.message:'H1_EXECUTION_FAILED';
-  try{await finishIssueLinkageH1Batch(pool,claimed.id,'failed',completed,code.slice(0,100));}
+  try{
+   // Preserve completed evidence and mark all unresolved reservations uncertain.
+   await pool.query(`UPDATE issue_linkage_h1_evidence_ledger SET status='uncertain'
+    WHERE batch_id=$1 AND status='reserved'`,[claimed.id]);
+   await finishIssueLinkageH1Batch(pool,claimed.id,'failed',completed,code.slice(0,100));
+  }
   catch(finishError){request.log.error({finishError,batchId:claimed.id},'H1 finish failed');}
   request.log.error({error,batchId:claimed.id},'H1 Gemini execution failed');
   return reply.code(502).send({error:'H1_EXECUTION_FAILED',batchId:claimed.id,
