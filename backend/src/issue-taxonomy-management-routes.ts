@@ -105,6 +105,18 @@ SELECT id,keyword,role,priority FROM ranked WHERE (role='PRIMARY' AND rn=1) OR (
   const primaryOpd=opdRows.find((x:any)=>x.routing_role==='PRIMARY')||null,supportingOpds=opdRows.filter((x:any)=>x.routing_role!=='PRIMARY'||Number(x.id)!==Number(primaryOpd?.id));
   const uptdRows=(await pool.query(`SELECT u.id,u.code,u.name,u.opd_id,bool_or(au.is_primary) is_primary FROM issue_articles ia JOIN article_uptd au ON au.article_id=ia.article_id JOIN uptd u ON u.id=au.uptd_id AND u.active=true WHERE ia.issue_id=$1 GROUP BY u.id,u.code,u.name,u.opd_id ORDER BY bool_or(au.is_primary) DESC,u.name`,[issueId])).rows;
   const issueContext={geography:{scope:issue.geographic_scope||'UNSPECIFIED',districts:Array.isArray(issue.districts)?issue.districts.map((d:any)=>({id:Number(d.id),code:d.code,name:d.name})):[]},keywords:{primary:primaryKeyword?{id:Number(primaryKeyword.id),keyword:primaryKeyword.keyword}:null,supporting:supportingKeywords.map((x:any)=>({id:Number(x.id),keyword:x.keyword}))},opds:{primary:primaryOpd?{id:Number(primaryOpd.id),code:primaryOpd.code,name:primaryOpd.name}:null,supporting:supportingOpds.map((x:any)=>({id:Number(x.id),code:x.code,name:x.name}))},uptds:uptdRows.map((x:any)=>({id:Number(x.id),code:x.code,name:x.name,opdId:Number(x.opd_id),primary:!!x.is_primary}))};
+  // Claim extraction and response coverage still use Gemini-specific adapters.
+  // Never charge Gemini when Humas explicitly selected another model for Gap.
+  const gapSelection=await pool.query(`SELECT p.code AS provider_code,m.code AS model_code,p.enabled AS provider_enabled,m.enabled AS model_enabled
+    FROM ai_humas_model_selections s
+    JOIN ai_models m ON m.id=s.model_id
+    JOIN ai_providers p ON p.id=m.provider_id
+    WHERE s.task_code='gap_analysis' LIMIT 1`);
+  const gapModel=gapSelection.rows[0];
+  if(gapModel && (!gapModel.provider_enabled || !gapModel.model_enabled))
+    return reply.code(409).send({error:'AI_GAP_SELECTED_MODEL_DISABLED'});
+  if(gapModel && gapModel.provider_code!=='gemini')
+    return reply.code(409).send({error:'AI_GAP_SELECTED_MODEL_RUNTIME_NOT_READY'});
   const angleResult=await extractDynamicIssueClaims(validExternal,{issueTitle:issue.title,geographicScope:issue.geographic_scope||null,districts:Array.isArray(issue.districts)?issue.districts:[]},pool);
   const coverageResult=await matchDynamicOfficialResponseCoverage(angleResult.angles,owned,pool);
   const ts=(v:any)=>{const n=v?new Date(v).getTime():NaN;return Number.isFinite(n)?n:null},first=(xs:any[])=>xs.map(x=>ts(x.published_at)).filter((x:number|null):x is number=>x!==null).sort((a,b)=>a-b)[0]??null;
