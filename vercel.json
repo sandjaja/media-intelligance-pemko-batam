@@ -97,6 +97,10 @@
     {
       "path": "/api/cron/collection",
       "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/cron/executive-brief",
+      "schedule": "30 23 * * *"
     }
   ],
   "headers": [
