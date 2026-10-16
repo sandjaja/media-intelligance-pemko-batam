@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
-import { h1Fingerprint, h1ClassifiedPlanFingerprint, validateH1ExecutionPlan, inboxContextFingerprint, selectYesterdayWibEvidence, groupH1Evidence, publicationDateNeedsReview, claimIssueLinkageH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
+import { h1Fingerprint, h1ClassifiedPlanFingerprint, isSafeH1Group, buildH1BoundedPlan, validateH1ExecutionPlan, inboxContextFingerprint, selectYesterdayWibEvidence, groupH1Evidence, publicationDateNeedsReview, claimIssueLinkageH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
 
 test('H-1 fingerprint is independent of evidence ordering and duplicate refs', () => {
   const a = [{ sourceType: 'online' as const, id: 7 }, { sourceType: 'social' as const, id: 3 }];
@@ -103,4 +103,31 @@ test('H-1 classified fingerprint changes with keyword and OPD', () => {
   assert.notEqual(first, h1ClassifiedPlanFingerprint([{ primaryKeyword: 'banjir', opdId: 15, evidence }]));
   assert.notEqual(first, h1ClassifiedPlanFingerprint([{ primaryKeyword: 'sampah', opdId: 16, evidence }]));
   assert.equal(first, h1ClassifiedPlanFingerprint([{ primaryKeyword: 'sampah', opdId: 15, evidence }]));
+});
+
+test('H-1 safety guard rejects cross-OPD evidence and oversized groups', () => {
+  const good = { primaryKeyword: 'sampah', opdId: 15,
+    evidence: [{ sourceType: 'online' as const, id: 1, opdId: 15 },
+      { sourceType: 'social' as const, id: 2, opdId: 15 }] };
+  assert.equal(isSafeH1Group(good), true);
+  assert.equal(isSafeH1Group({ ...good, evidence: [good.evidence[0],
+    { sourceType: 'social' as const, id: 2, opdId: 16 }] }), false);
+  assert.equal(isSafeH1Group({ ...good, evidence: [good.evidence[0], good.evidence[0]] }), false);
+  assert.equal(isSafeH1Group({ ...good, evidence: Array.from({ length: 41 }, (_, i) =>
+    ({ sourceType: 'online' as const, id: i + 1, opdId: 15 })) }), false);
+});
+
+test('shared H-1 planner excludes date discrepancies before grouping', () => {
+  const evidence = [
+    { sourceType: 'online' as const, id: 1, occurredAt: '2026-10-15T04:00:00Z',
+      title: 'Berita lama', summary: 'Terbit 10 Oktober 2026', primaryKeyword: 'sampah', opdId: 15 },
+    { sourceType: 'online' as const, id: 2, occurredAt: '2026-10-15T04:00:00Z',
+      title: 'Berita baru', summary: '', primaryKeyword: 'sampah', opdId: 15 },
+    { sourceType: 'social' as const, id: 3, occurredAt: '2026-10-15T04:00:00Z',
+      title: 'Berita baru', summary: '', primaryKeyword: 'sampah', opdId: 15 },
+  ];
+  const plan = buildH1BoundedPlan(evidence, new Date('2026-10-16T12:00:00Z'));
+  assert.equal(plan.publicationDateReviewCount, 1);
+  assert.equal(plan.plannedGroupCount, 1);
+  assert.equal(plan.plannedGroups[0].evidence.length, 2);
 });
