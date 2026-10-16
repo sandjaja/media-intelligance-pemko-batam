@@ -96,7 +96,8 @@ async function analyzePublicationPackage(pool:Pool,input:any,mediaParts:any[]=[]
     await pool.query("SELECT m.code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 1");
   if(!models.rows[0])throw new Error('GEMINI_DATABASE_MODEL_MISSING');
   const model=models.rows[0].code;
-  const promptRows=await pool.query("SELECT prompt_text FROM ai_humas_task_prompts WHERE task_code='publication_analysis' LIMIT 1").catch(()=>({rows:[]}));
+  const promptRows=await pool.query("SELECT prompt_text FROM ai_humas_task_prompts WHERE task_code='publication_analysis' LIMIT 1");
+  if(!promptRows.rows[0]?.prompt_text?.trim())throw new Error('AI_HUMAS_PROMPT_NOT_CONFIGURED');
   const prompt=(promptRows.rows[0]?.prompt_text||`Anda adalah analis komunikasi pemerintah daerah. Tugas Anda menilai apakah MATERI PUBLIKASI resmi benar-benar mengeksekusi INTI STRATEGI KOMUNIKASI (Strakom) yang sudah disetujui Humas.
 
 PRINSIP WAJIB:
@@ -175,7 +176,8 @@ async function analyzeMonitoringAgainstPublication(pool:Pool,input:any,userId:st
     await pool.query("SELECT m.code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 1");
   if(!models.rows[0])throw new Error('GEMINI_DATABASE_MODEL_MISSING');
   const model=models.rows[0].code;
-  const promptRows=await pool.query("SELECT prompt_text FROM ai_humas_task_prompts WHERE task_code='monitoring_analysis' LIMIT 1").catch(()=>({rows:[]}));
+  const promptRows=await pool.query("SELECT prompt_text FROM ai_humas_task_prompts WHERE task_code='monitoring_analysis' LIMIT 1");
+  if(!promptRows.rows[0]?.prompt_text?.trim())throw new Error('AI_HUMAS_PROMPT_NOT_CONFIGURED');
   const prompt=(promptRows.rows[0]?.prompt_text||`Anda adalah analis komunikasi strategis pemerintah daerah pada AKHIR satu siklus respons isu. Monitoring sudah selesai. Tugas Anda bukan sekadar memeriksa apakah fokus monitoring ditemukan, tetapi menyimpulkan apa arti seluruh evidence pascapublikasi bagi langkah komunikasi berikutnya.
 
 Gunakan secara terpadu: konteks issue dan routing OPD/wilayah, Analisis Gap awal, respons final OPD bila ada, Analisa Publikasi beserta monitoringFocus, dan evidence 4 media setelah publikasi. Semua kesimpulan harus dapat ditelusuri ke data yang diberikan. Jangan mengarang fakta, OPD, kecamatan, tindakan lapangan, reaksi audiens, engagement, atau kejadian masa depan.
