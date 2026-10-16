@@ -1,5 +1,5 @@
 import type { Pool } from 'pg';
-import { listGeminiFallbackModels } from './ai-gemini-config.js';
+import { loadSelectedHumasGeminiModel } from './ai-gemini-config.js';
 import { reserveGeminiDailyRequest } from './ai-gemini-quota-reservation.js';
 import { recordGeminiExecution } from './ai-gemini-execution-log.js';
 import { extractIssueAngles, type IssueAngleEvidence } from './issue-angle-extractor.js';
@@ -41,7 +41,7 @@ export async function extractDynamicIssueClaims(evidence:IssueAngleEvidence[],co
 
  const fallback=(reason='UNKNOWN')=>{const r=extractIssueAngles(evidence);return{...r,mode:'deterministic-fallback' as const,fallbackReason:reason,claims:r.angles.map(a=>({...a,claim:a.label,confidence:0,evidenceIds:a.evidence.map(x=>`${x.source}:${x.id}`)}))}};
  if(!evidence.length)return fallback('NO_VALID_EVIDENCE');if(!pool)return fallback('GEMINI_DATABASE_POOL_MISSING');
- let models:Array<{key:string;model:string}>;try{models=await listGeminiFallbackModels(pool);if(!models.length)return fallback('GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}catch{return fallback('GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}
+ let models:Array<{key:string;model:string}>;try{models=[await loadSelectedHumasGeminiModel(pool,'gap_analysis')];if(!models.length)return fallback('GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}catch{return fallback('GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}
  const source=evidence.slice(0,40).map(e=>({evidenceId:ref(e),source:e.source,title:clip(e.title,500),text:clip([e.summary,e.content,e.body_text].filter(Boolean).join(' '))}));
  for(let attempt=0;attempt<models.length;attempt++){
  const {key,model}=models[attempt];
