@@ -309,3 +309,28 @@ test('H-1 simulation: changing OPD or keyword invalidates prepared classified pl
   const modified = h1ClassifiedPlanFingerprint([{ primaryKeyword: 'banjir', opdId: 15, evidence }]);
   assert.equal(validateH1ExecutionPlan('2026-10-15', original, '2026-10-15', evidence, modified).reason, 'H1_PLAN_CHANGED');
 });
+
+test('H-1 rejects malformed evidence before opening a DB transaction', async () => {
+  let connected = false;
+  const pool = { connect: async () => { connected = true; throw new Error('must_not_connect'); } } as unknown as Pool;
+  const invalid = [
+    { sourceType: 'online' as const, id: 0 },
+    { sourceType: 'online' as const, id: 0 },
+  ];
+  const result = await claimAndReserveH1Batch(pool, 1, '2026-10-15', h1Fingerprint(invalid), invalid);
+  assert.equal(result.claimed, false);
+  assert.equal(result.status, 'invalid_evidence_plan');
+  assert.equal(connected, false);
+});
+
+test('H-1 duplicate evidence references are rejected before any DB transaction', async () => {
+  let connected = false;
+  const pool = { connect: async () => { connected = true; throw new Error('must_not_connect'); } } as unknown as Pool;
+  const duplicate = [
+    { sourceType: 'online' as const, id: 42 },
+    { sourceType: 'online' as const, id: 42 },
+  ];
+  const result = await claimAndReserveH1Batch(pool, 1, '2026-10-15', h1Fingerprint(duplicate), duplicate);
+  assert.equal(result.status, 'invalid_evidence_plan');
+  assert.equal(connected, false);
+});
