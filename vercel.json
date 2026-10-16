@@ -100,7 +100,7 @@
     },
     {
       "path": "/api/cron/executive-brief",
-      "schedule": "30 23 * * *"
+      "schedule": "10 1 * * *"
     }
   ],
   "headers": [
