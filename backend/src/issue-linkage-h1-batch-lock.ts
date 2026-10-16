@@ -83,13 +83,17 @@ export async function claimAndReserveH1Batch(
   newsDate: string,
   fingerprint: string,
   evidence: H1EvidenceRef[],
+  classifiedGroups?: Array<{primaryKeyword:string;opdId:number|null;evidence:H1EvidenceRef[]}>,
 ): Promise<{ claimed: boolean; id: number | null; status: string }> {
   // Reject invalid/empty plans before acquiring a DB connection or creating a batch.
   const unique = new Set(evidence.map(item => `${item.sourceType}:${item.id}`));
   if (!evidence.length || unique.size !== evidence.length ||
       evidence.some(item => !['online','print','social','owned'].includes(item.sourceType) ||
         !Number.isSafeInteger(item.id) || item.id <= 0) ||
-      h1Fingerprint(evidence) !== fingerprint) {
+      (classifiedGroups
+        ? h1ClassifiedPlanFingerprint(classifiedGroups) !== fingerprint ||
+          h1Fingerprint(classifiedGroups.flatMap(group => group.evidence)) !== h1Fingerprint(evidence)
+        : h1Fingerprint(evidence) !== fingerprint)) {
     return { claimed:false,id:null,status:'invalid_evidence_plan' };
   }
   const client = await pool.connect();
