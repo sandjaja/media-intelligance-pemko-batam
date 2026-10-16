@@ -106,3 +106,29 @@ export async function persistH1LinkageContext(
   );
   return true;
 }
+
+/** Deterministic H-1 groups. Never merge evidence from different OPDs.
+ * Empty primary keywords are deliberately isolated by evidence reference.
+ */
+export function groupH1Evidence<T extends H1EvidenceRef & {
+  primaryKeyword?: string | null; opdId?: number | null;
+}>(evidence: T[]): Array<{ key: string; primaryKeyword: string; opdId: number | null; evidence: T[] }> {
+  const groups = new Map<string, { key: string; primaryKeyword: string; opdId: number | null; evidence: T[] }>();
+  const seen = new Set<string>();
+  for (const item of evidence) {
+    const ref = `${item.sourceType}:${item.id}`;
+    if (seen.has(ref)) continue;
+    seen.add(ref);
+    const keyword = String(item.primaryKeyword || '').toLowerCase().normalize('NFKC')
+      .replace(/[^\\p{L}\\p{N}\\s-]/gu, ' ').replace(/\\s+/g, ' ').trim();
+    const opdId = Number.isInteger(item.opdId) && Number(item.opdId) > 0 ? Number(item.opdId) : null;
+    const key = keyword ? `${keyword}|opd:${opdId ?? 'none'}` : `unclassified|${ref}`;
+    let group = groups.get(key);
+    if (!group) {
+      group = { key, primaryKeyword: keyword, opdId, evidence: [] };
+      groups.set(key, group);
+    }
+    group.evidence.push(item);
+  }
+  return [...groups.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
