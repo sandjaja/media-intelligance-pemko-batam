@@ -73,7 +73,21 @@ export function selectYesterdayWibEvidence<T extends H1EvidenceRef & { occurredA
         !['online', 'print', 'social', 'owned'].includes(item.sourceType)) continue;
     const published = new Date(item.occurredAt);
     if (!Number.isFinite(published.getTime()) || day(published) !== date) continue;
-    selected.set(`${item.sourceType}:${item.id}`, item);
+    const ref = `${item.sourceType}:${item.id}`;
+    const previous = selected.get(ref);
+    // Duplicate candidate snapshots may disagree: retain the most complete
+    // keyword/OPD metadata, never discard an earlier useful classification.
+    if (!previous) {
+      selected.set(ref, item);
+    } else {
+      const keyword = (value: T) => String((value as T & { primaryKeyword?: string | null }).primaryKeyword || '').trim();
+      const opd = (value: T) => Number((value as T & { opdId?: number | null }).opdId || 0);
+      selected.set(ref, {
+        ...previous, ...item,
+        primaryKeyword: keyword(item) || keyword(previous) || null,
+        opdId: opd(item) > 0 ? opd(item) : opd(previous) > 0 ? opd(previous) : null,
+      } as T);
+    }
   }
   return { date, evidence: [...selected.values()] };
 }
