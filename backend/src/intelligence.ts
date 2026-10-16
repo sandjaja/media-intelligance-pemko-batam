@@ -1,6 +1,7 @@
 import { Pool } from 'pg';
 import { decryptIntegrationCredential } from './integration-credentials.js';
 import { reserveGeminiDailyRequest } from './ai-gemini-quota-reservation.js';
+import { recordGeminiExecution } from './ai-gemini-execution-log.js';
 
 export type IntelligenceArticle = {
   id: string;
@@ -69,14 +70,28 @@ async function providerBrief(pool: Pool, rows: IntelligenceArticle[]) {
   let response: Response | undefined;
   for (let attempt = 0; attempt < 2; attempt++) {
     await reserveGeminiDailyRequest(pool, model, 'executive_brief');
+    const startedAt = Date.now();
+    let payload: any;
+    try {
     response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
       body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseMimeType: 'application/json' } }),
       signal: AbortSignal.timeout(10000),
     });
-    if (response.ok) break;
+    if (response.ok) {
+      payload = await response.json() as any;
+      const raw = payload.candidates?.[0]?.content?.parts?.map((x: any) => x.text || '').join('').trim();
+      if (!raw) throw new Error('GEMINI_EMPTY_RESPONSE');
+      const jsonText = raw.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '').trim();
+      let parsed: unknown;
+      try { parsed = JSON.parse(jsonText); } catch { throw new Error('GEMINI_INVALID_JSON_RESPONSE'); }
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('GEMINI_INVALID_JSON_RESPONSE');
+      await recordGeminiExecution(pool,{model,feature:'executive_brief',status:'success',startedAt,payload});
+      return { ...(parsed as Record<string, unknown>), mode: 'ai', model_code: model, source_count: input.length };
+    }
     if (response.status === 503 && attempt === 0) {
+      await recordGeminiExecution(pool,{model,feature:'executive_brief',status:'failed',startedAt,error:'GEMINI_UPSTREAM_503'});
       await new Promise(resolve => setTimeout(resolve, 750));
       continue;
     }
@@ -85,18 +100,12 @@ async function providerBrief(pool: Pool, rows: IntelligenceArticle[]) {
       : response.status === 429 ? 'RATE_LIMIT'
       : response.status >= 500 ? 'UPSTREAM' : 'REQUEST_REJECTED';
     throw new Error('GEMINI_' + category + '_' + response.status);
+    } catch(error) {
+      await recordGeminiExecution(pool,{model,feature:'executive_brief',status:'failed',startedAt,error:error instanceof Error?error.message:String(error)});
+      throw error;
+    }
   }
-  if (!response?.ok) throw new Error('GEMINI_UPSTREAM_503');
-  const payload = await response.json() as any;
-  const raw = payload.candidates?.[0]?.content?.parts?.map((x: any) => x.text || '').join('').trim();
-  if (!raw) throw new Error('GEMINI_EMPTY_RESPONSE');
-  // Keep the Executive Brief schema unchanged; accept Gemini JSON with optional markdown fences.
-  const jsonText = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-  let parsed: unknown;
-  try { parsed = JSON.parse(jsonText); }
-  catch { throw new Error('GEMINI_INVALID_JSON_RESPONSE'); }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('GEMINI_INVALID_JSON_RESPONSE');
-  return { ...(parsed as Record<string, unknown>), mode: 'ai', model_code: model, source_count: input.length };
+  throw new Error('GEMINI_UPSTREAM_503');
 }
 
 export async function getExecutiveBrief(pool: Pool, opdId: string | null = null): Promise<Record<string, unknown>> {
