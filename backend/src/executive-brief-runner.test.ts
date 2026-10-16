@@ -25,7 +25,7 @@ test('runner refuses execution when schedule is disabled', async () => {
   const db = fakePool(false);
   let invoked = false;
   const result = await runScheduledExecutiveBrief(db.pool as never, now, {
-    dryRun: false, execute: async () => { invoked = true; return { status: 'created' }; },
+    dryRun: false, execute: async () => { invoked = true; return { status: 'created' as const }; },
   });
   assert.equal(result.status, 'disabled');
   assert.equal(invoked, false);
@@ -35,7 +35,7 @@ test('runner refuses repeated execution even if previous run failed', async () =
   const db = fakePool(true, true);
   let invoked = false;
   const result = await runScheduledExecutiveBrief(db.pool as never, now, {
-    dryRun: false, execute: async () => { invoked = true; return { status: 'created' }; },
+    dryRun: false, execute: async () => { invoked = true; return { status: 'created' as const }; },
   });
   assert.equal(result.status, 'already_recorded');
   assert.equal(invoked, false);
@@ -48,7 +48,7 @@ test('runner invokes supplied execution capability once when due', async () => {
     dryRun: false, execute: async (_pool, date) => {
       count++;
       assert.equal(date, '2026-10-17');
-      return { status: 'created' };
+      return { status: 'created' as const };
     },
   });
   assert.equal(count, 1);
