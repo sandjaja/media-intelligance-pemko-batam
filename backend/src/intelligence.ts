@@ -63,7 +63,7 @@ async function providerBrief(pool: Pool, rows: IntelligenceArticle[]) {
   if (!models.rows[0]) return null;
   const model = models.rows[0].code as string;
   const input = rows.slice(0, 10).map((r, i) => ({ rank: i + 1, ...r }));
-  const prompt = 'Anda adalah analis media intelligence pemerintah daerah. Buat executive brief singkat, faktual, tidak mengarang fakta, pisahkan fakta dan rekomendasi. Kembalikan JSON dengan keys headline, situation, implications, actions (array), key_message, priority. Priority hanya WATCH, MEDIUM, HIGH, IMMEDIATE.\\nDATA:\\n' + JSON.stringify(input);
+  const prompt = 'Anda adalah analis media intelligence pemerintah daerah. Buat executive brief singkat, faktual, tidak mengarang fakta, pisahkan fakta dan rekomendasi. Kembalikan JSON dengan keys headline, situation, implications, actions (array), key_message, priority. Priority hanya WATCH, MEDIUM, HIGH, IMMEDIATE.\nDATA:\\n' + JSON.stringify(input);
   await reserveGeminiDailyRequest(pool, model, 'executive_brief');
   const response = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent', {
     method: 'POST',
@@ -94,7 +94,7 @@ export async function getExecutiveBrief(pool: Pool, opdId: string | null = null)
   try { return await providerBrief(pool, data) ?? { ...fallbackBrief(data), provider_error_code: 'GEMINI_NOT_CONFIGURED' }; }
   catch (error) {
     const message = error instanceof Error ? error.message : '';
-    const code = /^GEMINI_(?:AUTH|MODEL_NOT_FOUND|RATE_LIMIT|UPSTREAM|REQUEST_REJECTED)_\\d{3}$/.test(message)
+    const code = /^GEMINI_(?:AUTH|MODEL_NOT_FOUND|RATE_LIMIT|UPSTREAM|REQUEST_REJECTED)_\d{3}$/.test(message)
       || message === 'GEMINI_EMPTY_RESPONSE' ? message : 'GEMINI_PROVIDER_ERROR';
     return { ...fallbackBrief(data), provider_error: true, provider_error_code: code };
   }
