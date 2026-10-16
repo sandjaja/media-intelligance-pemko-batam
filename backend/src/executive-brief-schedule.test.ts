@@ -41,7 +41,9 @@ test('schedule matches WIB clock, not server UTC time', () => {
   const schedule = { enabled: true, hour_wib: 6, minute_wib: 30, timezone: 'Asia/Jakarta' as const };
   assert.equal(isExecutiveBriefDue(schedule, new Date('2026-10-16T23:30:00Z')), true);
   assert.equal(isExecutiveBriefDue(schedule, new Date('2026-10-16T06:30:00Z')), false);
-  assert.equal(isExecutiveBriefDue(schedule, new Date('2026-10-16T23:31:00Z')), false);
+  assert.equal(isExecutiveBriefDue(schedule, new Date('2026-10-16T23:31:00Z')), true);
+  assert.equal(isExecutiveBriefDue(schedule, new Date('2026-10-16T23:39:00Z')), true);
+  assert.equal(isExecutiveBriefDue(schedule, new Date('2026-10-16T23:40:00Z')), false);
 });
 
 test('schedule rejects invalid timezone and clock settings', () => {
