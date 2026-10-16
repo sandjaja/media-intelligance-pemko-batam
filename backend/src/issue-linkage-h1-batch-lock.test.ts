@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
-import { h1Fingerprint, inboxContextFingerprint, claimIssueLinkageH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
+import { h1Fingerprint, inboxContextFingerprint, selectYesterdayWibEvidence, claimIssueLinkageH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
 
 test('H-1 fingerprint is independent of evidence ordering and duplicate refs', () => {
   const a = [{ sourceType: 'online' as const, id: 7 }, { sourceType: 'social' as const, id: 3 }];
@@ -40,4 +40,14 @@ test('inbox cache fingerprint includes normalized keyword and sorted evidence re
   ]), 'sampah|online:2|social:4');
   assert.notEqual(inboxContextFingerprint('Sampah', [{ sourceType: 'online', id: 2 }]),
     h1Fingerprint([{ sourceType: 'online', id: 2 }]));
+});
+
+test('H-1 selection uses WIB publication date, not ingestion date, and deduplicates', () => {
+  const now = new Date('2026-10-16T04:00:00Z');
+  const yesterday = { sourceType: 'online' as const, id: 8, occurredAt: '2026-10-15T16:59:00Z' };
+  const today = { sourceType: 'social' as const, id: 9, occurredAt: '2026-10-15T17:01:00Z' };
+  const missing = { sourceType: 'print' as const, id: 10, occurredAt: null };
+  const result = selectYesterdayWibEvidence([yesterday, today, missing, yesterday], now);
+  assert.equal(result.date, '2026-10-15');
+  assert.deepEqual(result.evidence, [yesterday]);
 });
