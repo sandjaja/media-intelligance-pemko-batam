@@ -18,3 +18,10 @@ export async function prepareGeminiRequest(pool: Pick<Pool, 'query'>, featureCod
   await reserveGeminiDailyRequest(pool, config.model, featureCode);
   return config;
 }
+
+export async function listGeminiFallbackModels(pool: Pick<Pool, 'query'>): Promise<Array<{model:string;key:string}>> {
+  const result = await pool.query(
+    "SELECT m.code AS model, c.credential_ciphertext FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id JOIN ai_provider_credentials c ON c.provider_id=p.id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 2",
+  );
+  return result.rows.map((row: any) => ({ model: String(row.model), key: decryptIntegrationCredential(row.credential_ciphertext) }));
+}
