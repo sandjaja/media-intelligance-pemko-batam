@@ -19,7 +19,7 @@ function ensureUI(){
  <label class="rounded-xl border border-slate-800 p-4 flex gap-3"><input id="schedOwned" type="checkbox" class="w-5 h-5 mt-1"><div><b>Owned Channel</b><div class="text-xs text-slate-500 mt-1">Website resmi Pemko/OPD/Kecamatan.</div></div></label>
  <label id="schedSocialCard" class="rounded-xl border border-slate-800 p-4 flex gap-3"><input id="schedSocial" type="checkbox" class="w-5 h-5 mt-1"><div><b>Media Sosial</b><div id="schedSocialNote" class="text-xs text-slate-500 mt-1">YouTube serta Actor Instagram/TikTok yang aktif di Admin. Apify menyimpan data kemarin WIB; biaya dan batas jumlah mengikuti pengaturan Admin.</div></div></label>
  <label class="rounded-xl border border-slate-800 p-4 flex gap-3"><input id="schedExecutiveBrief" type="checkbox" class="w-5 h-5 mt-1"><div><b>Executive Brief</b><div class="text-xs text-slate-500 mt-1">Gemini otomatis pukul 08.10 WIB, setelah pengumpulan. Maksimal sekali sehari.</div></div></label></div>
- <div class="flex flex-wrap gap-2"><button type="submit" class="px-4 py-2.5 rounded-lg bg-cyan-400 text-slate-950 font-black">Simpan Pengaturan</button><button id="schedRunNow" type="button" class="px-4 py-2.5 rounded-lg bg-slate-800 border border-slate-700 font-bold">Jalankan Sekarang</button></div></form></details>
+ <div class="flex flex-wrap gap-2"><button type="submit" class="px-4 py-2.5 rounded-lg bg-cyan-400 text-slate-950 font-black">Simpan Pengaturan</button><button id="schedRunNow" type="button" class="px-4 py-2.5 rounded-lg bg-slate-800 border border-slate-700 font-bold">Jalankan Sekarang</button></div><div class="mt-4 border-t border-slate-800 pt-4"><button id="schedBriefRetry" type="button" class="rounded-lg border border-amber-600 px-4 py-2.5 font-bold">Analisis Ulang Executive Brief</button><p class="text-xs text-amber-400 mt-2">Hanya jika analisis hari ini gagal. Satu percobaan ulang manual; memakai dan mengurangi kuota harian Gemini.</p><p id="schedBriefRetryResult" class="text-xs text-slate-400 mt-2" aria-live="polite"></p></div></form></details>
  <details id="schedHistoryDetails" class="glass rounded-2xl p-5"><summary class="cursor-pointer font-black text-lg mb-3">Riwayat Pengumpulan</summary><p id="schedLast" class="text-xs text-slate-500 mt-1">Belum pernah dijalankan.</p><div id="schedHistory" class="mt-4 space-y-2"></div></details></section>`);
  // Each source card collapses independently; the checkbox remains accessible in its header.
  $('#schedSourceCards').querySelectorAll('label').forEach(card=>{
@@ -45,6 +45,7 @@ function ensureUI(){
  });
  $('#schedForm').addEventListener('submit',save);
  $('#schedRunNow').addEventListener('click',runNow);
+ $('#schedBriefRetry').addEventListener('click',retryBrief);
  return true;
 }
 async function load(){
@@ -53,6 +54,16 @@ async function load(){
 }
 async function save(e){e.preventDefault();try{await api('/admin/collection-scheduler',{method:'PUT',body:JSON.stringify({enabled:$('#schedEnabled').checked,runTime:$('#schedTime').value,onlineEnabled:$('#schedOnline').checked,ownedEnabled:$('#schedOwned').checked,socialEnabled:!$('#schedSocial').disabled&&$('#schedSocial').checked,executiveBriefEnabled:$('#schedExecutiveBrief').checked})});toast('Pengaturan scheduler disimpan.');await load()}catch(e){toast(e.message,false)}}
 async function runNow(){const sources=[];if($('#schedOnline').checked)sources.push('online');if($('#schedOwned').checked)sources.push('owned');if(!$('#schedSocial').disabled&&$('#schedSocial').checked)sources.push('social');if(!sources.length)return toast('Pilih minimal satu sumber untuk dijalankan.',false);if(!confirm(`Jalankan pengumpulan sekarang untuk: ${sources.join(', ')}?${sources.includes('social')?' Actor Apify aktif ikut dijalankan dengan batas biaya Admin.':''}`))return;const b=$('#schedRunNow');b.disabled=true;b.textContent='Sedang menjalankan...';try{const j=await api('/admin/collection-scheduler/run',{method:'POST',body:JSON.stringify({sources})});toast(j.data?.skipped?'Pengumpulan sudah berjalan atau sudah dijalankan.':j.data?.status==='RUNNING'?'Pengumpulan berjalan. Hasil Apify akan diimpor otomatis.':j.data?.status==='SUCCESS'?'Pengumpulan selesai.':'Pengumpulan selesai dengan catatan; periksa riwayat.',j.data?.status!=='FAILED');await load()}catch(e){toast(e.message,false)}finally{b.disabled=false;b.textContent='Jalankan Sekarang'}}
+async function retryBrief(){
+ if(!confirm('Analisis ulang Executive Brief yang gagal hari ini? Ini akan memanggil Gemini dan MENGURANGI kuota AI harian. Hanya satu percobaan ulang.'))return;
+ const button=$('#schedBriefRetry'),status=$('#schedBriefRetryResult');
+ button.disabled=true;status.textContent='Menjalankan analisis ulang...';
+ try{
+  const result=await api('/admin/executive-brief/retry',{method:'POST'});
+  status.textContent=result.data?.status==='created'?'Berhasil. Executive Brief terbaru tersimpan dan dapat dilihat di dashboard.':'Analisis ulang gagal. Tidak ada percobaan otomatis berikutnya.';
+ }catch(e){status.textContent='Analisis ulang tidak dapat dijalankan: '+e.message;}
+ finally{button.disabled=false;}
+}
 function setupExecutiveBriefControl(){
  const panel=document.getElementById('schedulerPanel');
  if(!panel||document.getElementById('aiExecutiveBriefSection'))return;
@@ -110,5 +121,5 @@ function setupExecutiveBriefControl(){
  });
  section.querySelector('#aiExecutiveBriefReload').addEventListener('click',reload);
 }
-const start=()=>{if(ensureUI())setupExecutiveBriefControl();load()};if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(start,300));else setTimeout(start,300);
+const start=()=>{ensureUI();load()};if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(start,300));else setTimeout(start,300);
 })();
