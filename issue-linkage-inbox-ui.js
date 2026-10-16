@@ -39,7 +39,11 @@ root.querySelectorAll('[data-view-issue]').forEach(b=>b.addEventListener('click'
    Number(d.withPrimaryKeyword||0)+' memiliki Primary Keyword; '+
    Number(d.selectedYesterdayCount||0)+' berita H-1; '+
    Number(d.selectedGroupCount||0)+' kelompok awal; '+
-   Number(d.eligibleGroupCount||0)+' kelompok memenuhi syarat.';
+   Number(d.eligibleGroupCount||0)+' kelompok memenuhi syarat.'+
+   '\nBerita H-1 di sumber asli: Online '+Number(d.sourcePublishedYesterday?.online||0)+
+   ', Cetak '+Number(d.sourcePublishedYesterday?.print||0)+
+   ', Sosial '+Number(d.sourcePublishedYesterday?.social||0)+
+   ', Owned '+Number(d.sourcePublishedYesterday?.owned||0)+'.';
   if(!plan.planValid||!count){window.alert(message+detail+'\n\nTidak ada kelompok yang siap diproses.');return}
   const preflight=await api('/intelligence/issue-linkage-inbox/batch-h1/validate',{
    method:'POST',body:JSON.stringify({date:plan.date,plannedFingerprint:plan.plannedFingerprint}),
