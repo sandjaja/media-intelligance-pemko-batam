@@ -79,9 +79,15 @@ async function providerBrief(pool: Pool, rows: IntelligenceArticle[]) {
     throw new Error('GEMINI_' + category + '_' + response.status);
   }
   const payload = await response.json() as any;
-  const raw = payload.candidates?.[0]?.content?.parts?.map((x: any) => x.text || '').join('');
+  const raw = payload.candidates?.[0]?.content?.parts?.map((x: any) => x.text || '').join('').trim();
   if (!raw) throw new Error('GEMINI_EMPTY_RESPONSE');
-  return { ...JSON.parse(raw), mode: 'ai', model_code: model, source_count: input.length };
+  // Keep the Executive Brief schema unchanged; accept Gemini JSON with optional markdown fences.
+  const jsonText = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  let parsed: unknown;
+  try { parsed = JSON.parse(jsonText); }
+  catch { throw new Error('GEMINI_INVALID_JSON_RESPONSE'); }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('GEMINI_INVALID_JSON_RESPONSE');
+  return { ...(parsed as Record<string, unknown>), mode: 'ai', model_code: model, source_count: input.length };
 }
 
 export async function getExecutiveBrief(pool: Pool, opdId: string | null = null) {
@@ -95,7 +101,7 @@ export async function getExecutiveBrief(pool: Pool, opdId: string | null = null)
   catch (error) {
     const message = error instanceof Error ? error.message : '';
     const code = /^GEMINI_(?:AUTH|MODEL_NOT_FOUND|RATE_LIMIT|UPSTREAM|REQUEST_REJECTED)_\d{3}$/.test(message)
-      || message === 'GEMINI_EMPTY_RESPONSE' ? message : 'GEMINI_PROVIDER_ERROR';
+      || message === 'GEMINI_EMPTY_RESPONSE' || message === 'GEMINI_INVALID_JSON_RESPONSE' ? message : 'GEMINI_PROVIDER_ERROR';
     return { ...fallbackBrief(data), provider_error: true, provider_error_code: code };
   }
 }
