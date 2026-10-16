@@ -15,7 +15,7 @@ import { ingestEnabledSources } from './ingestion.js';
 import { registerAskIntelligence } from './ask-intelligence.js';
 import { readLatestExecutiveBrief } from './executive-brief-cache.js';
 import { generateDailyExecutiveBrief } from './executive-brief-daily.js';
-import { readExecutiveBriefSchedule, saveExecutiveBriefScheduleTime } from './executive-brief-schedule.js';
+import { readExecutiveBriefSchedule, saveExecutiveBriefScheduleTime, inspectExecutiveBriefSchedule } from './executive-brief-schedule.js';
 import { registerCollectionSchedulerRoutes } from './collection-scheduler-routes.js';
 import { registerAdminRoutes } from './admin-routes.js';
 import { registerDistrictRoutes } from './district-routes.js';
@@ -451,6 +451,14 @@ app.get('/api/admin/executive-brief/schedule',{preHandler:[requireAuth,requireRo
     return {data:await readExecutiveBriefSchedule(pool),scheduler_connected:false};
   }catch{
     return reply.code(503).send({error:'EXECUTIVE_BRIEF_SCHEDULE_UNAVAILABLE'});
+  }
+});
+// Preview-safe dry run: never reserves quota or invokes an AI provider.
+app.get('/api/admin/executive-brief/schedule/preflight',{preHandler:[requireAuth,requireRole('admin')]},async(_request,reply)=>{
+  try{
+    return {data:await inspectExecutiveBriefSchedule(pool,new Date()),dry_run:true,scheduler_connected:false};
+  }catch{
+    return reply.code(503).send({error:'EXECUTIVE_BRIEF_PREFLIGHT_UNAVAILABLE'});
   }
 });
 app.put('/api/admin/executive-brief/schedule',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
