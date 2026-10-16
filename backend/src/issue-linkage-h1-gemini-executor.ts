@@ -51,6 +51,8 @@ export async function analyzeReservedH1Groups(
       seen.add(ref);
     }
   }
+  // Five groups x two attempts x 12s = at most 120s of provider waits.
+  // Database operations add time; do not enable execution until Preview timeout is verified.
   const results = [];
   for (let i = 0; i < groups.length; i++) {
     // Match Executive Brief: primary, then at most one enabled fallback model.
@@ -69,7 +71,7 @@ export async function analyzeReservedH1Groups(
       }
       try {
         const response = await invokeAiProvider({
-          provider: 'gemini', model, apiKey: key, prompt: prompts[i], timeoutMs: 60000,
+          provider: 'gemini', model, apiKey: key, prompt: prompts[i], timeoutMs: 12000,
         });
         selected = { model, response };
         break;
