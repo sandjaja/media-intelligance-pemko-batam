@@ -48,7 +48,6 @@ export async function extractDynamicIssueClaims(evidence:IssueAngleEvidence[],co
  const source=evidence.slice(0,40).map(e=>({evidenceId:ref(e),source:e.source,title:clip(e.title,500),text:clip([e.summary,e.content,e.body_text].filter(Boolean).join(' '))}));
  for(let attempt=0;attempt<models.length;attempt++){
  const {key,model}=models[attempt];
- try{await reserveGeminiDailyRequest(pool,model,'issue_claim_extraction');}catch{if(attempt+1<models.length)continue;return fallback('GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}
  const startedAt=Date.now();
  try{
   const prompt=`${basePrompt}
@@ -97,6 +96,7 @@ Output JSON object {"claims":[{"claim":"...","angleType":"...","confidence":0.0,
 EVIDENCE:
 ${JSON.stringify(source)}`
   if(prompt.length>12000)throw new Error('AI_GAP_PROMPT_TOO_LARGE');
+  try{await reserveGeminiDailyRequest(pool,model,'issue_claim_extraction');}catch{if(attempt+1<models.length)continue;return fallback('GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}
   const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}}),signal:AbortSignal.timeout(10000)});
   if(!response.ok)throw new Error(`Gemini HTTP ${response.status}`);
   const payload=await response.json() as any;const raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');
