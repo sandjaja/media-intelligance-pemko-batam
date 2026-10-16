@@ -20,6 +20,10 @@ export async function generateDailyExecutiveBrief(
          LEFT JOIN ai_free_tier_daily_usage u
            ON u.model_id=l.model_id AND u.usage_date=(now() AT TIME ZONE 'UTC')::date
          WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE
+           AND m.id=(SELECT selected.id FROM ai_models selected
+             JOIN ai_providers provider ON provider.id=selected.provider_id
+             WHERE provider.code='gemini' AND provider.enabled=TRUE AND selected.enabled=TRUE
+             ORDER BY selected.id LIMIT 1)
            AND l.enabled=TRUE AND l.max_requests>COALESCE(u.reserved_requests,0)
        ) AS available`,
     );
