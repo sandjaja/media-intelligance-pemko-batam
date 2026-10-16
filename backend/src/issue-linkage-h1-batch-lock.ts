@@ -120,6 +120,27 @@ export function publicationDateNeedsReview(
   return Math.abs(stored.getTime() - embedded.getTime()) > 2 * 86400000;
 }
 
+/** Return a stable, deduplicated source list for a planned group.
+ * Reject mixed-OPD groups rather than sending cross-organization context to AI.
+ */
+export function isSafeH1Group(group: {
+  primaryKeyword: string; opdId: number | null;
+  evidence: Array<H1EvidenceRef & { opdId?: number | null }>;
+}): boolean {
+  if (!group.primaryKeyword || group.evidence.length < 2 || group.evidence.length > 40) return false;
+  const refs = new Set<string>();
+  for (const item of group.evidence) {
+    if (!Number.isInteger(item.id) || item.id <= 0 ||
+        !['online', 'print', 'social', 'owned'].includes(item.sourceType)) return false;
+    const ref = `${item.sourceType}:${item.id}`;
+    if (refs.has(ref)) return false;
+    refs.add(ref);
+    const opdId = Number.isInteger(item.opdId) && Number(item.opdId) > 0 ? Number(item.opdId) : null;
+    if (opdId !== group.opdId) return false;
+  }
+  return true;
+}
+
 /** Shared, deterministic bounded plan for prepare and eventual execution. */
 export function buildH1BoundedPlan<T extends H1EvidenceRef & {
   occurredAt?: string | null; title?: string | null; summary?: string | null;
@@ -131,7 +152,7 @@ export function buildH1BoundedPlan<T extends H1EvidenceRef & {
   const eligible = selected.evidence.filter(e => !flaggedRefs.has(`${e.sourceType}:${e.id}`));
   const groups = groupH1Evidence(eligible);
   const eligibleGroups = groups.filter(g => g.primaryKeyword && g.evidence.length >= 2);
-  const boundedGroups = eligibleGroups.filter(g => g.evidence.length <= 40);
+  const boundedGroups = eligibleGroups.filter(g => isSafeH1Group(g));
   const plannedGroups = boundedGroups.slice(0, 5);
   const plannedEvidence = plannedGroups.flatMap(g => g.evidence);
   const plannedFingerprint = h1ClassifiedPlanFingerprint(plannedGroups);
