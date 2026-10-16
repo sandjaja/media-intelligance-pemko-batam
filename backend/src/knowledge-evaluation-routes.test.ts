@@ -40,7 +40,7 @@ async function fixture(options:{role?:string;foreign?:boolean;noMonitoring?:bool
     const filtered=sql.includes("AND event_type='KNOWLEDGE_EVALUATION_APPROVED'")?events.filter(e=>e.event_type==='KNOWLEDGE_EVALUATION_APPROVED'):events;
     return row(filtered.length?[filtered.at(-1)]:[]);
   }
-  if(sql.includes('FROM issue_communication_gap_snapshots'))return row([{id:1,result:{data:{semanticAssessment:{status:'PARTIAL_RESPONSE'},externalAngles:{claims:[{claim:'Concern awal'}]}}}}]);
+  if(sql.includes('FROM issue_communication_gap_snapshots'))return row([{id:1,result:{data:{semanticAssessment:{status:'PARTIAL_RESPONSE',coverage:[{claim:'Concern awal',label:'Informasi / Fakta',status:'NOT_COVERED',matchScore:0,reason:'Respons resmi membahas kegiatan berbeda.',matchedOfficial:null}]},externalAngles:{claims:[{claim:'Concern awal'}],geographicAnalysis:{implication:'Perlu informasi tingkat kota.'}}}}}]);
   if(sql.includes('FROM communication_strategies'))return row([{id:2,version:1,executive_summary:'Strategi tersimpan',key_messages:['Pesan resmi']}]);
   if(sql.includes('FROM issue_publication_analysis_snapshots'))return row([{id:3,result:{executionAssessment:{status:'ALIGNED',assessment:'Publikasi mengikuti strategi.'},strengths:['Pesan konsisten.']}}]);
   if(sql.includes('FROM issue_monitoring_analysis_snapshots'))return row(options.noMonitoring?[]:[{id:4,period_number:1,evidence_summary:{total:5,online:3,owned:2},result:{analysis:{focusAssessment:{evidenceSufficiency:'LIMITED',cycleConclusion:'Kesimpulan monitoring tersimpan.',weaknesses:['Bukti terbatas.']}}}}]);
@@ -109,5 +109,34 @@ for(const failed of [false,true])test(`optional AI summarizes only saved results
   const r=await x.app.inject({method:'POST',url:'/api/knowledge/cycles/10/summarize',headers,payload:{expectedVersion:null}});assert.equal(r.statusCode,failed?503:200,r.body);assert.equal(calls,1);
   assert.equal(x.events().length,failed?0:1);if(!failed){assert.equal(r.json().data.status,'DRAFT');assert.equal(r.json().data.ai.model,'selected-monitoring-model');}
   assert.ok(!x.queries.some(q=>q.sql.includes('INSERT INTO issue_communication_gap_snapshots')||q.sql.includes('INSERT INTO issue_monitoring_analysis_snapshots')));
+ }finally{await x.app.close();}
+});
+
+test('knowledge exposes the saved Gap claims, zero coverage score, reason and geography without reanalysis',async()=>{
+ const x=await fixture();try{
+  const r=await x.app.inject({method:'GET',url:'/api/knowledge/cycles/10',headers});assert.equal(r.statusCode,200,r.body);
+  const gap=r.json().data.source.gap;
+  assert.deepEqual(gap.claims,['Concern awal']);
+  assert.equal(gap.coverage[0].matchScore,0);
+  assert.equal(gap.coverage[0].reason,'Respons resmi membahas kegiatan berbeda.');
+  assert.equal(gap.geographicAnalysis.implication,'Perlu informasi tingkat kota.');
+  assert.ok(!x.queries.some(q=>q.sql.includes('ai_humas_model_selections')||q.sql.includes('INSERT')));
+ }finally{await x.app.close();}
+});
+test('list, OPD search and cycle detail use the same organization-bound saved routing fallback',async()=>{
+ const x=await fixture();try{
+  for(const url of ['/api/knowledge/cycles?q=Kesbangpol','/api/knowledge/cycles/10']){
+   const r=await x.app.inject({method:'GET',url,headers});assert.equal(r.statusCode,200,r.body);
+  }
+  const reads=x.queries.filter(q=>q.sql.includes('FROM issue_workflows w'));
+  assert.equal(reads.length,3);
+  for(const {sql} of reads){
+   assert.match(sql,/COALESCE\(w\.lead_opd_id,/);
+   assert.match(sql,/#>>'\{issueContext,opds,primary,id\}'/);
+   assert.match(sql,/gs\.workflow_id=w\.id/);
+   assert.match(sql,/so\.organization_id=i\.organization_id/);
+   assert.match(sql,/ORDER BY ko\.weight DESC,ro\.id/);
+  }
+  assert.match(reads[0].sql,/o\.name ILIKE/);
  }finally{await x.app.close();}
 });

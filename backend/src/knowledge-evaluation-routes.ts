@@ -8,6 +8,15 @@ import { withHumasAnalysisLock } from './ai-humas-analysis-lock.js';
 import { knowledgeEvaluationSchema, summarizeKnowledgeSources, type KnowledgeEvaluation } from './knowledge-evaluation.js';
 
 declare module 'fastify' { interface FastifyRequest { knowledgeAuth?: AuthorizationContext } }
+// Closed cycles retain their original routing in the Gap snapshot, even without clarification.
+const cycleOpdJoin=`LEFT JOIN opd o ON o.organization_id=i.organization_id AND o.id=COALESCE(w.lead_opd_id,
+ (SELECT so.id FROM issue_communication_gap_snapshots gs JOIN opd so
+   ON so.id::text=COALESCE(gs.result->'data',gs.result)#>>'{issueContext,opds,primary,id}'
+   AND so.organization_id=i.organization_id WHERE gs.workflow_id=w.id ORDER BY gs.id DESC LIMIT 1),
+ (SELECT ro.id FROM issue_keywords ik JOIN keyword_opd ko ON ko.keyword_id=ik.keyword_id
+   AND ko.active=TRUE AND ko.routing_role='PRIMARY' JOIN opd ro ON ro.id=ko.opd_id
+   AND ro.organization_id=i.organization_id WHERE ik.issue_id=i.id AND ik.keyword_role='PRIMARY'
+   ORDER BY ko.weight DESC,ro.id LIMIT 1))`;
 const eventTypes=['KNOWLEDGE_EVALUATION_DRAFTED','KNOWLEDGE_EVALUATION_APPROVED'];
 const manager=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.some(r=>['super_admin','humas'].includes(r));
 const globalReader=(ctx:AuthorizationContext)=>manager(ctx)||ctx.roles.includes('executive');
@@ -42,7 +51,7 @@ export async function registerKnowledgeEvaluationRoutes(app:FastifyInstance,pool
  const cycle=async(ctx:AuthorizationContext,id:string,db:Pool|PoolClient=pool,lock=false)=>{
   const s=await scope(ctx);s.params.push(id);
   return (await db.query(`SELECT w.*,i.title AS issue_title,i.organization_id,i.geographic_scope,o.name AS lead_opd_name
-    FROM issue_workflows w JOIN issues i ON i.id=w.issue_id LEFT JOIN opd o ON o.id=w.lead_opd_id
+    FROM issue_workflows w JOIN issues i ON i.id=w.issue_id ${cycleOpdJoin}
     WHERE ${s.sql} AND w.id=$${s.params.length} AND w.workflow_status='CLOSED' ${lock?'FOR UPDATE OF w':''}`,s.params)).rows[0]||null;
  };
  const latest=async(id:string,db:Pool|PoolClient=pool,approvedOnly=false)=>(await db.query(`SELECT id,event_type,metadata,created_at,actor_user_id FROM issue_workflow_events
@@ -60,7 +69,7 @@ export async function registerKnowledgeEvaluationRoutes(app:FastifyInstance,pool
   ]);
   const gd=gap.rows[0]?.result?.data||gap.rows[0]?.result||{},mon=monitoring.rows[0];
   return {workflow:w,keywords:keywords.rows,districts:districts.rows,
-   gap:gap.rows[0]?{id:gap.rows[0].id,analyzedAt:gap.rows[0].analyzed_at,status:gd.semanticAssessment?.status||gd.baselineStatus,claims:(gd.externalAngles?.claims||gd.externalAngles?.angles||[]).map((a:any)=>a.claim||a.label).slice(0,16)}:null,
+   gap:gap.rows[0]?{id:gap.rows[0].id,analyzedAt:gap.rows[0].analyzed_at,status:gd.semanticAssessment?.status||gd.baselineStatus,claims:(gd.externalAngles?.claims||gd.externalAngles?.angles||[]).map((a:any)=>a.claim||a.label),coverage:gd.semanticAssessment?.coverage||[],geographicAnalysis:gd.geographicAnalysis||gd.externalAngles?.geographicAnalysis||null}:null,
    strategy:strategy.rows[0]||null,response:response.rows[0]||null,
    publication:publication.rows[0]?{id:publication.rows[0].id,analyzedAt:publication.rows[0].analyzed_at,analysis:publication.rows[0].result}:null,
    monitoring:mon?{id:mon.id,period:mon.period_number,analyzedAt:mon.analyzed_at,evidence:mon.evidence_summary||mon.result?.evidence||{},assessment:mon.result?.analysis?.focusAssessment||null}:null};
@@ -99,7 +108,7 @@ export async function registerKnowledgeEvaluationRoutes(app:FastifyInstance,pool
    let where=`${s.sql} AND w.workflow_status='CLOSED'`;
    if(q.data.view==='library')where+=' AND e.id IS NOT NULL';
    if(q.data.q){s.params.push('%'+q.data.q.replace(/[\\%_]/g,'\\$&')+'%');const n=s.params.length;where+=` AND (i.title ILIKE $${n} OR o.name ILIKE $${n} OR e.metadata->'evaluation'->>'summary' ILIKE $${n} OR (e.metadata->'evaluation'->'lessons')::text ILIKE $${n} OR (e.metadata->'evaluation'->'tags')::text ILIKE $${n} OR EXISTS(SELECT 1 FROM issue_keywords ik JOIN keywords k ON k.id=ik.keyword_id WHERE ik.issue_id=i.id AND k.keyword ILIKE $${n}))`;}
-   const from=`FROM issue_workflows w JOIN issues i ON i.id=w.issue_id LEFT JOIN opd o ON o.id=w.lead_opd_id
+   const from=`FROM issue_workflows w JOIN issues i ON i.id=w.issue_id ${cycleOpdJoin}
      LEFT JOIN LATERAL(SELECT ke.* FROM issue_workflow_events ke WHERE ke.workflow_id=w.id AND ke.event_type=ANY(ARRAY['KNOWLEDGE_EVALUATION_DRAFTED','KNOWLEDGE_EVALUATION_APPROVED']) ${approved?"AND ke.event_type='KNOWLEDGE_EVALUATION_APPROVED'":''} ORDER BY ke.id DESC LIMIT 1)e ON true WHERE ${where}`;
    const count=await pool.query(`SELECT COUNT(*)::int AS total ${from}`,s.params);
    const params=[...s.params,q.data.limit,(q.data.page-1)*q.data.limit];
