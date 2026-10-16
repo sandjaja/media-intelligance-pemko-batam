@@ -189,11 +189,13 @@ app.get('/api/intelligence/issue-linkage-inbox/batch-h1/continuation-preview',{p
    occurredAt:e.occurredAt||null,title:e.title||null,summary:e.summary||null,
    primaryKeyword:row.snapshot?.primaryKeyword||e.primaryKeyword||null,
    opdId:e.opdId==null?(row.snapshot?.opdId==null?null:Number(row.snapshot.opdId)):Number(e.opdId)})));
- const current=buildH1BoundedPlan(evidence as any[]);
+ // Use one clock snapshot so WIB midnight cannot shift the date between queries.
+ const now=new Date();
+ const current=buildH1BoundedPlan(evidence as any[],now);
  const reserved=(await pool.query(`SELECT source_type,source_id FROM issue_linkage_h1_evidence_ledger
   WHERE organization_id=$1 AND news_date=$2::date`,[organizationId,current.date])).rows;
  const refs=new Set<string>(reserved.map((e:any)=>`${e.source_type}:${e.source_id}`));
- const plan=buildH1ContinuationPlan(evidence as any[],refs);
+ const plan=buildH1ContinuationPlan(evidence as any[],refs,now);
  return {data:{mode:'read-only-continuation-preview',date:plan.date,timezone:'Asia/Jakarta',
   alreadyReservedCount:plan.alreadyReservedCount,plannedGroupCount:plan.plannedGroupCount,
   deferredGroupCount:plan.deferredGroupCount,plannedFingerprint:plan.plannedFingerprint,
