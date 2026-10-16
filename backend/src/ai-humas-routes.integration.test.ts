@@ -130,3 +130,53 @@ test('Content Studio source extraction reads the selected model and editable pro
    assert.equal(result.statusCode,200,result.body);assert.equal(generations,1);assert.equal(result.json().data.status,'EXTRACTED');
  }finally{await app.close();}
 });
+
+for(const outcome of ['success','invalid-output','provider-failure','project-locked'])test(`Content Studio Buat/Regenerasi Prompt: ${outcome}`,async()=>{
+ process.env.INTEGRATION_CREDENTIAL_KEY='test-only-encryption';
+ const credential=encryptIntegrationCredential('mock-only');
+ const oldPrompt={prompt:'Prompt lama yang sudah tersimpan'};
+ let saved:any=null,generations=0,usageLogs=0,quotas=0;const missing:string[]=[];
+ const guidance='Susun siaran pers dengan lead informatif, dahulukan manfaat publik, gunakan struktur jurnalistik yang runtut, dan pertahankan kutipan persis sesuai brief.';
+ const item={id:5,project_id:1,title:'Siaran pers kegiatan',format:'PRESS_RELEASE',audience:'MASYARAKAT_UMUM',purpose:'EDUKASI_SOSIALISASI',tone:'RESMI_FORMAL',channels:['WEBSITE_RESMI'],reference_asset_indexes:[0],official_asset_keys:['LOGO_PEMKO'],prompt_snapshot:oldPrompt};
+ const project={id:1,status:outcome==='project-locked'?'COMPLETED':'READY',production_parameters:{},context_snapshot:{executiveSummary:'Ringkasan Strakom yang disetujui',keyMessages:['Pesan utama Strakom'],inputSnapshot:{issue:{title:'Isu contoh'}}},reference_assets:[{name:'foto-kegiatan.jpg'}],official_assets:[{type:'LOGO_PEMKO',name:'Logo Pemko'}],production_notes:'Utamakan manfaat publik.'};
+ const app=await appFor(registerPhase5StrategyRoutes,async(sql,params=[])=>{
+  if(sql.includes('FROM users u'))return row([auth('humas')]);
+  if(sql.includes('SELECT * FROM content_projects'))return row([project]);
+  if(sql.includes('SELECT * FROM content_project_items'))return row([{...item,prompt_snapshot:saved||oldPrompt}]);
+  if(sql.includes('FROM content_project_sources'))return row([{id:7,category:'OFFICIAL_STATEMENT',source_title:'Pernyataan terkonfirmasi',confirmed_facts:[{type:'QUOTE',speaker:'Narasumber terkonfirmasi',text:'Tersedia 100 layanan.'}]}]);
+  if(sql.includes('FROM ai_humas_model_selections')){
+    assert.deepEqual(params,['content_studio_prompting']);
+    return row([{task_id:3,task_enabled:true,provider_id:2,provider:'gemini',provider_enabled:true,model_id:4,model:'selected-prompt-model',model_enabled:true,prompt_text:'Arahan dasar Humas yang terbaru dari database.',prompt_version:8}]);
+  }
+  if(sql.includes('FROM ai_provider_credentials'))return row([{credential_ciphertext:credential}]);
+  if(sql.includes('INSERT INTO ai_free_tier_daily_usage')){quotas++;return row([{model_id:4}]);}
+  if(sql.includes('INSERT INTO ai_gemini_quota_feature_audit'))return row([{id:1}]);
+  if(sql.includes('INSERT INTO ai_usage_logs')){usageLogs++;return row([{id:1}]);}
+  if(sql.includes('UPDATE content_project_items')){
+    saved=JSON.parse(params[0]);assert.deepEqual(params.slice(1),['99',5,1]);return row([{...item,status:'PROMPT_READY',prompt_snapshot:saved}]);
+  }
+  throw Error('UNEXPECTED_DB: '+sql);
+ });
+ globalThis.fetch=async(url,init)=>{
+   generations++;assert.ok(String(url).includes('selected-prompt-model'));
+   const prompt=JSON.parse(String(init?.body)).contents[0].parts[0].text;
+   for(const text of ['Arahan dasar Humas yang terbaru','PROMPT PRODUKSI untuk AI lain','Pesan utama Strakom','Tersedia 100 layanan.','gambar referensi terlampir #1','LOCKED ASSET','Utamakan manfaat publik.'])if(!prompt.includes(text))missing.push(text);
+   if(outcome==='provider-failure')return new Response('',{status:503});
+   return Response.json({candidates:[{finishReason:'STOP',content:{parts:[{text:JSON.stringify({productionGuidance:outcome==='invalid-output'?'':guidance})}]}}],usageMetadata:{promptTokenCount:500,candidatesTokenCount:70}});
+ };
+ try{
+   const result=await app.inject({method:'POST',url:'/api/phase6/content-projects/1/items/5/prompt',headers});
+   assert.deepEqual(missing,[]);
+   assert.equal(result.statusCode,outcome==='success'?200:outcome==='project-locked'?409:503,result.body);
+   if(outcome!=='success')assert.equal(result.json().error,({ 'invalid-output':'AI_CONTENT_STUDIO_INVALID_GUIDANCE','provider-failure':'AI_PROVIDER_HTTP_503','project-locked':'CONTENT_PROJECT_NOT_READY'} as any)[outcome]);
+   assert.equal(generations,outcome==='project-locked'?0:1);
+   assert.equal(usageLogs,outcome==='project-locked'?0:1);assert.equal(quotas,outcome==='project-locked'?0:1);
+   if(outcome==='success'){
+     assert.equal(saved.executionMode,'AI_ASSISTED_PROMPT');assert.equal(saved.basePromptVersion,8);assert.equal(saved.selectedModel.model,'selected-prompt-model');
+     for(const text of [guidance,'Tersedia 100 layanan.','Pesan utama Strakom','LOCKED ASSET','GUARDRAIL WAJIB','gambar referensi terlampir #1'])assert.ok(saved.prompt.includes(text),text);
+   }else assert.equal(saved,null,'failed or locked generation must not overwrite the old prompt');
+   const reload=await app.inject({method:'GET',url:'/api/phase6/content-projects/1/items',headers});
+   assert.equal(reload.statusCode,200);assert.equal(generations,outcome==='project-locked'?0:1,'reading a saved prompt must not invoke AI');
+   if(outcome!=='success')assert.equal(reload.json().data[0].prompt_snapshot.prompt,oldPrompt.prompt);
+ }finally{await app.close();}
+});
