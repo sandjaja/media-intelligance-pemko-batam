@@ -345,3 +345,25 @@ test('H-1 invalid calendar dates are rejected before DB connection', async () =>
   }
   assert.equal(connected, false);
 });
+
+test('H-1 partial evidence reservation rolls back the batch claim atomically', async () => {
+  const statements: string[] = [];
+  const client = {
+    query: async (sql: string) => {
+      statements.push(sql);
+      if (sql.includes('INSERT INTO issue_linkage_h1_batches'))
+        return { rows: [{ id: 201 }], rowCount: 1 };
+      if (sql.includes('INSERT INTO issue_linkage_h1_evidence_ledger'))
+        return { rows: [{ id: 301 }], rowCount: 1 }; // only 1 of 2 refs reserved
+      return { rows: [], rowCount: 0 };
+    },
+    release: () => { statements.push('RELEASE'); },
+  };
+  const pool = { connect: async () => client } as unknown as Pool;
+  const evidence = [{ sourceType: 'online' as const, id: 7 }, { sourceType: 'social' as const, id: 8 }];
+  const result = await claimAndReserveH1Batch(pool, 1, '2026-10-15', h1Fingerprint(evidence), evidence);
+  assert.deepEqual(result, { claimed: false, id: null, status: 'evidence_already_reserved' });
+  assert.equal(statements.includes('ROLLBACK'), true);
+  assert.equal(statements.includes('COMMIT'), false);
+  assert.equal(statements.at(-1), 'RELEASE');
+});
