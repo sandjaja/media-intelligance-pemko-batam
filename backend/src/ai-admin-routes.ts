@@ -21,7 +21,7 @@ export async function registerAiAdminRoutes(app:FastifyInstance,pool:Pool,jwtSec
       request.aiAdminAuthz=c;
     }catch{if(reply.sent)return;return reply.code(401).send({error:'INVALID_ACCESS_TOKEN'});}
   };
-  const audit=async(request:FastifyRequest,action:string,id:any)=>{try{await pool.query('INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,$2,$3::jsonb)',[(request.aiAdminAuthz as any)?.userId||null,action,JSON.stringify({id})]);}catch{}};
+  const audit=async(request:FastifyRequest,action:string,id:any)=>{try{await pool.query('INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,$2,$3::jsonb)',[request.aiAdminAuthz?.id||null,action,JSON.stringify({id})]);}catch{}};
 
   app.get('/api/admin/ai/budget/pending-reservations',{preHandler:guard},async(request,reply)=>{
     const parsed=z.object({
@@ -205,7 +205,7 @@ export async function registerAiAdminRoutes(app:FastifyInstance,pool:Pool,jwtSec
   // Only super admins may adjust it. Historical reservations remain intact.
   app.get('/api/admin/ai/manual-balances',{preHandler:guard},async(_request,reply)=>{
     try{
-      const result=await pool.query(`SELECT p.id AS provider_id,p.code AS provider_code,
+      const result=await pool.query(`SELECT p.id AS provider_id,p.code AS provider_code,p.enabled AS provider_enabled,
         s.balance_usd,s.committed_baseline_usd,s.reason,s.created_at,
         COALESCE((SELECT SUM(CASE WHEN r.status='settled' THEN r.settled_usd
           WHEN r.status='reserved' THEN r.reserved_usd ELSE 0 END)
@@ -252,10 +252,14 @@ export async function registerAiAdminRoutes(app:FastifyInstance,pool:Pool,jwtSec
       await client.query(`INSERT INTO ai_provider_balance_snapshots
         (provider_id,balance_usd,committed_baseline_usd,reason,recorded_by)
         VALUES($1,$2,$3,$4,$5)`,[providerId,parsed.data.balanceUsd,committed.rows[0].usd,parsed.data.reason,
-        String((request.aiAdminAuthz as any)?.userId||'admin')]);
+        String(request.aiAdminAuthz?.id||'admin')]);
+      // Saving a positive balance explicitly activates this paid provider.
+      // Model choices, credentials, prices and execution-time budget guards are unchanged.
+      const providerEnabled=parsed.data.balanceUsd>0;
+      await client.query('UPDATE ai_providers SET enabled=$2,updated_at=NOW() WHERE id=$1',[providerId,providerEnabled]);
       await client.query('COMMIT');
       await audit(request,'AI_MANUAL_BALANCE_UPDATED',parsed.data.providerCode);
-      return {ok:true};
+      return {ok:true,provider_code:parsed.data.providerCode,provider_enabled:providerEnabled};
     }catch{await client.query('ROLLBACK');return reply.code(503).send({error:'AI_MANUAL_BALANCE_SAVE_FAILED'});}
     finally{client.release();}
   });

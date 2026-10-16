@@ -29,14 +29,14 @@ async function loadManualBalances(){
    const balance=p.balance_usd==null?'Belum diinput':'$'+Number(p.balance_usd).toFixed(4);
    const lastReason=p.reason?' · Alasan terakhir: '+esc(p.reason):'';
    const updated=p.created_at?' · Diperbarui: '+esc(new Date(p.created_at).toLocaleString('id-ID')):'';
-   return '<div class="rounded-lg border border-slate-700 p-3 space-y-2" data-manual-balance="'+esc(p.provider_code)+'"><div class="font-semibold">'+esc(names[p.provider_code]||p.provider_code)+'</div><div class="text-xs">Saldo saat input: '+balance+' · Sisa internal: '+remaining+lastReason+updated+'</div><label class="block text-xs">Saldo aktual USD<input data-balance-amount type="number" min="0" step="0.0001" value="'+(p.balance_usd==null?'':esc(p.balance_usd))+'" class="mt-1 w-full rounded border border-slate-600 p-2"></label><label class="block text-xs">Alasan pembaruan<input data-balance-reason maxlength="500" placeholder="Contoh: Top-up saldo provider" class="mt-1 w-full rounded border border-slate-600 p-2"></label><button type="button" data-balance-save class="rounded bg-cyan-700 px-3 py-2 text-xs font-bold">Simpan saldo</button></div>';
+   return '<div class="rounded-lg border border-slate-700 p-3 space-y-2" data-manual-balance="'+esc(p.provider_code)+'"><div class="font-semibold">'+esc(names[p.provider_code]||p.provider_code)+'</div><div class="text-xs">Saldo saat input: '+balance+' · Sisa internal: '+remaining+' · Status provider: '+(p.provider_enabled?'Aktif':'Nonaktif')+lastReason+updated+'</div><label class="block text-xs">Saldo aktual USD<input data-balance-amount type="number" min="0" step="0.0001" value="'+(p.balance_usd==null?'':esc(p.balance_usd))+'" class="mt-1 w-full rounded border border-slate-600 p-2"></label><label class="block text-xs">Alasan pembaruan<input data-balance-reason maxlength="500" placeholder="Contoh: Top-up saldo provider" class="mt-1 w-full rounded border border-slate-600 p-2"></label><button type="button" data-balance-save class="rounded bg-cyan-700 px-3 py-2 text-xs font-bold">Simpan saldo</button></div>';
   }).join('')||'Provider berbayar tidak ditemukan.';
  }catch(error){root.textContent='Gagal memuat saldo manual: '+error.message;}
 }
 function setupManualBalances(){
  const panel=document.getElementById('aiAdminPanel');if(!panel||document.getElementById('aiManualBalanceSection'))return;
  const section=document.createElement('details');section.id='aiManualBalanceSection';section.className='border-t border-slate-700 pt-4 mt-4';
- section.innerHTML='<summary class="cursor-pointer font-bold">Saldo Manual AI Berbayar</summary><p class="text-xs text-slate-400 mt-2">Masukkan saldo tersisa yang terlihat di akun provider. Saldo ini adalah input manual, bukan hasil API provider. Alasan minimal 5 karakter diperlukan sebagai jejak audit perubahan. Setelah disimpan, nilai saldo terakhir tetap tampil dan dapat dikoreksi.</p><div id="aiManualBalanceRows" class="grid gap-3 mt-3"></div>';
+ section.innerHTML='<summary class="cursor-pointer font-bold">Saldo Manual AI Berbayar</summary><p class="text-xs text-slate-400 mt-2">Masukkan saldo tersisa yang terlihat di akun provider. Saldo ini adalah input manual, bukan hasil API provider. Alasan minimal 5 karakter diperlukan sebagai jejak audit perubahan. Saldo positif otomatis mengaktifkan provider; saldo nol menonaktifkannya. Humas tetap memilih model di menu Mesin AI. Nilai saldo terakhir tetap tampil dan dapat dikoreksi.</p><div id="aiManualBalanceRows" class="grid gap-3 mt-3"></div>';
  panel.appendChild(section);
  section.addEventListener('toggle',()=>{if(section.open)loadManualBalances();});
  section.addEventListener('click',async event=>{
@@ -45,7 +45,7 @@ function setupManualBalances(){
   const raw=row.querySelector('[data-balance-amount]').value;
   const amount=Number(raw),reason=row.querySelector('[data-balance-reason]').value.trim();
   if(!raw||!Number.isFinite(amount)||amount<0||reason.length<5){alert('Isi saldo valid dan alasan minimal 5 karakter.');return;}
-  if(!confirm('Ganti saldo acuan provider dengan angka ini?'))return;
+  if(!confirm('Simpan saldo ini dan '+(amount>0?'aktifkan':'nonaktifkan')+' provider?'))return;
   button.disabled=true;
   try{
    const response=await fetch('/api/admin/ai/manual-balances',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify({providerCode:row.dataset.manualBalance,balanceUsd:amount,reason})});
