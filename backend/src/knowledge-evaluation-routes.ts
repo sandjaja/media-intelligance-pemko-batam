@@ -83,6 +83,7 @@ export async function registerKnowledgeEvaluationRoutes(app:FastifyInstance,pool
    const w=await cycle(ctx,id,client,true);if(!w)throw Error('KNOWLEDGE_CYCLE_NOT_FOUND');
    const prior=await latest(id,client);
    if((prior?String(prior.id):null)!==expectedVersion)throw Error('KNOWLEDGE_VERSION_CONFLICT');
+   if(!approve&&prior?.event_type===eventTypes[1])throw Error('KNOWLEDGE_APPROVED_LOCKED');
    if(approve&&(!prior||prior.event_type!==eventTypes[0]))throw Error('KNOWLEDGE_DRAFT_REQUIRED');
    if(approve&&(evaluation.summary.length<20||!evaluation.lessons.length))throw Error('KNOWLEDGE_REVIEW_INCOMPLETE');
    if(!approve&&prior?.event_type===eventTypes[0]&&JSON.stringify(prior.metadata.evaluation)===JSON.stringify(evaluation)&&!ai)throw Error('KNOWLEDGE_NO_CHANGES');
@@ -125,7 +126,7 @@ export async function registerKnowledgeEvaluationRoutes(app:FastifyInstance,pool
    const library=(request.query as any)?.view==='library';
    const ctx=request.knowledgeAuth!,w=await cycle(ctx,id.data.id);if(!w)return reply.code(404).send({error:'KNOWLEDGE_CYCLE_NOT_FOUND'});
    const source=await sources(w),evaluation=await latest(id.data.id,pool,library||!manager(ctx));
-   return {data:{source,...summarizeKnowledgeSources(source),saved:evaluationEvent(evaluation),canManage:manager(ctx)&&!library}};
+   return {data:{source,...summarizeKnowledgeSources(source),saved:evaluationEvent(evaluation),canManage:manager(ctx)&&!library&&evaluation?.event_type!==eventTypes[1]}};
   }catch(error){return fail(reply,error);}
  });
  app.put('/api/knowledge/cycles/:id/draft',{preHandler:auth},async(request,reply)=>{
@@ -151,6 +152,7 @@ export async function registerKnowledgeEvaluationRoutes(app:FastifyInstance,pool
   try{return await withHumasAnalysisLock(pool,'knowledge:'+id.data.id,async()=>{
    const w=await cycle(ctx,id.data.id);if(!w)throw Error('KNOWLEDGE_CYCLE_NOT_FOUND');
    const prior=await latest(id.data.id);if((prior?String(prior.id):null)!==body.data.expectedVersion)throw Error('KNOWLEDGE_VERSION_CONFLICT');
+   if(prior?.event_type===eventTypes[1])throw Error('KNOWLEDGE_APPROVED_LOCKED');
    const source=await sources(w),facts=summarizeKnowledgeSources(source),config=await loadHumasAiTask(pool,'monitoring_analysis');
    const result=await executeHumasAi(pool,{userId:Number(ctx.id),taskCode:'monitoring_analysis',config,prompt:config.prompt+`\n\nTUGAS KHUSUS KNOWLEDGE & EVALUATION: rangkum pembelajaran dari HASIL ANALISIS SIKLUS YANG SUDAH TERSIMPAN di bawah. Jangan menganalisis ulang berita, Gap, Strakom, Publikasi, atau Monitoring. Jangan mengubah fakta, metrik, OPD, wilayah atau kecukupan bukti. Hindari menyimpulkan kausalitas atau keberhasilan komunikasi jika bukti LIMITED/INSUFFICIENT. Rumuskan pelajaran yang spesifik dengan batas penerapannya. Jangan mengarang engagement, hasil lapangan, kutipan, atau fakta baru. Output satu objek JSON: {"summary":"ringkasan evaluasi","strengths":["..."],"weaknesses":["..."],"lessons":["pelajaran dan kondisi penerapannya"],"recommendations":["..."],"tags":["..."]}. Maksimal 10 item tiap array, 1200 karakter tiap item, tag maksimal 80 karakter, summary maksimal 4000 karakter.\nDATA HASIL TERSIMPAN:\n`+JSON.stringify({source,metrics:facts.metrics})});
    const parsed=knowledgeEvaluationSchema.safeParse(result);if(!parsed.success)throw Error('AI_KNOWLEDGE_INVALID_RESULT');

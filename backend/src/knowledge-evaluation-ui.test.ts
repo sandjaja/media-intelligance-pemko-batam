@@ -56,9 +56,9 @@ test('print all includes approved lessons beyond the visible page, retains searc
  const pending=x.window.printKnowledgeLibrary({query:'organisasi'});assert.equal(x.opened(),1);await pending;
  assert.equal(x.requests.length,2);assert.equal(x.printed(),1);
  const html=x.writes.at(-1)!;
- for(const value of ['Isu 21','Pelajaran khusus isu 21','Kesbangpol','Pemerintah Kota Batam','logo.png','@page{size:A4 portrait','0 berita','Verifikasi kondisi terbaru'])assert.ok(html.includes(value),value);
+ for(const value of ['Isu 21','Pelajaran khusus isu 21','Kesbangpol','Pemerintah Kota Batam','logo.png','@page{size:A4 landscape','Belum memadai','Verifikasi kondisi terbaru'])assert.ok(html.includes(value),value);
  assert.ok(!html.includes('Isu 22'));assert.ok(!html.includes('<script>'));assert.ok(html.includes('&lt;script&gt;'));
- assert.equal((html.match(/<article class="page">/g)||[]).length,21);
+ assert.equal((html.match(/<tbody>/g)||[]).length,1);assert.equal((html.match(/<tr>/g)||[]).length,22);assert.ok(!html.includes('<article class="page">'));
 });
 
 test('single issue print reads the approved library version and rejects unapproved drafts',async()=>{
@@ -73,4 +73,14 @@ test('blocked popup and failed API do not produce a misleading printed report',a
  const x=printFixture(async()=>new Response('',{status:503}));
  x.window.open=()=>null;await assert.rejects(x.window.printKnowledgeLibrary(),/Popup cetak diblokir/);assert.equal(x.requests.length,0);
  x.window.open=()=>x.popup;await assert.rejects(x.window.printKnowledgeLibrary(),/belum dapat dimuat/);assert.equal(x.printed(),0);assert.ok(x.writes.at(-1)!.includes('Cetak belum berhasil'));
+});
+
+test('approved evaluation is read-only even when a stale response still permits management',()=>{
+ const x=fixture();x.state.detail={...detail({}),canManage:true,saved:{status:'APPROVED',evaluation:{summary:'Evaluasi disetujui',lessons:['Pelajaran disetujui']},ai:{provider:'gemini',model:'selected-model',promptVersion:1}}};x.renderDetail();
+ assert.ok(!x.root.innerHTML.includes('<textarea'));
+ assert.ok(!x.root.innerHTML.includes('data-ke-ai'));
+ assert.ok(!x.root.innerHTML.includes('data-ke-save'));
+ assert.ok(x.root.innerHTML.includes('Evaluasi disetujui dan dikunci.'));
+ assert.ok(x.root.innerHTML.includes('selected-model'));
+ assert.ok(x.root.innerHTML.includes('monitoring_analysis'));
 });

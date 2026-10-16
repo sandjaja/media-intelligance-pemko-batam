@@ -61,13 +61,15 @@ async function fixture(options:{role?:string;foreign?:boolean;noMonitoring?:bool
 }
 const draft=(app:any,expectedVersion:string|null,e=evaluation)=>app.inject({method:'PUT',url:'/api/knowledge/cycles/10/draft',headers,payload:{expectedVersion,evaluation:e}});
 
-test('closed-cycle evaluation supports draft, approval, library, and reviewed-version preservation',async()=>{
+test('closed-cycle evaluation supports draft, approval, library, and approval locking',async()=>{
  const x=await fixture();try{
   const initial=await x.app.inject({method:'GET',url:'/api/knowledge/cycles/10',headers});assert.equal(initial.statusCode,200,initial.body);assert.equal(initial.json().data.metrics.evidenceSufficiency,'LIMITED');assert.equal(initial.json().data.saved,null);
   const saved=await draft(x.app,null);assert.equal(saved.statusCode,200,saved.body);const version=saved.json().data.version;
   const approved=await x.app.inject({method:'POST',url:'/api/knowledge/cycles/10/approve',headers,payload:{expectedVersion:version}});assert.equal(approved.statusCode,200,approved.body);assert.equal(approved.json().data.status,'APPROVED');
   const library=await x.app.inject({method:'GET',url:'/api/knowledge/cycles?view=library',headers});assert.equal(library.json().data[0].evaluation.summary,evaluation.summary);
-  const revision=await draft(x.app,approved.json().data.version,{...evaluation,summary:'Draft revisi yang belum disetujui oleh Humas.'});assert.equal(revision.statusCode,200,revision.body);
+  const revision=await draft(x.app,approved.json().data.version,{...evaluation,summary:'Draft revisi yang belum disetujui oleh Humas.'});assert.equal(revision.statusCode,409,revision.body);assert.equal(revision.json().error,'KNOWLEDGE_APPROVED_LOCKED');
+  const lockedAi=await x.app.inject({method:'POST',url:'/api/knowledge/cycles/10/summarize',headers,payload:{expectedVersion:approved.json().data.version}});assert.equal(lockedAi.statusCode,409);assert.equal(lockedAi.json().error,'KNOWLEDGE_APPROVED_LOCKED');assert.ok(!x.queries.some(q=>q.sql.includes('ai_humas_model_selections')));
+  const locked=await x.app.inject({method:'GET',url:'/api/knowledge/cycles/10',headers});assert.equal(locked.json().data.canManage,false);
   x.setRole('executive');const reader=await x.app.inject({method:'GET',url:'/api/knowledge/cycles/10',headers});assert.equal(reader.json().data.saved.evaluation.summary,evaluation.summary);assert.equal(reader.json().data.canManage,false);
   assert.ok(!x.queries.some(q=>/^UPDATE (issues|issue_workflows|issue_communication_gap|communication_strategies|issue_publication)/.test(q.sql)));
  }finally{await x.app.close();}
