@@ -127,6 +127,14 @@ app.post('/api/intelligence/issue-linkage-inbox/batch-h1/validate',{preHandler:a
   ready:false,
  });
  if(!check.valid)return reply.code(409).send({error:check.reason,date:plan.date,plannedFingerprint:plan.plannedFingerprint});
+ const prior=(await pool.query(`SELECT id,status,request_count,started_at,finished_at
+  FROM issue_linkage_h1_batches
+  WHERE organization_id=$1 AND news_date=$2::date AND fingerprint=$3
+  LIMIT 1`,[organizationId,plan.date,plan.plannedFingerprint])).rows[0];
+ if(prior)return reply.code(409).send({
+  error:'H1_BATCH_ALREADY_RECORDED',batchStatus:prior.status,batchId:Number(prior.id),
+  ready:false,
+ });
  return {data:{valid:true,date:plan.date,plannedFingerprint:plan.plannedFingerprint,
   plannedGroupCount:plan.plannedGroupCount,evidenceCount:plan.plannedGroups.reduce((n,g)=>n+g.evidence.length,0),
   ready:false,reason:'EXECUTION_ENDPOINT_NOT_ENABLED'}};
