@@ -113,7 +113,8 @@ SELECT id,keyword,role,priority FROM ranked WHERE (role='PRIMARY' AND rn=1) OR (
     JOIN ai_providers p ON p.id=m.provider_id
     WHERE s.task_code='gap_analysis' LIMIT 1`);
   const gapModel=gapSelection.rows[0];
-  if(gapModel && (!gapModel.provider_enabled || !gapModel.model_enabled))
+  if(!gapModel)return reply.code(409).send({error:'AI_GAP_MODEL_SELECTION_MISSING'});
+  if(!gapModel.provider_enabled || !gapModel.model_enabled)
     return reply.code(409).send({error:'AI_GAP_SELECTED_MODEL_DISABLED'});
   if(gapModel && gapModel.provider_code!=='gemini')
     return reply.code(409).send({error:'AI_GAP_SELECTED_MODEL_RUNTIME_NOT_READY'});
