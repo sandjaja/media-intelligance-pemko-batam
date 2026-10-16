@@ -26,9 +26,20 @@ export function createExecutiveBriefCronHandler(dependencies: {
 } = {
   createPool: databaseUrl => new Pool({ connectionString: databaseUrl, max: 1 }),
   runDryRun: (pool, now) => runScheduledExecutiveBrief(pool, now, { dryRun: true }),
-  runLive: (pool, now) => runScheduledExecutiveBrief(pool, now, {
-    dryRun: false, execute: executeAuthorizedExecutiveBrief,
-  }),
+  runLive: async (pool, now) => {
+    // Never run the brief independently of the main collection scheduler.
+    const { rows } = await pool.query(
+      "SELECT enabled, run_time FROM collection_scheduler_config WHERE id=1",
+    );
+    const main = rows[0];
+    if (!main?.enabled) return { status: 'disabled', reason: 'MAIN_SCHEDULER_DISABLED' };
+    if (String(main.run_time).slice(0,5) !== '08:00') {
+      return { status: 'not_due', reason: 'MAIN_SCHEDULER_TIME_MISMATCH' };
+    }
+    return runScheduledExecutiveBrief(pool, now, {
+      dryRun: false, execute: executeAuthorizedExecutiveBrief,
+    });
+  },
 }) {
 return async function handler(req: IncomingMessage, res: ServerResponse) {
   if (req.method !== 'GET') return json(res, 405, { error: 'METHOD_NOT_ALLOWED' });
