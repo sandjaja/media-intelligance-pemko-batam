@@ -39,7 +39,7 @@ export async function extractDynamicIssueClaims(evidence:IssueAngleEvidence[],co
 
  const fallback=(reason='UNKNOWN')=>{const r=extractIssueAngles(evidence);return{...r,mode:'deterministic-fallback' as const,fallbackReason:reason,claims:r.angles.map(a=>({...a,claim:a.label,confidence:0,evidenceIds:a.evidence.map(x=>`${x.source}:${x.id}`)}))}};
  if(!evidence.length)return fallback('NO_VALID_EVIDENCE');if(!pool)return fallback('GEMINI_DATABASE_POOL_MISSING');
- let key:string,model:string;try{({key,model}=await prepareGeminiRequest(pool));}catch{return fallback('GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}
+ let key:string,model:string;try{({key,model}=await prepareGeminiRequest(pool,'issue_claim_extraction'));}catch{return fallback('GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}
  const source=evidence.slice(0,40).map(e=>({evidenceId:ref(e),source:e.source,title:clip(e.title,500),text:clip([e.summary,e.content,e.body_text].filter(Boolean).join(' '))}));
  try{
   const prompt=`Anda adalah Dynamic Communication Angle Extractor untuk analisis komunikasi pemerintah. Analisis evidence media dari SUDUT KOMUNIKASI, bukan hanya mencari masalah. Setiap evidence valid dapat membawa informasi, capaian, concern, risiko, dampak, tuntutan, ketidakpastian, atau sudut komunikasi lain yang relevan.
