@@ -402,3 +402,20 @@ test('H-1 continuation never reuses reserved evidence after keyword or OPD chang
   assert.deepEqual(plan.plannedGroups[0].evidence.map(e => e.id).sort(), [3, 4]);
   assert.equal(plan.planCheck.valid, true);
 });
+
+test('H-1 continuation retains reservations after uncertain or failed batch and never rewrites ledger', () => {
+  const now = new Date('2026-10-16T04:00:00Z');
+  const evidence = [
+    { sourceType: 'online' as const, id: 31, occurredAt: '2026-10-15T10:00:00Z', primaryKeyword: 'sampah', opdId: 4 },
+    { sourceType: 'social' as const, id: 32, occurredAt: '2026-10-15T10:00:00Z', primaryKeyword: 'sampah', opdId: 4 },
+    { sourceType: 'online' as const, id: 41, occurredAt: '2026-10-15T10:00:00Z', primaryKeyword: 'banjir', opdId: 5 },
+    { sourceType: 'social' as const, id: 42, occurredAt: '2026-10-15T10:00:00Z', primaryKeyword: 'banjir', opdId: 5 },
+  ];
+  const reserved = new Set(['online:31', 'social:32']);
+  const before = [...reserved].sort();
+  const plan = buildH1ContinuationPlan(evidence, reserved, now);
+  assert.deepEqual([...reserved].sort(), before);
+  assert.equal(plan.alreadyReservedCount, 2);
+  assert.equal(plan.plannedGroupCount, 1);
+  assert.deepEqual(plan.plannedGroups[0].evidence.map(e => e.id).sort(), [41, 42]);
+});
