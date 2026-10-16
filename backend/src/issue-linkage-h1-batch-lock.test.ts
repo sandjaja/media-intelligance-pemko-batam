@@ -131,3 +131,13 @@ test('shared H-1 planner excludes date discrepancies before grouping', () => {
   assert.equal(plan.plannedGroupCount, 1);
   assert.equal(plan.plannedGroups[0].evidence.length, 2);
 });
+
+test('H-1 different fingerprint collision reports the active batch', async () => {
+  const pool = { query: async (sql: string) => {
+    if (sql.includes('INSERT INTO')) return { rows: [] };
+    if (sql.includes('AND fingerprint=$3')) return { rows: [] };
+    return { rows: [{ id: 88 }] };
+  } } as unknown as Pool;
+  const result = await claimIssueLinkageH1Batch(pool, 1, '2026-10-15', 'new-fingerprint', 3);
+  assert.deepEqual(result, { claimed: false, id: 88, status: 'another_batch_running' });
+});
