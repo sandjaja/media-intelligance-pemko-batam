@@ -98,7 +98,7 @@ ${JSON.stringify(source)}`
    const ev=ids.map((id:string)=>byId.get(id)).filter(Boolean) as IssueAngleEvidence[];
    return{key:type,label:TYPES[type],claim:String(c.claim||'').trim().slice(0,500),confidence:Math.max(0,Math.min(1,Number(c.confidence)||0)),evidenceIds:ids,evidenceCount:ev.length,evidence:ev.map(e=>({id:String(e.id),source:e.source,title:e.title??null})),anchors:[]};
   }).filter((c:DynamicClaim)=>c.claim.length>=8&&c.evidenceIds.length>0&&c.confidence>=0.45);
-  if(!claims.length)return fallback('AI_RETURNED_NO_VALID_CLAIMS');
+  if(!claims.length)throw new Error('AI_RETURNED_NO_VALID_CLAIMS');
   const ga=parsed?.geographicAnalysis&&typeof parsed.geographicAnalysis==='object'?parsed.geographicAnalysis:null;
   const geographicAnalysis=ga?{
    scopeSummary:String(ga.scopeSummary||'').trim().slice(0,500),
