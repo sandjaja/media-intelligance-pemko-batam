@@ -120,6 +120,17 @@ export function publicationDateNeedsReview(
   return Math.abs(stored.getTime() - embedded.getTime()) > 2 * 86400000;
 }
 
+/** Include classification in the plan identity: changing a keyword or OPD
+ * must invalidate a previously prepared batch even if evidence IDs are unchanged.
+ */
+export function h1ClassifiedPlanFingerprint(
+  groups: Array<{ primaryKeyword: string; opdId: number | null; evidence: H1EvidenceRef[] }>,
+): string {
+  const rows = groups.flatMap(group => group.evidence.map(e =>
+    [e.sourceType, e.id, group.primaryKeyword, group.opdId ?? 'none'].join('|')));
+  return createHash('sha256').update(JSON.stringify([...new Set(rows)].sort())).digest('hex');
+}
+
 /** Verify that a submitted H-1 plan still matches the server's freshly computed
  * bounded evidence set before claiming a DB lock or spending Gemini quota.
  */
