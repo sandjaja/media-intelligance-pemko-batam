@@ -228,6 +228,11 @@ app.post('/api/intelligence/issue-linkage-inbox/batch-h1/simulate',{preHandler:a
  const check=validateH1ExecutionPlan(body.date,body.plannedFingerprint,plan.date,
   plan.plannedGroups.flatMap(g=>g.evidence) as any[],plan.plannedFingerprint);
  if(!check.valid)return reply.code(409).send({error:check.reason,date:plan.date,plannedFingerprint:plan.plannedFingerprint});
+ // Simulation must not report a runnable group when all evidence was reserved.
+ if(!plan.planCheck.valid)return reply.code(409).send({
+  error:plan.planCheck.reason||'H1_PLAN_SIZE_INVALID',date:plan.date,
+  plannedGroupCount:plan.plannedGroupCount,ready:false,executed:false,geminiCalls:0,
+ });
  // Simulated responses deliberately contain no generated content or AI usage.
  return {data:{mode:'simulation',ready:false,executed:false,geminiCalls:0,quotaUsed:0,
   date:plan.date,plannedFingerprint:plan.plannedFingerprint,alreadyReservedCount:plan.alreadyReservedCount,
