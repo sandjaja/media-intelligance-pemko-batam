@@ -86,7 +86,18 @@ export async function inspectExecutiveBriefSchedule(
   return { due: true, date, reason: 'due' };
 }
 
-/** Enable only after the actual runner is wired and audited; currently safe to disable only. */
+/** Explicit opt-in. Caller must verify that a real clock trigger is available first. */
+export async function enableExecutiveBriefSchedule(pool: Pick<Pool, 'query'>): Promise<ExecutiveBriefSchedule> {
+  const { rows } = await pool.query(
+    `UPDATE executive_brief_schedule_settings
+     SET enabled=TRUE,updated_at=now() WHERE id=1 AND timezone='Asia/Jakarta'
+     RETURNING enabled,hour_wib,minute_wib,timezone,updated_at`,
+  );
+  if (!rows[0]) throw new Error('EXECUTIVE_BRIEF_SCHEDULE_MISSING');
+  return rows[0];
+}
+
+/** Disabling is always allowed, even if the cron trigger is unavailable. */
 export async function disableExecutiveBriefSchedule(pool: Pick<Pool, 'query'>): Promise<ExecutiveBriefSchedule> {
   const { rows } = await pool.query(
     `UPDATE executive_brief_schedule_settings
