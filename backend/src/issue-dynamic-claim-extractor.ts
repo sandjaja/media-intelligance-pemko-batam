@@ -51,7 +51,9 @@ export async function extractDynamicIssueClaims(evidence:IssueAngleEvidence[],co
  try{await reserveGeminiDailyRequest(pool,model,'issue_claim_extraction');}catch{if(attempt+1<models.length)continue;return fallback('GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}
  const startedAt=Date.now();
  try{
-  const prompt=`\${basePrompt}\n\nINSTRUKSI TEKNIS SUBANALISIS (wajib mengikuti arahan dasar di atas):\nAnda adalah Dynamic Communication Angle Extractor untuk analisis komunikasi pemerintah. Analisis evidence media dari SUDUT KOMUNIKASI, bukan hanya mencari masalah. Setiap evidence valid dapat membawa informasi, capaian, concern, risiko, dampak, tuntutan, ketidakpastian, atau sudut komunikasi lain yang relevan.
+  const prompt=`${basePrompt}
+
+INSTRUKSI TEKNIS SUBANALISIS (wajib mengikuti arahan dasar di atas):\nAnda adalah Dynamic Communication Angle Extractor untuk analisis komunikasi pemerintah. Analisis evidence media dari SUDUT KOMUNIKASI, bukan hanya mencari masalah. Setiap evidence valid dapat membawa informasi, capaian, concern, risiko, dampak, tuntutan, ketidakpastian, atau sudut komunikasi lain yang relevan.
 
 TUJUAN:
 - Representasikan substansi utama pemberitaan yang penting bagi komunikasi pemerintah.
