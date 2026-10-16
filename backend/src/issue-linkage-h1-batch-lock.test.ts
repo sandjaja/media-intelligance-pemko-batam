@@ -334,3 +334,14 @@ test('H-1 duplicate evidence references are rejected before any DB transaction',
   assert.equal(result.status, 'invalid_evidence_plan');
   assert.equal(connected, false);
 });
+
+test('H-1 invalid calendar dates are rejected before DB connection', async () => {
+  let connected = false;
+  const pool = { connect: async () => { connected = true; throw new Error('must_not_connect'); } } as unknown as Pool;
+  const evidence = [{ sourceType: 'online' as const, id: 9 }];
+  for (const date of ['2026-02-30', '2026-13-01', '2026-1-05', 'invalid']) {
+    const result = await claimAndReserveH1Batch(pool, 1, date, h1Fingerprint(evidence), evidence);
+    assert.equal(result.status, 'invalid_news_date');
+  }
+  assert.equal(connected, false);
+});
