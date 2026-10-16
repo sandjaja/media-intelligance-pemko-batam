@@ -17,6 +17,13 @@
       }
     },
     {
+      "src": "backend/src/cron-executive-brief.ts",
+      "use": "@vercel/node",
+      "config": {
+        "maxDuration": 30
+      }
+    },
+    {
       "src": "backend/src/vercel.ts",
       "use": "@vercel/node"
     },
@@ -65,6 +72,10 @@
     {
       "src": "/api/cron/collection",
       "dest": "/backend/src/cron-collection.ts"
+    },
+    {
+      "src": "/api/cron/executive-brief",
+      "dest": "/backend/src/cron-executive-brief.ts"
     },
     {
       "src": "/health(?:/.*)?",
