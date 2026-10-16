@@ -90,7 +90,7 @@ SELECT id,keyword,role,priority FROM ranked WHERE (role='PRIMARY' AND rn=1) OR (
   if(String(issue.status||'').toLowerCase()!=='active')return reply.code(409).send({error:'COMMUNICATION_GAP_REQUIRES_ACTIVE_ISSUE',issue:{id:Number(issue.id),title:issue.title,status:issue.status}});
   // Reuse the current cycle's existing analysis on ordinary GET requests.
   // A page refresh must not automatically repeat potentially billable AI calls.
-  const savedGap=(await pool.query(`SELECT s.result,w.id workflow_id,w.cycle_number,s.analyzed_at
+  const savedGap=(await pool.query(`SELECT s.result,s.signature,w.id workflow_id,w.cycle_number,s.analyzed_at
     FROM issue_workflows w JOIN issue_communication_gap_snapshots s ON s.workflow_id=w.id
     WHERE w.issue_id=$1 AND s.organization_id=$2 AND w.workflow_status<>'CLOSED'
     ORDER BY w.cycle_number DESC,w.id DESC LIMIT 1`,[issueId,organizationId])).rows[0];
