@@ -33,7 +33,14 @@ root.querySelectorAll('[data-view-issue]').forEach(b=>b.addEventListener('click'
    Number(plan.estimatedMinimumGeminiCalls||0)+' permintaan Gemini.\n\n'+
    'Analisis menggunakan kuota Gemini. Gunakan secara bijaksana.\n'+
    'Tahap ini hanya memeriksa rencana dan tidak memakai kuota.';
-  if(!plan.planValid||!count){window.alert(message+'\n\nTidak ada kelompok yang siap diproses.');return}
+  const d=plan.diagnostic||{};
+  const detail='\n\nDiagnostik data: '+Number(d.snapshotEvidenceCount||0)+' evidence dalam snapshot; '+
+   Number(d.withPublicationDate||0)+' memiliki tanggal valid; '+
+   Number(d.withPrimaryKeyword||0)+' memiliki Primary Keyword; '+
+   Number(d.selectedYesterdayCount||0)+' berita H-1; '+
+   Number(d.selectedGroupCount||0)+' kelompok awal; '+
+   Number(d.eligibleGroupCount||0)+' kelompok memenuhi syarat.';
+  if(!plan.planValid||!count){window.alert(message+detail+'\n\nTidak ada kelompok yang siap diproses.');return}
   const preflight=await api('/intelligence/issue-linkage-inbox/batch-h1/validate',{
    method:'POST',body:JSON.stringify({date:plan.date,plannedFingerprint:plan.plannedFingerprint}),
   });
