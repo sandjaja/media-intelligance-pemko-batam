@@ -105,7 +105,7 @@ test('Executive Brief activation changes only its own schedule row', async () =>
   const db = { query: async (sql: string) => {
     assert.match(sql, /UPDATE executive_brief_schedule_settings/);
     assert.match(sql, /enabled=TRUE/);
-    assert.match(sql, /timezone='Asia\\/Jakarta'/);
+    assert.ok(sql.includes("timezone='Asia/Jakarta'"));
     assert.doesNotMatch(sql, /collection_scheduler/);
     return { rows: [{ enabled: true, hour_wib: 6, minute_wib: 30, timezone: 'Asia/Jakarta' }] };
   } };
