@@ -139,8 +139,9 @@ export function validateH1ExecutionPlan(
   expectedFingerprint: string,
   actualDate: string,
   plannedEvidence: H1EvidenceRef[],
+  classifiedFingerprint?: string,
 ): { valid: boolean; reason: string | null; fingerprint: string } {
-  const fingerprint = h1Fingerprint(plannedEvidence);
+  const fingerprint = classifiedFingerprint ?? h1Fingerprint(plannedEvidence);
   if (!/^20\\d{2}-\\d{2}-\\d{2}$/.test(expectedDate) || expectedDate !== actualDate) {
     return { valid: false, reason: 'H1_DATE_CHANGED', fingerprint };
   }
