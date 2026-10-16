@@ -25,3 +25,23 @@ export async function listGeminiFallbackModels(pool: Pick<Pool, 'query'>): Promi
   );
   return result.rows.map((row: any) => ({ model: String(row.model), key: decryptIntegrationCredential(row.credential_ciphertext) }));
 }
+
+/** Exact Humas-selected Gemini model; never substitute a different Gemini model. */
+export async function loadSelectedHumasGeminiModel(pool: Pick<Pool, 'query'>, taskCode: string): Promise<{key:string;model:string}> {
+  const result = await pool.query(
+    `SELECT p.code AS provider_code,p.enabled AS provider_enabled,m.code AS model,
+       m.enabled AS model_enabled,c.credential_ciphertext
+     FROM ai_humas_model_selections s
+     JOIN ai_models m ON m.id=s.model_id
+     JOIN ai_providers p ON p.id=m.provider_id
+     LEFT JOIN ai_provider_credentials c ON c.provider_id=p.id
+     WHERE s.task_code=$1 LIMIT 1`,[taskCode]);
+  const row=result.rows[0];
+  if(!row)throw new Error('AI_HUMAS_MODEL_SELECTION_MISSING');
+  if(row.provider_code!=='gemini')throw new Error('AI_HUMAS_SELECTED_PROVIDER_NOT_GEMINI');
+  if(!row.provider_enabled||!row.model_enabled)throw new Error('AI_HUMAS_SELECTED_MODEL_DISABLED');
+  if(!row.credential_ciphertext)throw new Error('AI_HUMAS_GEMINI_CREDENTIAL_MISSING');
+  const key=decryptIntegrationCredential(row.credential_ciphertext);
+  if(!key)throw new Error('AI_HUMAS_GEMINI_CREDENTIAL_INVALID');
+  return {key,model:String(row.model)};
+}
