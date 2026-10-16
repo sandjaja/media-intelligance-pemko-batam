@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
-import { h1Fingerprint, h1ClassifiedPlanFingerprint, isSafeH1Group, buildH1BoundedPlan, buildH1ContinuationPlan, validateH1ExecutionPlan, inboxContextFingerprint, selectYesterdayWibEvidence, groupH1Evidence, publicationDateNeedsReview, claimIssueLinkageH1Batch, claimAndReserveH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
+import { h1Fingerprint, h1ClassifiedPlanFingerprint, isSafeH1Group, buildH1BoundedPlan, buildH1ContinuationPlan, buildH1GeminiGroupPrompt, validateH1GeminiGroupResult, validateH1ExecutionPlan, inboxContextFingerprint, selectYesterdayWibEvidence, groupH1Evidence, publicationDateNeedsReview, claimIssueLinkageH1Batch, claimAndReserveH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
 
 test('H-1 fingerprint is independent of evidence ordering and duplicate refs', () => {
   const a = [{ sourceType: 'online' as const, id: 7 }, { sourceType: 'social' as const, id: 3 }];
@@ -418,4 +418,19 @@ test('H-1 continuation retains reservations after uncertain or failed batch and 
   assert.equal(plan.alreadyReservedCount, 2);
   assert.equal(plan.plannedGroupCount, 1);
   assert.deepEqual(plan.plannedGroups[0].evidence.map(e => e.id).sort(), [41, 42]);
+});
+
+test('Gemini H-1 prompt is bounded and validated output cannot invent evidence', () => {
+  const group = { primaryKeyword:'sampah',opdId:7,evidence:[
+    {sourceType:'online' as const,id:11,opdId:7,title:'Berita A',summary:'Ringkasan A'},
+    {sourceType:'social' as const,id:12,opdId:7,title:'Berita B',summary:'Ringkasan B'},
+  ] };
+  const prompt = buildH1GeminiGroupPrompt(group);
+  assert.ok(prompt.includes('online:11'));
+  assert.ok(prompt.length <= 12000);
+  const valid = {summary:'Dua laporan terkait sampah',issueSignals:['laporan berulang'],
+    riskFactors:[],suggestedAction:'Verifikasi ke OPD',evidenceRefs:['online:11','social:12']};
+  assert.deepEqual(validateH1GeminiGroupResult(group,valid),valid);
+  assert.throws(()=>validateH1GeminiGroupResult(group,{...valid,evidenceRefs:['online:999']}),/H1_GEMINI_INVALID_EVIDENCE_REFS/);
+  assert.throws(()=>validateH1GeminiGroupResult(group,{...valid,summary:''}),/H1_GEMINI_INVALID_RESULT/);
 });
