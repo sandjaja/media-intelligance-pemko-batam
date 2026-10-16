@@ -21,6 +21,15 @@ export type H1GeminiGroup = {
 export async function analyzeReservedH1Groups(
   pool: Pool,
   groups: H1GeminiGroup[],
+  onValidatedGroup: (result: {
+    groupIndex: number;
+    primaryKeyword: string;
+    opdId: number | null;
+    analysis: ReturnType<typeof validateH1GeminiGroupResult>;
+    model: string;
+    usage: { inputTokens: number; outputTokens: number };
+    latencyMs: number;
+  }) => Promise<void>,
 ): Promise<Array<{
   primaryKeyword: string;
   opdId: number | null;
@@ -29,6 +38,7 @@ export async function analyzeReservedH1Groups(
   usage: { inputTokens: number; outputTokens: number };
   latencyMs: number;
 }>> {
+  if (typeof onValidatedGroup !== 'function') throw new Error('H1_RESULT_PERSISTENCE_REQUIRED');
   if (groups.length < 1 || groups.length > 5) throw new Error('H1_INVALID_GROUP_COUNT');
   // Validate all groups before reserving even one Gemini request.
   const prompts = groups.map(buildH1GeminiGroupPrompt);
@@ -48,14 +58,18 @@ export async function analyzeReservedH1Groups(
       provider: 'gemini', model, apiKey: key, prompt: prompts[i], timeoutMs: 60000,
     });
     const analysis = validateH1GeminiGroupResult(groups[i], response.data);
-    results.push({
+    const validated = {
       primaryKeyword: groups[i].primaryKeyword,
       opdId: groups[i].opdId,
       analysis,
       model,
       usage: response.usage,
       latencyMs: response.latencyMs,
-    });
+    };
+    // Persist each verified response immediately. A later provider failure must not
+    // discard earlier successful analysis or trigger automatic replay.
+    await onValidatedGroup({ groupIndex: i, ...validated });
+    results.push(validated);
   }
   return results;
 }
