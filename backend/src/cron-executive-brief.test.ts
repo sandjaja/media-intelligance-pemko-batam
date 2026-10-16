@@ -19,7 +19,7 @@ test('Executive Brief cron does not allow mutation methods', () => {
   assert.equal(isAuthorizedExecutiveBriefCron('PUT', 'Bearer token', 'token'), false);
 });
 
-import handler from './cron-executive-brief.js';
+import handler, { createExecutiveBriefCronHandler } from './cron-executive-brief.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 async function invoke(method: string, authorization?: string) {
@@ -67,4 +67,42 @@ test('HTTP: 200 dry-run contract is exercised via isolated runner without real D
   const result = await runScheduledExecutiveBrief(fakePool as never, new Date('2026-10-16T23:30:00Z'), { dryRun: true });
   assert.equal(result.status, 'due');
   assert.equal(result.dry_run, true);
+});
+
+test('HTTP: authorized GET returns 200 dry-run with injected pool and no AI call', async () => {
+  const previousSecret = process.env.CRON_SECRET;
+  const previousDatabase = process.env.DATABASE_URL;
+  process.env.CRON_SECRET = 'test-secret-only';
+  process.env.DATABASE_URL = 'postgresql://mock-only';
+  let closed = false;
+  let executions = 0;
+  try {
+    const injected = createExecutiveBriefCronHandler({
+      createPool: () => ({
+        query: async () => { throw new Error('UNEXPECTED_DB_QUERY'); },
+        end: async () => { closed = true; },
+      }) as never,
+      runDryRun: async () => {
+        executions++;
+        return { date: '2026-10-17', status: 'disabled', dry_run: true };
+      },
+    });
+    const request = { method: 'GET', headers: { authorization: 'Bearer test-secret-only' } } as unknown as IncomingMessage;
+    let status = 200;
+    let payload: Record<string, unknown> = {};
+    const response = {
+      statusCode: 200,
+      setHeader() {},
+      end(body: string) { status = this.statusCode; payload = JSON.parse(body); },
+    } as ServerResponse & { statusCode: number };
+    await injected(request, response);
+    assert.equal(status, 200);
+    assert.equal(executions, 1);
+    assert.equal(closed, true);
+    assert.equal((payload.data as { dry_run: boolean }).dry_run, true);
+    assert.equal(payload.scheduler_connected, false);
+  } finally {
+    if (previousSecret === undefined) delete process.env.CRON_SECRET; else process.env.CRON_SECRET = previousSecret;
+    if (previousDatabase === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previousDatabase;
+  }
 });
