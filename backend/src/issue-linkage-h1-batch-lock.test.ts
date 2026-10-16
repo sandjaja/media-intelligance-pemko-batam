@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
-import { h1Fingerprint, claimIssueLinkageH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
+import { h1Fingerprint, inboxContextFingerprint, claimIssueLinkageH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
 
 test('H-1 fingerprint is independent of evidence ordering and duplicate refs', () => {
   const a = [{ sourceType: 'online' as const, id: 7 }, { sourceType: 'social' as const, id: 3 }];
@@ -32,4 +32,12 @@ test('H-1 batch completion requires a running status', async () => {
   }) } as unknown as Pool;
   assert.equal(await finishIssueLinkageH1Batch(pool, 41, 'completed', 2), true);
   assert.equal(await finishIssueLinkageH1Batch(pool, 41, 'failed', 2), false);
+});
+
+test('inbox cache fingerprint includes normalized keyword and sorted evidence refs', () => {
+  assert.equal(inboxContextFingerprint(' Sampah! ', [
+    { sourceType: 'social', id: 4 }, { sourceType: 'online', id: 2 },
+  ]), 'sampah|online:2|social:4');
+  assert.notEqual(inboxContextFingerprint('Sampah', [{ sourceType: 'online', id: 2 }]),
+    h1Fingerprint([{ sourceType: 'online', id: 2 }]));
 });
