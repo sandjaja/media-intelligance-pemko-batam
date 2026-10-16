@@ -93,7 +93,7 @@ test('HTTP: authorized GET returns 200 dry-run with injected pool and no AI call
     const response = {
       statusCode: 200,
       setHeader() {},
-      end(body: string) { status = this.statusCode; payload = JSON.parse(body); },
+      end(body: string) { status = response.statusCode; payload = JSON.parse(body); },
     } as unknown as ServerResponse & { statusCode: number };
     await injected(request, response);
     assert.equal(status, 200);
