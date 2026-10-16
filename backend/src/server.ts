@@ -491,6 +491,17 @@ app.post('/api/admin/executive-brief/generate',{preHandler:[requireAuth,requireR
     return reply.code(503).send({error:'EXECUTIVE_BRIEF_GENERATION_UNAVAILABLE'});
   }
 });
+// Admin-only retry: one additional Gemini request for today's failed brief, never an automatic loop.
+app.post('/api/admin/executive-brief/retry',{preHandler:[requireAuth,requireRole('admin')]},async(_request,reply)=>{
+  const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
+  try {
+    const result=await generateDailyExecutiveBrief(pool,today,true);
+    if(result.status==='already_claimed')return reply.code(409).send({error:'EXECUTIVE_BRIEF_RETRY_NOT_AVAILABLE'});
+    return {data:result};
+  }catch{
+    return reply.code(503).send({error:'EXECUTIVE_BRIEF_RETRY_UNAVAILABLE'});
+  }
+});
 // Read-only cached brief endpoint. Never invokes an AI provider on dashboard reads.
 app.get('/api/executive-brief/cached',{preHandler:requireAuth},async(_request,reply)=>{
   try {
