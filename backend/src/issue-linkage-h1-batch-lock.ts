@@ -44,6 +44,35 @@ export async function claimIssueLinkageH1Batch(
     status: active.rows[0] ? 'another_batch_running' : 'unknown' };
 }
 
+
+/** Reserve all evidence atomically inside the caller's transaction.
+ * Any duplicate means the entire batch must be rolled back before Gemini runs.
+ */
+export async function reserveH1Evidence(
+  db: Pick<Pool, 'query'>,
+  organizationId: number,
+  newsDate: string,
+  batchId: number,
+  evidence: H1EvidenceRef[],
+): Promise<{ reserved: boolean; count: number }> {
+  const keys = new Set(evidence.map(item => `${item.sourceType}:${item.id}`));
+  if (!evidence.length || keys.size !== evidence.length ||
+      evidence.some(item => !['online','print','social','owned'].includes(item.sourceType) ||
+        !Number.isInteger(item.id) || item.id <= 0)) return { reserved: false, count: 0 };
+  const types = evidence.map(item => item.sourceType);
+  const ids = evidence.map(item => item.id);
+  const result = await db.query(
+    `INSERT INTO issue_linkage_h1_evidence_ledger
+      (organization_id,news_date,source_type,source_id,batch_id)
+     SELECT $1,$2::date,e.source_type,e.source_id,$3
+     FROM unnest($4::text[],$5::bigint[]) AS e(source_type,source_id)
+     ON CONFLICT (organization_id,news_date,source_type,source_id) DO NOTHING
+     RETURNING id`,
+    [organizationId,newsDate,batchId,types,ids],
+  );
+  return { reserved: result.rowCount === evidence.length, count: result.rowCount || 0 };
+}
+
 export async function finishIssueLinkageH1Batch(
   pool: Pool,
   id: number,
