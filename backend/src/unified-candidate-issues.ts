@@ -256,6 +256,29 @@ app.post('/api/intelligence/issue-linkage-inbox/batch-h1/execute',{preHandler:au
    warning:'Evidence tetap terkunci. Jangan ulangi tanpa rekonsiliasi.'});
  }
 });
+// Read-only H-1 analysis history. Only Humas/admin may inspect the checkpoints.
+app.get('/api/intelligence/issue-linkage-inbox/batch-h1/results',{preHandler:auth},async(request,reply)=>{
+ const ctx=request.unifiedIssueAuth!;
+ if(!canManage(ctx))return reply.code(403).send({error:'ISSUE_LINKAGE_REQUIRES_HUMAS_OR_SUPER_ADMIN'});
+ const organizationId=await resolveOrganizationId(pool,ctx);
+ if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
+ const query=(request.query||{}) as {batchId?:string};
+ const batchId=Number(query.batchId);
+ if(!Number.isSafeInteger(batchId)||batchId<=0)return reply.code(400).send({error:'H1_VALID_BATCH_ID_REQUIRED'});
+ const installed=(await pool.query(`SELECT to_regclass('public.issue_linkage_h1_batches') IS NOT NULL AS installed`)).rows[0]?.installed===true;
+ if(!installed)return reply.code(503).send({error:'H1_BATCH_LEDGER_MIGRATION_REQUIRED'});
+ const batch=(await pool.query(`SELECT id,news_date,status,request_count,started_at,finished_at,error_code
+  FROM issue_linkage_h1_batches WHERE id=$1 AND organization_id=$2 LIMIT 1`,[batchId,organizationId])).rows[0];
+ if(!batch)return reply.code(404).send({error:'H1_BATCH_NOT_FOUND'});
+ const checkpoints=(await pool.query(`SELECT metadata,created_at FROM audit_logs
+  WHERE action='ISSUE_LINKAGE_H1_GEMINI_GROUP_ANALYZED'
+   AND metadata->>'organizationId'=$1
+   AND metadata->>'batchId'=$2
+  ORDER BY created_at ASC LIMIT 5`,[String(organizationId),String(batchId)])).rows;
+ return {data:{batch,groups:checkpoints.map((row:any)=>({
+  ...row.metadata,recordedAt:row.created_at,
+ }))}};
+});
 // Read-only continuation preview. Ledger reservations are authoritative, including failed/uncertain runs.
 // This does not authorize a second batch or consume AI quota.
 app.get('/api/intelligence/issue-linkage-inbox/batch-h1/continuation-preview',{preHandler:auth},async(request,reply)=>{
