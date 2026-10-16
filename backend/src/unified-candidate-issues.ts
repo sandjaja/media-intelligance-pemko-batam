@@ -84,8 +84,12 @@ const groups:any[]=[];for(const g of consolidatedGroups){if(g.linkedIssue?.issue
    opdId:e.opdId==null?(row.snapshot?.opdId==null?null:Number(row.snapshot.opdId)):Number(e.opdId)})));
  const selected=selectYesterdayWibEvidence(evidence as any[]);
  const fingerprint=h1Fingerprint(selected.evidence as any[]);
- const dateReviewCount=selected.evidence.filter((e:any)=>publicationDateNeedsReview(e.occurredAt,e.title,e.summary)).length;
- const groups=groupH1Evidence(selected.evidence as any[]);
+ const reviewEvidence=selected.evidence.filter((e:any)=>publicationDateNeedsReview(e.occurredAt,e.title,e.summary));
+ const dateReviewCount=reviewEvidence.length;
+ // Suspicious publication dates must be reviewed; they are not eligible for Gemini.
+ const reviewRefs=new Set(reviewEvidence.map((e:any)=>e.sourceType+':'+e.id));
+ const eligibleEvidence=selected.evidence.filter((e:any)=>!reviewRefs.has(e.sourceType+':'+e.id));
+ const groups=groupH1Evidence(eligibleEvidence as any[]);
  const eligibleGroups=groups.filter(g=>g.primaryKeyword&&g.evidence.length>=2);
  const oversizedGroups=eligibleGroups.filter(g=>g.evidence.length>40).length;
  // Preparation is read-only: no Gemini, no quota reservation, no ledger claim.
@@ -93,7 +97,7 @@ const groups:any[]=[];for(const g of consolidatedGroups){if(g.linkedIssue?.issue
  return {data:{date:selected.date,timezone:'Asia/Jakarta',evidenceCount:selected.evidence.length,
   fingerprint,groupCount:groups.length,eligibleGroupCount:eligibleGroups.length,
   oversizedGroupCount:oversizedGroups,estimatedMinimumGeminiCalls:eligibleGroups.length,
-  publicationDateReviewCount:dateReviewCount,
+  publicationDateReviewCount:dateReviewCount,excludedFromAnalysisCount:reviewRefs.size,
   ready:false,reason:'EXECUTION_ENDPOINT_NOT_ENABLED',
   warning:'Analisis ini menggunakan kuota Gemini. Gunakan secara bijaksana. Berita yang sudah dianalisis tidak akan diproses ulang.'}};
 });
