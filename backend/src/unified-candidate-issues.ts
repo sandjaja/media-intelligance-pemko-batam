@@ -176,7 +176,7 @@ app.post('/api/intelligence/issue-linkage-inbox/batch-h1/validate',{preHandler:a
  });
  return {data:{valid:true,date:plan.date,plannedFingerprint:plan.plannedFingerprint,
   plannedGroupCount:plan.plannedGroupCount,alreadyReservedCount:plan.alreadyReservedCount,evidenceCount:plan.plannedGroups.reduce((n,g)=>n+g.evidence.length,0),
-  ready:false,reason:'EXECUTION_ENDPOINT_NOT_ENABLED'}};
+  ready:process.env.H1_GEMINI_EXECUTION_ENABLED==='true'&&process.env.NODE_ENV!=='production',reason:process.env.H1_GEMINI_EXECUTION_ENABLED==='true'&&process.env.NODE_ENV!=='production'?null:'EXECUTION_ENDPOINT_NOT_ENABLED'}};
 });
 app.post('/api/intelligence/issue-linkage-inbox/batch-h1/execute',{preHandler:auth},async(request,reply)=>{
  const ctx=request.unifiedIssueAuth!;
