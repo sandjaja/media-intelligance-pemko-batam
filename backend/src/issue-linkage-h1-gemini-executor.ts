@@ -73,3 +73,46 @@ export async function analyzeReservedH1Groups(
   }
   return results;
 }
+
+/**
+ * Durable, append-only per-group checkpoint. A failed write aborts the batch;
+ * the caller must not mark it completed or retry reserved evidence automatically.
+ * audit_logs is an existing application table, so no new migration is required.
+ */
+export async function persistH1GeminiGroupResult(
+  pool: Pool,
+  input: {
+    batchId: number;
+    organizationId: number;
+    userId: string | number;
+    newsDate: string;
+    groupIndex: number;
+    primaryKeyword: string;
+    opdId: number | null;
+    evidenceRefs: string[];
+    analysis: ReturnType<typeof validateH1GeminiGroupResult>;
+    model: string;
+    usage: { inputTokens: number; outputTokens: number };
+    latencyMs: number;
+  },
+): Promise<void> {
+  if (!Number.isSafeInteger(input.batchId) || input.batchId <= 0 ||
+      !Number.isSafeInteger(input.organizationId) || input.organizationId <= 0 ||
+      !Number.isInteger(input.groupIndex) || input.groupIndex < 0 || input.groupIndex >= 5 ||
+      !input.evidenceRefs.length || input.evidenceRefs.length > 40 ||
+      new Set(input.evidenceRefs).size !== input.evidenceRefs.length ||
+      input.evidenceRefs.some(ref => !/^(online|print|social|owned):[1-9]\\d*$/.test(ref))) {
+    throw new Error('H1_INVALID_CHECKPOINT');
+  }
+  await pool.query(
+    `INSERT INTO audit_logs(user_id,action,metadata)
+     VALUES($1,'ISSUE_LINKAGE_H1_GEMINI_GROUP_ANALYZED',$2::jsonb)`,
+    [input.userId, JSON.stringify({
+      batchId: input.batchId, organizationId: input.organizationId,
+      newsDate: input.newsDate, groupIndex: input.groupIndex,
+      primaryKeyword: input.primaryKeyword, opdId: input.opdId,
+      evidenceRefs: input.evidenceRefs, analysis: input.analysis,
+      model: input.model, usage: input.usage, latencyMs: input.latencyMs,
+    })],
+  );
+}
