@@ -3,7 +3,7 @@ import type { Pool, PoolClient } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
-import { selectYesterdayWibEvidence, h1Fingerprint, groupH1Evidence, publicationDateNeedsReview } from './issue-linkage-h1-batch-lock.js';
+import { selectYesterdayWibEvidence, h1Fingerprint, groupH1Evidence, publicationDateNeedsReview, validateH1ExecutionPlan } from './issue-linkage-h1-batch-lock.js';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { checkIssueEvidenceEligibility, type IssueEvidenceSource } from './issue-evidence-eligibility.js';
 import { matchExistingIssues } from './unified-existing-issue-matcher.js';
@@ -97,13 +97,15 @@ const groups:any[]=[];for(const g of consolidatedGroups){if(g.linkedIssue?.issue
  const withinRunLimit=boundedGroups.slice(0,maximumGroupsPerRun);
  const deferredGroups=Math.max(0,eligibleGroups.length-withinRunLimit.length);
  const plannedFingerprint=h1Fingerprint(withinRunLimit.flatMap(g=>g.evidence) as any[]);
+ const planCheck=validateH1ExecutionPlan(selected.date,plannedFingerprint,selected.date,
+  withinRunLimit.flatMap(g=>g.evidence) as any[]);
  // Preparation is read-only: no Gemini, no quota reservation, no ledger claim.
  // The eventual execution endpoint must revalidate this fingerprint before claiming.
  return {data:{date:selected.date,timezone:'Asia/Jakarta',evidenceCount:selected.evidence.length,
   fingerprint,groupCount:groups.length,eligibleGroupCount:eligibleGroups.length,
   oversizedGroupCount:oversizedGroups,estimatedMinimumGeminiCalls:eligibleGroups.length,
   maximumGroupsPerRun,plannedGroupCount:withinRunLimit.length,deferredGroupCount:deferredGroups,
-  plannedFingerprint,
+  plannedFingerprint,planValid:planCheck.valid,planValidationReason:planCheck.reason,
   publicationDateReviewCount:dateReviewCount,excludedFromAnalysisCount:reviewRefs.size,
   ready:false,reason:'EXECUTION_ENDPOINT_NOT_ENABLED',
   warning:'Analisis ini menggunakan kuota Gemini. Gunakan secara bijaksana. Berita yang sudah dianalisis tidak akan diproses ulang.'}};
