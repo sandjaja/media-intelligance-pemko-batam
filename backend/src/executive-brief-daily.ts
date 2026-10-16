@@ -17,7 +17,9 @@ export async function generateDailyExecutiveBrief(
       return { status: 'failed', date };
     }
     const saved = await completeExecutiveBriefDay(
-      pool, date, 'city', brief as Record<string, unknown>, null, 20,
+      pool, date, 'city', brief as Record<string, unknown>,
+      typeof brief.model_code === 'string' ? brief.model_code : null,
+      typeof brief.source_count === 'number' ? brief.source_count : 0,
     );
     if (!saved) throw new Error('EXECUTIVE_BRIEF_CLAIM_LOST');
     return { status: 'created', date };
