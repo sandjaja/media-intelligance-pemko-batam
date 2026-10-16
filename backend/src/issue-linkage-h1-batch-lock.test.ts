@@ -252,3 +252,42 @@ test('H-1 atomic claim rejects altered keyword/OPD before opening transaction', 
   assert.equal(result.status, 'invalid_evidence_plan');
   assert.equal(connected, false);
 });
+
+
+test('H-1 simulation: normalized keywords, WIB boundaries and group limit without Gemini', () => {
+  const now = new Date('2026-10-16T03:00:00Z');
+  const items = Array.from({ length: 7 }, (_, group) => [1, 2].map(id => ({
+    sourceType: 'online' as const, id: group * 10 + id,
+    occurredAt: '2026-10-15T12:00:00Z',
+    primaryKeyword: `Topik ${group}`, opdId: 10,
+    title: 'Berita simulasi', summary: '',
+  }))).flat();
+  items.push({ ...items[0], id: 99, occurredAt: '2026-10-15T17:00:00Z' });
+  const plan = buildH1BoundedPlan(items, now);
+  assert.equal(plan.date, '2026-10-15');
+  assert.equal(plan.plannedGroupCount, 5);
+  assert.equal(plan.deferredGroupCount, 2);
+  assert.equal(plan.plannedGroups.every(g => g.evidence.length === 2), true);
+  assert.equal(plan.planCheck.valid, true);
+});
+
+test('H-1 simulation: duplicate completed batch cannot reserve evidence or invoke AI', async () => {
+  const statements: string[] = [];
+  const client = {
+    query: async (sql: string) => {
+      statements.push(sql);
+      if (sql.includes('INSERT INTO issue_linkage_h1_batches')) return { rows: [], rowCount: 0 };
+      if (sql.includes('SELECT id, status FROM issue_linkage_h1_batches'))
+        return { rows: [{ id: 19, status: 'completed' }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
+    release: () => { statements.push('RELEASE'); },
+  };
+  const pool = { connect: async () => client } as unknown as Pool;
+  const evidence = [{ sourceType: 'online' as const, id: 1 }];
+  const result = await claimAndReserveH1Batch(pool, 1, '2026-10-15', h1Fingerprint(evidence), evidence);
+  assert.deepEqual(result, { claimed: false, id: 19, status: 'completed' });
+  assert.equal(statements.some(sql => sql.includes('INSERT INTO issue_linkage_h1_evidence_ledger')), false);
+  assert.deepEqual(statements.filter(sql => ['BEGIN', 'COMMIT', 'ROLLBACK', 'RELEASE'].includes(sql)),
+    ['BEGIN', 'ROLLBACK', 'RELEASE']);
+});
