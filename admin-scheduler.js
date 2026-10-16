@@ -30,5 +30,60 @@ async function load(){
 }
 async function save(e){e.preventDefault();try{await api('/admin/collection-scheduler',{method:'PUT',body:JSON.stringify({enabled:$('#schedEnabled').checked,runTime:$('#schedTime').value,onlineEnabled:$('#schedOnline').checked,ownedEnabled:$('#schedOwned').checked,socialEnabled:!$('#schedSocial').disabled&&$('#schedSocial').checked})});toast('Pengaturan scheduler disimpan.');await load()}catch(e){toast(e.message,false)}}
 async function runNow(){const sources=[];if($('#schedOnline').checked)sources.push('online');if($('#schedOwned').checked)sources.push('owned');if(!$('#schedSocial').disabled&&$('#schedSocial').checked)sources.push('social');if(!sources.length)return toast('Pilih minimal satu sumber untuk dijalankan.',false);if(!confirm(`Jalankan pengumpulan sekarang untuk: ${sources.join(', ')}?${sources.includes('social')?' Actor Apify aktif ikut dijalankan dengan batas biaya Admin.':''}`))return;const b=$('#schedRunNow');b.disabled=true;b.textContent='Sedang menjalankan...';try{const j=await api('/admin/collection-scheduler/run',{method:'POST',body:JSON.stringify({sources})});toast(j.data?.skipped?'Pengumpulan sudah berjalan atau sudah dijalankan.':j.data?.status==='RUNNING'?'Pengumpulan berjalan. Hasil Apify akan diimpor otomatis.':j.data?.status==='SUCCESS'?'Pengumpulan selesai.':'Pengumpulan selesai dengan catatan; periksa riwayat.',j.data?.status!=='FAILED');await load()}catch(e){toast(e.message,false)}finally{b.disabled=false;b.textContent='Jalankan Sekarang'}}
-const start=()=>{ensureUI();load()};if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(start,300));else setTimeout(start,300);
+function setupExecutiveBriefControl(){
+ const panel=document.getElementById('schedulerPanel');
+ if(!panel||document.getElementById('aiExecutiveBriefSection'))return;
+ const section=document.createElement('details');
+ section.id='aiExecutiveBriefSection';
+ section.className='glass rounded-2xl p-5 space-y-3';
+ section.innerHTML='<summary class="cursor-pointer font-bold text-lg">Jadwal Executive Brief Harian</summary><p class="text-xs text-slate-400 mt-2">Jadwal yang disarankan: 06.30 WIB. Scheduler otomatis belum diaktifkan. Membuka dashboard hanya membaca hasil tersimpan, tanpa menggunakan kuota Gemini.</p><div id="aiExecutiveBriefStatus" class="text-xs text-slate-400 mt-2">Memuat status...</div><div class="mt-3 flex flex-wrap items-center gap-2 text-xs"><label for="aiExecutiveBriefHour">Jam WIB</label><input id="aiExecutiveBriefHour" type="number" min="0" max="23" value="6" class="w-16 rounded border border-slate-600 bg-transparent px-2 py-1"><span>:</span><input id="aiExecutiveBriefMinute" type="number" min="0" max="59" value="30" aria-label="Menit WIB" class="w-16 rounded border border-slate-600 bg-transparent px-2 py-1"><button type="button" id="aiExecutiveBriefSave" class="rounded-lg border border-cyan-600 px-3 py-2 text-xs">Simpan Jam (Nonaktif)</button></div><div id="aiExecutiveBriefScheduleStatus" class="mt-2 text-xs text-slate-400">Jadwal belum dimuat</div><button type="button" id="aiExecutiveBriefReload" class="mt-2 rounded-lg border border-slate-600 px-3 py-2 text-xs">Perbarui Status</button><button type="button" id="aiExecutiveBriefPreflight" class="mt-2 ml-2 rounded-lg border border-cyan-600 px-3 py-2 text-xs">Uji Jadwal (Tanpa AI)</button><div id="aiExecutiveBriefPreflightResult" class="mt-2 text-xs text-slate-400"></div><p class="text-xs text-amber-400 mt-2">Pembuatan analisis manual belum dibuka melalui UI sampai smoke test pengaman kuota selesai.</p>';
+ panel.appendChild(section);
+ async function reload(){
+  const status=section.querySelector('#aiExecutiveBriefStatus');
+  status.textContent='Memuat status...';
+  try{
+   const r=await fetch('/api/executive-brief/cached',{credentials:'include',cache:'no-store'});
+   const j=await r.json();
+   if(!r.ok)throw Error(j.error||'HTTP '+r.status);
+   const b=j.data;
+   status.textContent=b?.status==='ready'
+    ?'Analisis terakhir: '+String(b.generated_at||b.brief_date)+' · tersimpan di database.'
+    :'Belum ada Executive Brief harian tersimpan. Scheduler otomatis NONAKTIF.';
+  }catch(e){status.textContent='Status tidak tersedia: '+e.message;}
+ }
+ async function loadSchedule(){
+  const status=section.querySelector('#aiExecutiveBriefScheduleStatus');
+  try{
+   const r=await fetch('/api/admin/executive-brief/schedule',{credentials:'include',cache:'no-store'});
+   const j=await r.json();if(!r.ok)throw Error(j.error||'HTTP '+r.status);
+   section.querySelector('#aiExecutiveBriefHour').value=j.data.hour_wib;
+   section.querySelector('#aiExecutiveBriefMinute').value=j.data.minute_wib;
+   status.textContent='Tersimpan: '+String(j.data.hour_wib).padStart(2,'0')+':'+String(j.data.minute_wib).padStart(2,'0')+' WIB · NONAKTIF · cron belum terhubung.';
+  }catch(e){status.textContent='Pengaturan belum tersedia: '+e.message;}
+ }
+ section.querySelector('#aiExecutiveBriefSave').addEventListener('click',async()=>{
+  const btn=section.querySelector('#aiExecutiveBriefSave'),status=section.querySelector('#aiExecutiveBriefScheduleStatus');
+  const hour=Number(section.querySelector('#aiExecutiveBriefHour').value),minute=Number(section.querySelector('#aiExecutiveBriefMinute').value);
+  if(!Number.isInteger(hour)||hour<0||hour>23||!Number.isInteger(minute)||minute<0||minute>59){status.textContent='Jam tidak valid.';return;}
+  btn.disabled=true;
+  try{
+   const r=await fetch('/api/admin/executive-brief/schedule',{method:'PUT',credentials:'include',headers:{'content-type':'application/json'},body:JSON.stringify({hour_wib:hour,minute_wib:minute})});
+   const j=await r.json();if(!r.ok)throw Error(j.error||'HTTP '+r.status);
+   await loadSchedule();
+  }catch(e){status.textContent='Gagal menyimpan: '+e.message;}finally{btn.disabled=false;}
+ });
+ section.addEventListener('toggle',()=>{if(section.open){reload();loadSchedule();}});
+ section.querySelector('#aiExecutiveBriefPreflight').addEventListener('click',async()=>{
+  const status=section.querySelector('#aiExecutiveBriefPreflightResult');
+  status.textContent='Memeriksa jadwal...';
+  try{
+   const r=await fetch('/api/admin/executive-brief/schedule/preflight',{credentials:'include',cache:'no-store'});
+   const j=await r.json();if(!r.ok)throw Error(j.error||'HTTP '+r.status);
+   const labels={disabled:'Jadwal nonaktif',not_due:'Belum waktunya',already_recorded:'Sudah tercatat untuk hari ini',due:'Memenuhi syarat jadwal (simulasi)'};
+   status.textContent='Simulasi '+j.data.date+': '+(labels[j.data.reason]||j.data.reason)+'. Tidak ada pemanggilan Gemini.';
+  }catch(e){status.textContent='Pemeriksaan gagal: '+e.message;}
+ });
+ section.querySelector('#aiExecutiveBriefReload').addEventListener('click',reload);
+}
+const start=()=>{if(ensureUI())setupExecutiveBriefControl();load()};if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(start,300));else setTimeout(start,300);
 })();
