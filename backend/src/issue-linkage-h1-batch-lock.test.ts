@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
-import { h1Fingerprint, inboxContextFingerprint, selectYesterdayWibEvidence, claimIssueLinkageH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
+import { h1Fingerprint, inboxContextFingerprint, selectYesterdayWibEvidence, groupH1Evidence, claimIssueLinkageH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
 
 test('H-1 fingerprint is independent of evidence ordering and duplicate refs', () => {
   const a = [{ sourceType: 'online' as const, id: 7 }, { sourceType: 'social' as const, id: 3 }];
@@ -50,4 +50,18 @@ test('H-1 selection uses WIB publication date, not ingestion date, and deduplica
   const result = selectYesterdayWibEvidence([yesterday, today, missing, yesterday], now);
   assert.equal(result.date, '2026-10-15');
   assert.deepEqual(result.evidence, [yesterday]);
+});
+
+test('H-1 grouping isolates OPDs, deduplicates and keeps missing keywords separate', () => {
+  const groups = groupH1Evidence([
+    { sourceType: 'online', id: 1, primaryKeyword: ' Sampah ', opdId: 4 },
+    { sourceType: 'social', id: 2, primaryKeyword: 'sampah', opdId: 4 },
+    { sourceType: 'print', id: 3, primaryKeyword: 'sampah', opdId: 5 },
+    { sourceType: 'owned', id: 4, primaryKeyword: null, opdId: 4 },
+    { sourceType: 'online', id: 1, primaryKeyword: ' Sampah ', opdId: 4 },
+  ] as const);
+  assert.equal(groups.length, 3);
+  assert.equal(groups.find(g => g.key === 'sampah|opd:4')?.evidence.length, 2);
+  assert.equal(groups.find(g => g.key === 'sampah|opd:5')?.evidence.length, 1);
+  assert.equal(groups.find(g => g.key === 'unclassified|owned:4')?.evidence.length, 1);
 });
