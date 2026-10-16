@@ -52,6 +52,28 @@ export async function finishIssueLinkageH1Batch(
   return (result.rowCount || 0) === 1;
 }
 
+/** Strict H-1 selection by publication time in WIB, never by ingestion time.
+ * Invalid/missing dates are excluded rather than guessed.
+ */
+export function selectYesterdayWibEvidence<T extends H1EvidenceRef & { occurredAt?: string | null }>(
+  evidence: T[],
+  now: Date = new Date(),
+): { date: string; evidence: T[] } {
+  const day = (date: Date) => new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(date);
+  const date = day(new Date(now.getTime() - 86400000));
+  const selected = new Map<string, T>();
+  for (const item of evidence) {
+    if (!item.occurredAt || !Number.isInteger(item.id) || item.id <= 0 ||
+        !['online', 'print', 'social', 'owned'].includes(item.sourceType)) continue;
+    const published = new Date(item.occurredAt);
+    if (!Number.isFinite(published.getTime()) || day(published) !== date) continue;
+    selected.set(`${item.sourceType}:${item.id}`, item);
+  }
+  return { date, evidence: [...selected.values()] };
+}
+
 /** Must match the existing Issue Linkage inbox cache lookup exactly.
  * Unlike the batch claim SHA-256, this includes the primary keyword.
  */
