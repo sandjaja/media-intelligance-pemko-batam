@@ -116,7 +116,8 @@ const groups:any[]=[];for(const g of consolidatedGroups){if(g.linkedIssue?.issue
   planValid:plan.planCheck.valid,planValidationReason:plan.planCheck.reason,
   publicationDateReviewCount:plan.publicationDateReviewCount,
   excludedFromAnalysisCount:plan.excludedFromAnalysisCount,
-  ready:false,reason:'EXECUTION_ENDPOINT_NOT_ENABLED',
+  ready:process.env.H1_GEMINI_EXECUTION_ENABLED==='true'&&process.env.NODE_ENV!=='production',
+  reason:process.env.H1_GEMINI_EXECUTION_ENABLED==='true'&&process.env.NODE_ENV!=='production'?null:'EXECUTION_ENDPOINT_NOT_ENABLED',
   warning:'Analisis ini menggunakan kuota Gemini. Gunakan secara bijaksana. Berita yang sudah dianalisis tidak akan diproses ulang.'
 }};
 });
