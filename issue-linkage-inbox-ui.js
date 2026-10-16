@@ -41,7 +41,13 @@ root.querySelectorAll('[data-view-issue]').forEach(b=>b.addEventListener('click'
    window.alert(message+'\n\nValidasi selesai, tetapi eksekusi belum diizinkan.');
    return;
   }
-  window.alert(message+'\n\nValidasi berhasil. Eksekusi Gemini tetap belum diaktifkan dari tombol ini.');
+  if(!window.confirm(message+'\n\nJalankan analisis Gemini untuk SATU kelompok sekarang?'))return;
+  const executed=await api('/intelligence/issue-linkage-inbox/batch-h1/execute',{
+   method:'POST',body:JSON.stringify({date:plan.date,plannedFingerprint:plan.plannedFingerprint,confirmQuotaUsage:true}),
+  });
+  const result=executed.data||{};
+  window.alert('Analisis H-1 selesai: '+Number(result.analyzedGroupCount||0)+' kelompok. Batch #'+String(result.batchId||'-')+'. Hasil tersimpan dalam riwayat audit.');
+  await load(null,true);
  }catch(error){window.toast?.('Validasi H-1 gagal: '+error.message,false)}
  finally{busy(btn,false)}
 });root.querySelector('[data-refresh]')?.addEventListener('click',async e=>{const b=e.currentTarget;busy(b,true,'MEMUAT...');await load(null,true)});root.querySelectorAll('[data-kpi-filter]').forEach(b=>b.addEventListener('click',()=>{statusFilter=statusFilter===b.dataset.kpiFilter?'ALL':b.dataset.kpiFilter;page=1;render();window.toast?.(statusFilter==='ALL'?'Filter Issue Linkage: Semua':('Filter Issue Linkage: '+(statusFilter==='UNDECIDED'?'Perlu Keputusan':statusFilter))) }));const searchBox=root.querySelector('[data-search-linkage]');if(searchBox)searchBox.addEventListener('input',e=>{searchTerm=e.target.value;page=1;const pos=e.target.selectionStart;render();const next=section().querySelector('[data-search-linkage]');if(next){next.focus({preventScroll:true});try{next.setSelectionRange(pos,pos)}catch(_){}}});root.querySelector('[data-prev]')?.addEventListener('click',()=>{page--;render()});root.querySelector('[data-next]')?.addEventListener('click',()=>{page++;render()});
