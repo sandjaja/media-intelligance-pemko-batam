@@ -81,3 +81,14 @@ export async function inspectExecutiveBriefSchedule(
   if (rows.length) return { due: false, date, reason: 'already_recorded' };
   return { due: true, date, reason: 'due' };
 }
+
+/** Enable only after the actual runner is wired and audited; currently safe to disable only. */
+export async function disableExecutiveBriefSchedule(pool: Pick<Pool, 'query'>): Promise<ExecutiveBriefSchedule> {
+  const { rows } = await pool.query(
+    `UPDATE executive_brief_schedule_settings
+     SET enabled=FALSE,updated_at=now() WHERE id=1
+     RETURNING enabled,hour_wib,minute_wib,timezone,updated_at`,
+  );
+  if (!rows[0]) throw new Error('EXECUTIVE_BRIEF_SCHEDULE_MISSING');
+  return rows[0];
+}
