@@ -54,7 +54,7 @@ test('provider adapter rejects oversized prompt without network access', async (
   let called = false;
   globalThis.fetch = async () => { called = true; throw new Error('UNEXPECTED_NETWORK'); };
   await assert.rejects(invokeAiProvider({
-    provider: 'openai', model: 'test-model', apiKey: 'mock', prompt: 'x'.repeat(12001),
+    provider: 'openai', model: 'test-model', apiKey: 'mock', prompt: 'x'.repeat(120001),
   }), /AI_PROVIDER_INVALID_REQUEST/);
   assert.equal(called, false);
 });

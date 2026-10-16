@@ -2,9 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
-import { decryptIntegrationCredential } from './integration-credentials.js';
-import { executeConfiguredAi } from './ai-execution-gateway.js';
-import type { AiProvider } from './ai-provider-adapters.js';
+import { loadHumasAiTask, executeHumasAi } from './ai-humas-execution.js';
 import { hasPermission, loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 
 declare module 'fastify' { interface FastifyRequest { phase5Auth?: AuthorizationContext } }
@@ -51,90 +49,10 @@ export async function reserveGeminiDailyQuota(pool:Pick<Pool,'query'>,model:stri
    RETURNING reserved_requests`,[configured.rows[0].model_id]);
  if(!reserved.rowCount)throw new Error('AI_GEMINI_DAILY_QUOTA_EXCEEDED');
 }
-async function generateStrategyWithGemini(pool:Pool,input:any,userId:string){
- // Respect the Humas model choice. Never silently execute Gemini if Humas selected a
- // different provider: paid providers require the separate budgeted gateway path.
- const selected=await pool.query(`SELECT p.code AS provider_code,m.code AS model_code,
-     p.enabled AS provider_enabled,m.enabled AS model_enabled
-   FROM ai_humas_model_selections s
-   JOIN ai_models m ON m.id=s.model_id
-   JOIN ai_providers p ON p.id=m.provider_id
-   WHERE s.task_code='strakom_analysis' LIMIT 1`);
- if(selected.rows.length && (!selected.rows[0].provider_enabled || !selected.rows[0].model_enabled))
-   throw new Error('AI_STRATEGY_SELECTED_MODEL_DISABLED');
- const modelRows=selected.rows.length ? selected.rows :
-   (await pool.query("SELECT m.code AS model_code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 1")).rows;
- // A missing explicit selection may use the configured Gemini free route only.
- // Never fall back from a selected provider to another provider after a failure.
- const model=modelRows[0]?.model_code;
- if(!model)throw new Error('AI_STRATEGY_GEMINI_MODEL_NOT_CONFIGURED');
- const promptRow=await pool.query("SELECT prompt_text FROM ai_humas_task_prompts WHERE task_code='strakom_analysis' LIMIT 1");
- if(!promptRow.rows[0]?.prompt_text?.trim())throw new Error('AI_STRATEGY_PROMPT_NOT_CONFIGURED');
- const prompt=(promptRow.rows[0]?.prompt_text||`Anda adalah mesin strategi komunikasi Pemerintah Kota Batam. Susun DRAFT strategi komunikasi berbasis data yang diberikan. Jangan mengarang fakta. Bedakan pesan induk Pemko dan arahan kewilayahan. Arahan kecamatan hanya untuk kecamatan yang tercantum dalam input. Pesan lokal harus konsisten dengan pesan induk. Historical learning adalah pembelajaran, bukan fakta kondisi saat ini.
-
-Strakom harus menjawab bukan hanya bagaimana Pemko berkomunikasi, tetapi juga substansi apa yang perlu tersedia agar komunikasi kredibel, koordinasi komunikasi apa yang diperlukan, dan hasil komunikasi apa yang diharapkan pada masyarakat.
-coordinationRequirements adalah KEBUTUHAN KOORDINASI/SUBSTANSI KOMUNIKASI, bukan perintah kebijakan operasional dan bukan tuduhan bahwa OPD/kecamatan belum bekerja. Gunakan hanya OPD/kecamatan yang tersedia dalam input/routing. Untuk setiap kebutuhan, jelaskan purpose, informationNeeded, parties, dan publicationUse.
-expectedCommunicationOutcomes adalah TARGET setelah komunikasi: apa yang diharapkan masyarakat tahu, pahami, atau lakukan. Jangan menyatakan target itu sudah tercapai; dampak aktual baru dinilai pada Monitoring.
-KPI adalah indikator pengukuran, berbeda dari expectedCommunicationOutcomes.
-
-Agar hasil Strakom siap dipakai Content Studio, gunakan kosakata produksi yang TERBATAS dan konsisten. Jangan membuat nama kategori baru.
-Target audiens yang boleh dipakai: MASYARAKAT_UMUM, ANAK_PELAJAR, REMAJA_GEN_Z, LANSIA_KELOMPOK_RENTAN, PELAKU_USAHA_UMKM_INVESTOR, INTERNAL_ASN, MEDIA_JURNALIS.
-Tone yang boleh dipakai: INFORMATIF_KLARITATIF, RESMI_FORMAL, EDUKATIF_PERSUASIF, EMPATIS_MENENANGKAN, TEGAS_PENGAYOM, SEMANGAT_INSPIRATIF.
-Tujuan komunikasi yang boleh dipakai: EDUKASI_SOSIALISASI, PENGUMUMAN_IMBAUAN, KLARIFIKASI_ANTI_HOAKS, LAPORAN_CAPAIAN_TRANSPARANSI, UNDANGAN_PERINGATAN_ACARA, MANAJEMEN_KRISIS.
-Format materi yang boleh dipakai: PRESS_RELEASE, CAPTION_MEDIA_SOSIAL, NASKAH_SAMBUTAN_PIDATO, BERITA_WEB, VIDEO_AUDIO_SCRIPT, INFOGRAFIS, PENGUMUMAN_RESMI.
-Kanal yang boleh dipakai: WEBSITE_RESMI, INSTAGRAM, FACEBOOK, TIKTOK, YOUTUBE, MEDIA_PERS.
-spokespersonStrategy adalah rekomendasi PERAN juru bicara, bukan nama orang. Gunakan hanya kode OPD_UTAMA, HUMAS_PEMKO, atau PIMPINAN_DAERAH. Jangan mengarang nama/jabatan personal. Pilih hanya jika memang diperlukan oleh strategi; bila tidak perlu boleh kosong. OPD_UTAMA berarti pejabat berwenang dari OPD utama yang sudah ada di routing, bukan penetapan nama pejabat baru.
-productionRecommendations harus berupa rekomendasi produksi, bukan fakta baru. Setiap rekomendasi wajib memilih tepat satu audience, purpose, tone, format, satu atau lebih channel, priority UTAMA atau PENDUKUNG, serta reason yang singkat dan berbasis Strakom. Maksimal 5 rekomendasi dan hindari kombinasi yang tidak relevan.
-Issue, primary/supporting keyword, OPD, kecamatan/wilayah, risk, momentum, fakta/evidence dan data routing dari input adalah CONTEXT TERKUNCI: jangan mengubah, mengganti, menyimpulkan ulang identitasnya, atau membuat nilai baru. Content Studio kelak membacanya sebagai read-only.
-Jangan memasukkan kutipan, angka/statistik, dasar hukum, URL, nama pejabat, tanggal, atau fakta spesifik yang tidak tersedia pada input. Jika materi membutuhkannya tetapi input tidak memuatnya, nyatakan sebagai kebutuhan bahan pendukung, bukan mengarangnya.
-
-Output JSON:
-{"executiveSummary":"...","communicationObjectives":[],"targetAudiences":[],"keyMessages":[],"talkingPoints":[],"coordinationRequirements":[{"purpose":"...","informationNeeded":["..."],"parties":["..."],"publicationUse":"..."}],"expectedCommunicationOutcomes":[{"audience":"...","expectedUnderstanding":"...","expectedAction":"..."}],"channelStrategy":[],"timingStrategy":{},"spokespersonStrategy":[],"contentFormats":[],"communicationRisks":[],"successKpis":[],"productionRecommendations":[{"audience":"MASYARAKAT_UMUM","purpose":"EDUKASI_SOSIALISASI","tone":"INFORMATIF_KLARITATIF","format":"INFOGRAFIS","channels":["INSTAGRAM","FACEBOOK"],"priority":"UTAMA","reason":"..."}],"districtStrategies":[{"districtId":1,"evidenceContext":{},"localAudiences":[],"communicationFocus":[],"localMessages":[],"talkingPoints":[],"localChannels":[],"coordinationOpds":[],"timingStrategy":{},"successKpis":[],"fieldUpdateRequirements":[]}]}`)+ '\n\nDATA:\n'+JSON.stringify(input);
- if(selected.rows.length && selected.rows[0].provider_code!=='gemini') {
-   // Paid executions must reserve budget and settle usage in the shared gateway.
-   // Do not truncate strategy evidence silently: a shortened prompt could
-   // produce an apparently complete strategy from incomplete input.
-   if(prompt.length>12000)throw new Error('AI_STRATEGY_PROMPT_TOO_LARGE');
-   const numericUserId=Number(userId);
-   if(!Number.isSafeInteger(numericUserId)||numericUserId<=0)throw new Error('AI_GATEWAY_INVALID_CONTEXT');
-   const result=await executeConfiguredAi(pool,{
-     userId:numericUserId,taskCode:'strakom_analysis',
-     provider:selected.rows[0].provider_code as AiProvider,
-     modelCode:model,prompt
-   });
-   return result.data;
- }
- // Apply the same input ceiling to free-tier requests before any external call.
- if(prompt.length>12000)throw new Error('AI_STRATEGY_PROMPT_TOO_LARGE');
- // The free-tier quota configuration is opt-in. Until its migration and
- // per-model limit are explicitly enabled, preserve the existing Gemini path.
- // Once enabled, reserve atomically before calling the provider.
- await reserveGeminiDailyQuota(pool,model);
-  const {rows}=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
- if(!rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
- const key=decryptIntegrationCredential(rows[0].credential_ciphertext);
- const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},signal:AbortSignal.timeout(30000),body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json',maxOutputTokens:4096}})});
- if(!r.ok)throw new Error(r.status===429?'AI_GEMINI_QUOTA_EXCEEDED':`Gemini HTTP ${r.status}`);const payload=await r.json() as any;if(payload.promptFeedback?.blockReason||payload.candidates?.[0]?.finishReason==='SAFETY')throw new Error('AI_GEMINI_RESPONSE_BLOCKED');if(payload.candidates?.[0]?.finishReason!=='STOP')throw new Error('AI_GEMINI_RESPONSE_INCOMPLETE');const raw=payload.candidates[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');
- const generated=JSON.parse(raw);
- // Free-tier calls do not reserve USD, but must still be recorded in the
- // shared token ledger. Do not report a successful generation if usage is
- // missing or the ledger write fails.
- const usage=payload.usageMetadata;
- const validTokens=(n:unknown)=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=0;
- if(!validTokens(usage?.promptTokenCount)||!validTokens(usage?.candidatesTokenCount)||
-    (usage?.thoughtsTokenCount!==undefined&&!validTokens(usage.thoughtsTokenCount)))
-   throw new Error('AI_GEMINI_USAGE_MISSING');
- const inputTokens=usage.promptTokenCount as number;
- const outputTokens=(usage.candidatesTokenCount as number)+(usage.thoughtsTokenCount??0);
- if(!Number.isSafeInteger(outputTokens))throw new Error('AI_GEMINI_USAGE_INVALID');
- const logged=await pool.query(`INSERT INTO ai_usage_logs(task_id,provider_id,model_id,status,input_tokens,output_tokens)
-   SELECT t.id,p.id,m.id,'success',$2,$3
-   FROM ai_tasks t JOIN ai_providers p ON p.code='gemini'
-   JOIN ai_models m ON m.provider_id=p.id AND m.code=$1
-   WHERE t.code='strakom_analysis' AND p.enabled=TRUE AND m.enabled=TRUE
-   RETURNING id`,[model,inputTokens,outputTokens]);
- if(!logged.rowCount)throw new Error('AI_GEMINI_USAGE_LOG_FAILED');
- return generated;
+async function generateStrategy(pool:Pool,input:any,userId:string){
+ const config=await loadHumasAiTask(pool,'strakom_analysis');
+ return executeHumasAi(pool,{userId:Number(userId),taskCode:'strakom_analysis',config,
+   prompt:config.prompt+'\n\nDATA:\n'+JSON.stringify(input)});
 }
 
 export async function registerPhase5StrategyRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
@@ -210,10 +128,19 @@ s.id strategy_id,s.version strategy_version,s.status strategy_status,s.is_curren
  app.post('/api/phase6/content-projects/:id/sources',{preHandler:auth},async(request,reply)=>{const ctx=request.phase5Auth!;if(!requireManage(ctx))return reply.code(403).send({error:'FORBIDDEN'});const p=z.object({id:z.coerce.number().int().positive()}).safeParse(request.params),b=z.object({itemId:z.coerce.number().int().positive().nullable().optional(),category:z.enum(['OFFICIAL_STATEMENT','DATA_STATISTICS','LEGAL_REGULATION','PROGRAM_SERVICE','ADDITIONAL_REFERENCE']),sourceUrl:z.string().url(),sourceTitle:z.string().trim().max(500).optional()}).safeParse(request.body);if(!p.success||!b.success)return reply.code(400).send({error:'INVALID_CONTENT_SOURCE'});const project=(await pool.query("SELECT status FROM content_projects WHERE id=$1",[p.data.id])).rows[0];if(!project)return reply.code(404).send({error:'CONTENT_PROJECT_NOT_FOUND'});if(project.status!=='DRAFT')return reply.code(409).send({error:'CONTENT_SOURCES_LOCKED'});const sourceCount=Number((await pool.query("SELECT count(*) n FROM content_project_sources WHERE project_id=$1",[p.data.id])).rows[0].n);if(sourceCount>=3)return reply.code(409).send({error:'CONTENT_SOURCE_LIMIT',max:3});if(b.data.itemId){const item=(await pool.query("SELECT 1 FROM content_project_items WHERE id=$1 AND project_id=$2",[b.data.itemId,p.data.id])).rows[0];if(!item)return reply.code(409).send({error:'CONTENT_ITEM_PROJECT_MISMATCH'});}const row=(await pool.query("INSERT INTO content_project_sources(project_id,item_id,category,source_url,source_title,created_by) VALUES($1,$2,$3,$4,$5,$6) RETURNING *",[p.data.id,b.data.itemId||null,b.data.category,b.data.sourceUrl,b.data.sourceTitle||null,ctx.id])).rows[0];return reply.code(201).send({data:row});});
 
 
- app.post('/api/phase6/content-projects/:projectId/sources/:sourceId/extract',{preHandler:auth},async(request,reply)=>{const ctx=request.phase5Auth!;if(!requireManage(ctx))return reply.code(403).send({error:'FORBIDDEN'});const p=z.object({projectId:z.coerce.number().int().positive(),sourceId:z.coerce.number().int().positive()}).safeParse(request.params);if(!p.success)return reply.code(400).send({error:'INVALID_CONTENT_SOURCE'});const source=(await pool.query("SELECT s.*,p.status project_status FROM content_project_sources s JOIN content_projects p ON p.id=s.project_id WHERE s.id=$1 AND s.project_id=$2",[p.data.sourceId,p.data.projectId])).rows[0];if(!source)return reply.code(404).send({error:'CONTENT_SOURCE_NOT_FOUND'});if(source.project_status!=='DRAFT')return reply.code(409).send({error:'CONTENT_SOURCES_LOCKED'});let html='';try{const r=await fetch(source.source_url,{headers:{'user-agent':'Mozilla/5.0 MediaIntelligencePemkoBatam/1.0'},signal:AbortSignal.timeout(15000)});if(!r.ok)return reply.code(422).send({error:'SOURCE_FETCH_FAILED',status:r.status});html=await r.text();}catch{return reply.code(422).send({error:'SOURCE_FETCH_FAILED'});}const text=html.replace(/<script[\s\S]*?<\/script>/gi,' ').replace(/<style[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/&quot;/g,'"').replace(/&#8217;|&rsquo;/g,"'").replace(/&#8220;|&#8221;|&ldquo;|&rdquo;/g,'"').replace(/&amp;/g,'&').replace(/\s+/g,' ').trim().slice(0,50000);if(!text)return reply.code(422).send({error:'SOURCE_TEXT_EMPTY'});const configured=await pool.query("SELECT m.code,c.credential_ciphertext FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id JOIN ai_provider_credentials c ON c.provider_id=p.id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 1").catch(()=>({rows:[]}));
-if(!configured.rows[0])return reply.code(503).send({error:'GEMINI_DATABASE_CONFIGURATION_MISSING'});
-let key:string;try{key=decryptIntegrationCredential(configured.rows[0].credential_ciphertext)}catch{return reply.code(503).send({error:'GEMINI_DATABASE_CREDENTIAL_INVALID'});}
-const model=String(configured.rows[0].code);const prompt=`Ekstrak fakta terverifikasi dari sumber berikut untuk Content Studio Pemko Batam. Kategori: ${source.category}. Jangan menambah fakta yang tidak ada. Jika kategori OFFICIAL_STATEMENT, prioritaskan kutipan langsung dan kembalikan speaker, role bila tersedia, quote persis, context singkat. Untuk DATA_STATISTICS kembalikan angka dan konteksnya. LEGAL_REGULATION kembalikan nama/nomor regulasi hanya bila tertulis. PROGRAM_SERVICE dan ADDITIONAL_REFERENCE kembalikan fakta relevan. JSON wajib: {"sourceTitle":"...","facts":[{"type":"QUOTE|STATISTIC|REGULATION|FACT","speaker":null,"role":null,"text":"...","context":"..."}]}. Maksimal 10 fakta. SOURCE:\n${text}`;let parsed:any;try{await reserveGeminiDailyQuota(pool,model);const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}})});if(!r.ok)return reply.code(502).send({error:'SOURCE_EXTRACTION_AI_FAILED',status:r.status});const payload=await r.json() as any,raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');parsed=JSON.parse(raw||'{}');}catch{return reply.code(502).send({error:'SOURCE_EXTRACTION_AI_FAILED'});}const facts=Array.isArray(parsed.facts)?parsed.facts.slice(0,10):[];const row=(await pool.query("UPDATE content_project_sources SET source_title=COALESCE($1,source_title),extracted_facts=$2::jsonb,status='EXTRACTED',updated_at=NOW() WHERE id=$3 RETURNING *",[parsed.sourceTitle||null,JSON.stringify(facts),source.id])).rows[0];return{data:row};});
+ app.post('/api/phase6/content-projects/:projectId/sources/:sourceId/extract',{preHandler:auth},async(request,reply)=>{const ctx=request.phase5Auth!;if(!requireManage(ctx))return reply.code(403).send({error:'FORBIDDEN'});const p=z.object({projectId:z.coerce.number().int().positive(),sourceId:z.coerce.number().int().positive()}).safeParse(request.params);if(!p.success)return reply.code(400).send({error:'INVALID_CONTENT_SOURCE'});const source=(await pool.query("SELECT s.*,p.status project_status FROM content_project_sources s JOIN content_projects p ON p.id=s.project_id WHERE s.id=$1 AND s.project_id=$2",[p.data.sourceId,p.data.projectId])).rows[0];if(!source)return reply.code(404).send({error:'CONTENT_SOURCE_NOT_FOUND'});if(source.project_status!=='DRAFT')return reply.code(409).send({error:'CONTENT_SOURCES_LOCKED'});let html='';try{const r=await fetch(source.source_url,{headers:{'user-agent':'Mozilla/5.0 MediaIntelligencePemkoBatam/1.0'},signal:AbortSignal.timeout(15000)});if(!r.ok)return reply.code(422).send({error:'SOURCE_FETCH_FAILED',status:r.status});html=await r.text();}catch{return reply.code(422).send({error:'SOURCE_FETCH_FAILED'});}const text=html.replace(/<script[\s\S]*?<\/script>/gi,' ').replace(/<style[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/&quot;/g,'"').replace(/&#8217;|&rsquo;/g,"'").replace(/&#8220;|&#8221;|&ldquo;|&rdquo;/g,'"').replace(/&amp;/g,'&').replace(/\s+/g,' ').trim().slice(0,50000);if(!text)return reply.code(422).send({error:'SOURCE_TEXT_EMPTY'});let parsed:any;
+try{
+ const config=await loadHumasAiTask(pool,'content_studio_prompting');
+ const prompt=config.prompt+`\n\nINSTRUKSI TEKNIS EKSTRAKSI SUMBER (JSON wajib):
+Ekstrak fakta terverifikasi dari sumber untuk Content Studio. Kategori: ${source.category}.
+Jangan menambah fakta. OFFICIAL_STATEMENT: prioritaskan kutipan persis, speaker, role, context.
+DATA_STATISTICS: angka dan konteks. LEGAL_REGULATION: nama/nomor regulasi hanya bila tertulis.
+PROGRAM_SERVICE/ADDITIONAL_REFERENCE: fakta relevan. Maksimal 10 fakta.
+Kembalikan JSON {"sourceTitle":"...","facts":[{"type":"QUOTE|STATISTIC|REGULATION|FACT","speaker":null,"role":null,"text":"...","context":"..."}]}.
+SOURCE:\n${text}`;
+ parsed=await executeHumasAi(pool,{userId:Number(ctx.id),taskCode:'content_studio_prompting',config,prompt});
+}catch(error:any){request.log.warn({reason:String(error?.message||error).slice(0,180)},'Content Studio source extraction unavailable');return reply.code(503).send({error:'SOURCE_EXTRACTION_AI_FAILED',reason:String(error?.message||'AI_UNAVAILABLE').slice(0,100)});}
+const facts=Array.isArray(parsed.facts)?parsed.facts.slice(0,10):[];const row=(await pool.query("UPDATE content_project_sources SET source_title=COALESCE($1,source_title),extracted_facts=$2::jsonb,status='EXTRACTED',updated_at=NOW() WHERE id=$3 RETURNING *",[parsed.sourceTitle||null,JSON.stringify(facts),source.id])).rows[0];return{data:row};});
  app.post('/api/phase6/content-projects/:projectId/sources/:sourceId/confirm',{preHandler:auth},async(request,reply)=>{const ctx=request.phase5Auth!;if(!requireManage(ctx))return reply.code(403).send({error:'FORBIDDEN'});const p=z.object({projectId:z.coerce.number().int().positive(),sourceId:z.coerce.number().int().positive()}).safeParse(request.params),b=z.object({facts:z.array(z.any()).max(10)}).safeParse(request.body);if(!p.success||!b.success)return reply.code(400).send({error:'INVALID_CONTENT_SOURCE_CONFIRMATION'});const source=(await pool.query("SELECT s.*,p.status project_status FROM content_project_sources s JOIN content_projects p ON p.id=s.project_id WHERE s.id=$1 AND s.project_id=$2",[p.data.sourceId,p.data.projectId])).rows[0];if(!source)return reply.code(404).send({error:'CONTENT_SOURCE_NOT_FOUND'});if(source.project_status!=='DRAFT')return reply.code(409).send({error:'CONTENT_SOURCES_LOCKED'});if(source.status!=='EXTRACTED')return reply.code(409).send({error:'SOURCE_EXTRACTION_REQUIRED'});const row=(await pool.query("UPDATE content_project_sources SET confirmed_facts=$1::jsonb,status='CONFIRMED',confirmed_by=$2,confirmed_at=NOW(),updated_at=NOW() WHERE id=$3 RETURNING *",[JSON.stringify(b.data.facts),ctx.id,source.id])).rows[0];return{data:row};});
 
  app.get('/api/phase5/issues/:issueId/workflows/:workflowId/strategy',{preHandler:auth},async(request,reply)=>{
@@ -237,7 +164,7 @@ const model=String(configured.rows[0].code);const prompt=`Ekstrak fakta terverif
  app.post('/api/phase5/issues/:issueId/workflows/:workflowId/strategy/draft',{preHandler:auth},async(request,reply)=>{
   const p=paramsSchema.safeParse(request.params);if(!p.success)return reply.code(400).send({error:'INVALID_WORKFLOW'});const ctx=request.phase5Auth!;if(!requireManage(ctx))return reply.code(403).send({error:'FORBIDDEN'});const w=await workflow(p.data.issueId,p.data.workflowId);if(!w)return reply.code(404).send({error:'WORKFLOW_NOT_FOUND'});if(!['APPROVED','STRATEGY'].includes(String(w.workflow_status)))return reply.code(409).send({error:'STRATEGY_STAGE_NOT_AVAILABLE',status:w.workflow_status});const gap=(await pool.query('SELECT 1 FROM issue_communication_gap_snapshots WHERE workflow_id=$1',[w.id])).rows[0];if(!gap)return reply.code(409).send({error:'COMMUNICATION_GAP_REQUIRED'});const open=(await pool.query("SELECT * FROM communication_strategies WHERE workflow_id=$1 AND status IN ('DRAFT','IN_REVIEW') ORDER BY version DESC LIMIT 1",[w.id])).rows[0];if(open)return reply.code(409).send({error:'OPEN_STRATEGY_EXISTS',data:open});
   const version=Number((await pool.query('SELECT COALESCE(MAX(version),0)+1 v FROM communication_strategies WHERE workflow_id=$1',[w.id])).rows[0].v),input=await snapshot(w);
-  const generated=await generateStrategyWithGemini(pool,input,ctx.id);
+  const generated=await generateStrategy(pool,input,ctx.id);
   const client=await pool.connect();try{await client.query('BEGIN');if(w.workflow_status==='APPROVED')await client.query("UPDATE issue_workflows SET workflow_status='STRATEGY',updated_by=$1,updated_at=NOW() WHERE id=$2",[ctx.id,w.id]);const row=(await client.query("INSERT INTO communication_strategies(workflow_id,issue_id,version,status,input_snapshot,executive_summary,communication_objectives,target_audiences,key_messages,talking_points,channel_strategy,timing_strategy,spokesperson_strategy,content_formats,communication_risks,coordination_requirements,expected_communication_outcomes,success_kpis,generated_by,generated_at,created_by,updated_by) VALUES($1,$2,$3,'DRAFT',$4::jsonb,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb,$14::jsonb,$15::jsonb,$16::jsonb,$17::jsonb,$18,NOW(),$18,$18) RETURNING *",[w.id,w.issue_id,version,JSON.stringify(input),generated.executiveSummary||null,JSON.stringify(generated.communicationObjectives||[]),JSON.stringify(generated.targetAudiences||[]),JSON.stringify(generated.keyMessages||[]),JSON.stringify(generated.talkingPoints||[]),JSON.stringify(generated.channelStrategy||[]),JSON.stringify(generated.timingStrategy||{}),JSON.stringify(generated.spokespersonStrategy||[]),JSON.stringify(generated.contentFormats||[]),JSON.stringify(generated.communicationRisks||[]),JSON.stringify(generated.coordinationRequirements||[]),JSON.stringify(generated.expectedCommunicationOutcomes||[]),JSON.stringify(generated.successKpis||[]),ctx.id])).rows[0];
   // Production recommendations are intentionally stored inside input_snapshot metadata for now.
   // This avoids a schema migration while making newly generated Strakom Content-Studio-ready.
@@ -247,7 +174,7 @@ const model=String(configured.rows[0].code);const prompt=`Ekstrak fakta terverif
  app.post('/api/phase5/issues/:issueId/workflows/:workflowId/strategy/:version/regenerate',{preHandler:auth},async(request,reply)=>{
   const p=paramsSchema.extend({version:z.coerce.number().int().positive()}).safeParse(request.params);if(!p.success)return reply.code(400).send({error:'INVALID_STRATEGY'});const ctx=request.phase5Auth!;if(!requireManage(ctx))return reply.code(403).send({error:'FORBIDDEN'});
   const w=await workflow(p.data.issueId,p.data.workflowId);if(!w)return reply.code(404).send({error:'WORKFLOW_NOT_FOUND'});const current=(await pool.query("SELECT id,status FROM communication_strategies WHERE workflow_id=$1 AND issue_id=$2 AND version=$3",[p.data.workflowId,p.data.issueId,p.data.version])).rows[0];if(!current||current.status!=='DRAFT')return reply.code(409).send({error:'ONLY_DRAFT_STRATEGY_CAN_BE_REGENERATED'});
-  const input=await snapshot(w),generated=await generateStrategyWithGemini(pool,input,ctx.id),enriched={...input,productionRecommendations:Array.isArray(generated.productionRecommendations)?generated.productionRecommendations:[]};
+  const input=await snapshot(w),generated=await generateStrategy(pool,input,ctx.id),enriched={...input,productionRecommendations:Array.isArray(generated.productionRecommendations)?generated.productionRecommendations:[]};
   const client=await pool.connect();try{await client.query('BEGIN');const row=(await client.query(`UPDATE communication_strategies SET input_snapshot=$1::jsonb,executive_summary=$2,communication_objectives=$3::jsonb,target_audiences=$4::jsonb,key_messages=$5::jsonb,talking_points=$6::jsonb,channel_strategy=$7::jsonb,timing_strategy=$8::jsonb,spokesperson_strategy=$9::jsonb,content_formats=$10::jsonb,communication_risks=$11::jsonb,coordination_requirements=$12::jsonb,expected_communication_outcomes=$13::jsonb,success_kpis=$14::jsonb,generated_by=$15,generated_at=NOW(),updated_by=$15,updated_at=NOW() WHERE id=$16 AND status='DRAFT' RETURNING *`,[JSON.stringify(enriched),generated.executiveSummary||null,JSON.stringify(generated.communicationObjectives||[]),JSON.stringify(generated.targetAudiences||[]),JSON.stringify(generated.keyMessages||[]),JSON.stringify(generated.talkingPoints||[]),JSON.stringify(generated.channelStrategy||[]),JSON.stringify(generated.timingStrategy||{}),JSON.stringify(generated.spokespersonStrategy||[]),JSON.stringify(generated.contentFormats||[]),JSON.stringify(generated.communicationRisks||[]),JSON.stringify(generated.coordinationRequirements||[]),JSON.stringify(generated.expectedCommunicationOutcomes||[]),JSON.stringify(generated.successKpis||[]),ctx.id,current.id])).rows[0];
   await client.query('DELETE FROM communication_strategy_districts WHERE strategy_id=$1',[current.id]);const allowed=new Set((input.districts||[]).map((d:any)=>Number(d.id)));for(const ds of (generated.districtStrategies||[])){const districtId=Number(ds.districtId);if(!allowed.has(districtId))continue;await client.query(`INSERT INTO communication_strategy_districts(strategy_id,workflow_id,district_id,evidence_context,local_audiences,communication_focus,local_messages,talking_points,local_channels,coordination_opds,timing_strategy,success_kpis,field_update_requirements) VALUES($1,$2,$3,$4::jsonb,$5::jsonb,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb,$12::jsonb,$13::jsonb)`,[current.id,w.id,districtId,JSON.stringify(ds.evidenceContext||{}),JSON.stringify(ds.localAudiences||[]),JSON.stringify(ds.communicationFocus||[]),JSON.stringify(ds.localMessages||[]),JSON.stringify(ds.talkingPoints||[]),JSON.stringify(ds.localChannels||[]),JSON.stringify(ds.coordinationOpds||[]),JSON.stringify(ds.timingStrategy||{}),JSON.stringify(ds.successKpis||[]),JSON.stringify(ds.fieldUpdateRequirements||[])]);}await client.query('COMMIT');return{data:row};}catch(e){await client.query('ROLLBACK');throw e}finally{client.release()}
  });

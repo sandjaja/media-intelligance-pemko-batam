@@ -111,7 +111,7 @@ test('configured gateway rejects oversized prompt before database or provider ac
   const pool = { query: async () => { queried = true; throw new Error('UNEXPECTED_DB_ACCESS'); } } as unknown as Pool;
   await assert.rejects(executeConfiguredAi(pool, {
     userId: 99, taskCode: 'strakom_analysis', provider: 'gemini',
-    modelCode: 'test-model', prompt: 'x'.repeat(12001),
+    modelCode: 'test-model', prompt: 'x'.repeat(120001),
   }), /AI_GATEWAY_INVALID_REQUEST/);
   assert.equal(queried, false);
 });

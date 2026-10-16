@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 
 const directCallers = [
+  'ai-humas-execution.ts',
   'intelligence.ts',
   'ask-intelligence-core.ts',
   'phase3-outcome-routes.ts',
@@ -17,7 +18,7 @@ test('direct Gemini analysis call sites use database configuration and shared qu
     const source = readFileSync(new URL('./' + filename, import.meta.url), 'utf8');
     assert.doesNotMatch(source, /process\.env\.GEMINI_API_KEY/, filename + ' must not use environment credentials');
     assert.doesNotMatch(source, /process\.env\.GEMINI_MODEL/, filename + ' must not use environment model');
-    assert.match(source, /reserveGeminiDailyRequest|reserveGeminiDailyQuota|prepareGeminiRequest/, filename + ' must reserve quota');
+    assert.match(source, /reserveGeminiDailyRequest|reserveGeminiDailyQuota|prepareGeminiRequest|executeHumasAi/, filename + ' must reserve quota');
   }
 });
 

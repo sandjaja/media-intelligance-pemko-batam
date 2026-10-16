@@ -1,9 +1,6 @@
 import type { Pool } from 'pg';
-import { executeConfiguredAi } from './ai-execution-gateway.js';
-import type { AiProvider } from './ai-provider-adapters.js';
-import { loadSelectedHumasGeminiModel } from './ai-gemini-config.js';
-import { reserveGeminiDailyRequest } from './ai-gemini-quota-reservation.js';
-import { recordGeminiExecution } from './ai-gemini-execution-log.js';
+import { loadHumasAiTask, executeHumasAi } from './ai-humas-execution.js';
+import { AI_MAX_PROMPT_CHARS } from './ai-provider-adapters.js';
 import { extractIssueAngles, type IssueAngleEvidence } from './issue-angle-extractor.js';
 
 export type DynamicClaim={
@@ -43,18 +40,9 @@ export async function extractDynamicIssueClaims(evidence:IssueAngleEvidence[],co
 
  const fallback=(reason='UNKNOWN')=>{const r=extractIssueAngles(evidence);return{...r,mode:'deterministic-fallback' as const,fallbackReason:reason,claims:r.angles.map(a=>({...a,claim:a.label,confidence:0,evidenceIds:a.evidence.map(x=>`${x.source}:${x.id}`)}))}};
  if(!evidence.length)return fallback('NO_VALID_EVIDENCE');if(!pool)return fallback('GEMINI_DATABASE_POOL_MISSING');
- const selection=(await pool.query("SELECT p.code AS provider,m.code AS model FROM ai_humas_model_selections s JOIN ai_models m ON m.id=s.model_id JOIN ai_providers p ON p.id=m.provider_id WHERE s.task_code='gap_analysis' LIMIT 1")).rows[0];
- if(!selection)throw new Error('AI_GAP_MODEL_SELECTION_MISSING');
- const paid=selection.provider!=='gemini';
- if(paid&&(!Number.isSafeInteger(userId)||!userId||userId<=0))throw new Error('AI_GATEWAY_INVALID_CONTEXT');
- const models:Array<{key:string;model:string}>=paid?[{key:'',model:String(selection.model)}]:[await loadSelectedHumasGeminiModel(pool,'gap_analysis')];
- const basePromptRows=await pool.query("SELECT prompt_text FROM ai_humas_task_prompts WHERE task_code='gap_analysis' LIMIT 1");
- const basePrompt=String(basePromptRows.rows[0]?.prompt_text||'').trim();
- if(!basePrompt)throw new Error('AI_GAP_PROMPT_NOT_CONFIGURED');
+ const config=await loadHumasAiTask(pool,'gap_analysis');
+ const basePrompt=config.prompt;
  const source=evidence.slice(0,40).map(e=>({evidenceId:ref(e),source:e.source,title:clip(e.title,500),text:clip([e.summary,e.content,e.body_text].filter(Boolean).join(' '))}));
- for(let attempt=0;attempt<models.length;attempt++){
- const {key,model}=models[attempt];
- const startedAt=Date.now();
  try{
   const prompt=`${basePrompt}
 
@@ -101,21 +89,9 @@ Output JSON object {"claims":[{"claim":"...","angleType":"...","confidence":0.0,
 
 EVIDENCE:
 ${JSON.stringify(source)}`
-  if(prompt.length>12000)throw new Error('AI_GAP_PROMPT_TOO_LARGE');
-  try{if(!paid)await reserveGeminiDailyRequest(pool,model,'issue_claim_extraction');}catch{if(attempt+1<models.length)continue;return fallback('GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}
-  let payload:any;
-  let raw:string;
-  if(paid){
-    const result=await executeConfiguredAi(pool,{userId:userId!,taskCode:'gap_analysis',provider:selection.provider as AiProvider,modelCode:model,prompt});
-    raw=JSON.stringify(result.data);
-    payload={gatewayUsage:result.usage};
-  }else{
-    const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}}),signal:AbortSignal.timeout(10000)});
-    if(!response.ok)throw new Error(`Gemini HTTP ${response.status}`);
-    payload=await response.json();
-    raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('')||'';
-  }
-  if(!raw)throw new Error('AI_PROVIDER_EMPTY_RESPONSE');
+  if(prompt.length>AI_MAX_PROMPT_CHARS)throw new Error('AI_GAP_PROMPT_TOO_LARGE');
+  const data=await executeHumasAi(pool,{userId:userId!,taskCode:'gap_analysis',config,prompt});
+  const raw=JSON.stringify(data);
   const parsed=JSON.parse(raw),validIds=new Set(source.map(x=>x.evidenceId)),byId=new Map(evidence.map(e=>[ref(e),e]));
   const claims:DynamicClaim[]=(Array.isArray(parsed.claims)?parsed.claims:[]).slice(0,16).filter((c:any)=>c?.include===true).map((c:any)=>{
    const ids:string[]=[...new Set<string>((Array.isArray(c.evidenceIds)?c.evidenceIds:[]).map((x:any)=>String(x)).filter((x:string)=>validIds.has(x)))];
@@ -132,8 +108,11 @@ ${JSON.stringify(source)}`
    mentionedLocations:[...new Set<string>((Array.isArray(ga.mentionedLocations)?ga.mentionedLocations:[]).map((x:any)=>String(x).trim()).filter(Boolean))].slice(0,20),
    scopeEvidenceStatus:['SUPPORTED','PARTIAL','GENERIC','OUTSIDE_SCOPE'].includes(String(ga.scopeEvidenceStatus))?String(ga.scopeEvidenceStatus):'GENERIC'
   }:null;
-  if(!paid)await recordGeminiExecution(pool,{model,feature:'issue_claim_extraction',status:'success',startedAt,payload});return{angles:claims,claims,unclassified:[],totalEvidence:evidence.length,mode:'ai-dynamic' as const,fallbackReason:null,geographicAnalysis};
- }catch(error:any){if(paid)throw error;await recordGeminiExecution(pool,{model,feature:'issue_claim_extraction',status:'failed',startedAt,error:String(error?.message||error)});const reason=String(error?.message||error||'UNKNOWN').slice(0,180);if(/^Gemini HTTP (429|503)$/.test(reason)&&attempt+1<models.length)continue;console.warn('[communication-gap] dynamic claim fallback:',reason);return fallback(reason)}
+  return{angles:claims,claims,unclassified:[],totalEvidence:evidence.length,mode:'ai-dynamic' as const,fallbackReason:null,geographicAnalysis};
+ }catch(error:any){
+  if(config.provider!=='gemini')throw error;
+  const reason=String(error?.message||error||'UNKNOWN').slice(0,180);
+  console.warn('[communication-gap] dynamic claim fallback:',reason);
+  return fallback(reason);
  }
- return fallback('GEMINI_MODELS_UNAVAILABLE');
 }

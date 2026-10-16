@@ -7,6 +7,7 @@ import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { recalculateIssueRisk } from './issue-risk.js';
 import { extractDynamicIssueClaims } from './issue-dynamic-claim-extractor.js';
 import { matchDynamicOfficialResponseCoverage } from './issue-response-coverage.js';
+import { withHumasAnalysisLock } from './ai-humas-analysis-lock.js';
 
 declare module 'fastify' { interface FastifyRequest { issueTaxonomyAuth?: AuthorizationContext } }
 const canManage=(ctx:AuthorizationContext)=>ctx.legacyRole==='admin'||ctx.roles.includes('super_admin')||ctx.roles.includes('humas');
@@ -81,7 +82,7 @@ SELECT id,keyword,role,priority FROM ranked WHERE (role='PRIMARY' AND rn=1) OR (
   return{data:{keywords:{primary:primaryKeyword?{id:Number(primaryKeyword.id),keyword:primaryKeyword.keyword}:null,supporting:supportingKeywords.map((x:any)=>({id:Number(x.id),keyword:x.keyword}))},opds:{primary:primaryOpd?{id:Number(primaryOpd.id),code:primaryOpd.code,name:primaryOpd.name}:null,supporting:supportingOpds.map((x:any)=>({id:Number(x.id),code:x.code,name:x.name}))}}};
  });
 
- app.get('/api/admin/issue-taxonomy/issues/:id/communication-gap',{preHandler:issueReader},async(request,reply)=>{
+ const communicationGap=async(request:FastifyRequest,reply:any)=>{
   const ctx=request.issueTaxonomyAuth!,organizationId=await resolveOrganizationId(pool,ctx),issueId=Number((request.params as any).id);
   if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
   if(!Number.isInteger(issueId)||issueId<=0)return reply.code(400).send({error:'INVALID_ID'});
@@ -94,7 +95,8 @@ SELECT id,keyword,role,priority FROM ranked WHERE (role='PRIMARY' AND rn=1) OR (
     FROM issue_workflows w JOIN issue_communication_gap_snapshots s ON s.workflow_id=w.id
     WHERE w.issue_id=$1 AND s.organization_id=$2 AND w.workflow_status<>'CLOSED'
     ORDER BY w.cycle_number DESC,w.id DESC LIMIT 1`,[issueId,organizationId])).rows[0];
-  if(savedGap){
+  const force=request.method==='POST'&&(request.body as any)?.force===true;
+  if(savedGap&&!force){
     let prior:any=null;
     try{prior=typeof savedGap.signature==='string'?JSON.parse(savedGap.signature):savedGap.signature;}catch{prior=null;}
     const counts=(await pool.query(`SELECT
@@ -110,9 +112,10 @@ SELECT id,keyword,role,priority FROM ranked WHERE (role='PRIMARY' AND rn=1) OR (
     const freshnessUnverified=!prior?.evidenceFingerprint;
     return {...savedGap.result,workflow:{id:Number(savedGap.workflow_id),cycleNumber:Number(savedGap.cycle_number)},snapshot:{analyzedAt:savedGap.analyzed_at,stale:stale||freshnessUnverified,refreshRequired:stale||freshnessUnverified}};
   }
-  // Never start a paid analysis from an ordinary page read.
-  const gapProviderOnRead=(await pool.query("SELECT p.code FROM ai_humas_model_selections s JOIN ai_models m ON m.id=s.model_id JOIN ai_providers p ON p.id=m.provider_id WHERE s.task_code='gap_analysis' LIMIT 1")).rows[0]?.code;
-  if(gapProviderOnRead&&gapProviderOnRead!=='gemini')return reply.code(409).send({error:'AI_GAP_PAID_EXECUTION_REQUIRES_EXPLICIT_ACTION'});
+  if(request.method==='GET')return reply.code(404).send({error:'COMMUNICATION_GAP_SNAPSHOT_NOT_FOUND'});
+  const activeWorkflow=(await pool.query(`SELECT id,cycle_number,workflow_status FROM issue_workflows WHERE issue_id=$1 AND workflow_status<>'CLOSED' ORDER BY cycle_number DESC,id DESC LIMIT 1`,[issueId])).rows[0];
+  if(!activeWorkflow)return reply.code(409).send({error:'ACTIVE_WORKFLOW_NOT_FOUND'});
+  if(activeWorkflow.workflow_status!=='NEW')return reply.code(409).send({error:'GAP_ANALYSIS_WORKFLOW_LOCKED'});
   const online=(await pool.query(`SELECT a.id,a.title,a.summary,a.content,a.published_at,(a.news_classification='UTAMA' AND (SELECT al.action FROM audit_logs al WHERE al.action IN ('ARTICLE_CLASSIFICATION_VERIFIED','ARTICLE_CLASSIFICATION_REOPENED') AND al.metadata->>'articleId'=a.id::text ORDER BY al.created_at DESC,al.id DESC LIMIT 1)='ARTICLE_CLASSIFICATION_VERIFIED' AND a.sentiment IS NOT NULL AND COALESCE(a.risk_score,0)>0) valid FROM issue_articles ia JOIN articles a ON a.id=ia.article_id WHERE ia.issue_id=$1`,[issueId])).rows;
   const print=(await pool.query(`SELECT pa.id,pa.title,pa.summary,pa.body_text,pe.edition_date published_at,(lower(pa.status)='analyzed' AND pa.opd_id IS NOT NULL AND pa.ai_metadata->'v16Routing'->>'routingStatus'='ROUTED' AND COALESCE(pa.ai_metadata->'v16Routing'->>'keywordId','')<>'' AND pa.ai_metadata->'v16Routing'->>'keywordVerification'='ACCEPTED' AND pa.ai_metadata->'intelligence'->>'riskStatus'='FINAL' AND pa.sentiment IS NOT NULL AND COALESCE(pa.risk_score,0)>0) valid FROM issue_print_articles ipa JOIN print_articles pa ON pa.id=ipa.print_article_id JOIN print_editions pe ON pe.id=pa.edition_id WHERE ipa.issue_id=$1 AND ipa.linkage_status='linked'`,[issueId])).rows;
   const social=(await pool.query(`SELECT sm.id,sm.title,sm.content,sm.published_at,sm.source_kind,sm.owned_account_id,sm.opd_id,osa.account_name owned_account_name,osa.handle owned_account_handle,(sm.source_kind='external' AND sm.metadata->'v16Routing'->>'newsClassification'='UTAMA' AND sm.metadata->'v16Routing'->>'routingStatus'='ROUTED' AND sm.opd_id IS NOT NULL AND (sm.metadata->'socialVerification'->>'status'='LOCKED' OR sm.metadata->'manualClassification'->>'locked'='true') AND COALESCE(sm.metadata->'intelligence'->>'riskStatus','')='FINAL' AND sm.sentiment IS NOT NULL AND COALESCE(sm.risk_score,0)>0) valid FROM social_mention_issues smi JOIN social_mentions sm ON sm.id=smi.mention_id LEFT JOIN owned_social_accounts osa ON osa.id=sm.owned_account_id WHERE smi.issue_id=$1`,[issueId])).rows;
@@ -130,8 +133,7 @@ SELECT id,keyword,role,priority FROM ranked WHERE (role='PRIMARY' AND rn=1) OR (
   const primaryOpd=opdRows.find((x:any)=>x.routing_role==='PRIMARY')||null,supportingOpds=opdRows.filter((x:any)=>x.routing_role!=='PRIMARY'||Number(x.id)!==Number(primaryOpd?.id));
   const uptdRows=(await pool.query(`SELECT u.id,u.code,u.name,u.opd_id,bool_or(au.is_primary) is_primary FROM issue_articles ia JOIN article_uptd au ON au.article_id=ia.article_id JOIN uptd u ON u.id=au.uptd_id AND u.active=true WHERE ia.issue_id=$1 GROUP BY u.id,u.code,u.name,u.opd_id ORDER BY bool_or(au.is_primary) DESC,u.name`,[issueId])).rows;
   const issueContext={geography:{scope:issue.geographic_scope||'UNSPECIFIED',districts:Array.isArray(issue.districts)?issue.districts.map((d:any)=>({id:Number(d.id),code:d.code,name:d.name})):[]},keywords:{primary:primaryKeyword?{id:Number(primaryKeyword.id),keyword:primaryKeyword.keyword}:null,supporting:supportingKeywords.map((x:any)=>({id:Number(x.id),keyword:x.keyword}))},opds:{primary:primaryOpd?{id:Number(primaryOpd.id),code:primaryOpd.code,name:primaryOpd.name}:null,supporting:supportingOpds.map((x:any)=>({id:Number(x.id),code:x.code,name:x.name}))},uptds:uptdRows.map((x:any)=>({id:Number(x.id),code:x.code,name:x.name,opdId:Number(x.opd_id),primary:!!x.is_primary}))};
-  // Claim extraction and response coverage still use Gemini-specific adapters.
-  // Never charge Gemini when Humas explicitly selected another model for Gap.
+  // Validate the exact selected model before running either Gap subanalysis.
   const gapSelection=await pool.query(`SELECT p.code AS provider_code,m.code AS model_code,p.enabled AS provider_enabled,m.enabled AS model_enabled
     FROM ai_humas_model_selections s
     JOIN ai_models m ON m.id=s.model_id
@@ -166,10 +168,21 @@ SELECT id,keyword,role,priority FROM ranked WHERE (role='PRIMARY' AND rn=1) OR (
     social:social.map((x:any)=>[x.id,x.title,x.content,x.valid,x.source_kind,x.published_at])
   });
   const signature=JSON.stringify({status:issue.status,scope:issue.geographic_scope,districts:(issue.districts||[]).map((d:any)=>d.id),external:external.length,validExternal:validExternal.length,owned:owned.length,evidenceFingerprint});
-  const activeWorkflow=(await pool.query(`SELECT id,cycle_number FROM issue_workflows WHERE issue_id=$1 AND workflow_status<>'CLOSED' ORDER BY cycle_number DESC,id DESC LIMIT 1`,[issueId])).rows[0];if(!activeWorkflow)return reply.code(409).send({error:'ACTIVE_WORKFLOW_NOT_FOUND'});
   await pool.query(`INSERT INTO issue_communication_gap_snapshots(workflow_id,issue_id,organization_id,signature,result,analyzed_at,analyzed_by,updated_at) VALUES($1,$2,$3,$4,$5::jsonb,NOW(),$6,NOW()) ON CONFLICT(workflow_id) DO UPDATE SET organization_id=EXCLUDED.organization_id,signature=EXCLUDED.signature,result=EXCLUDED.result,analyzed_at=NOW(),analyzed_by=EXCLUDED.analyzed_by,updated_at=NOW()`,[activeWorkflow.id,issueId,organizationId,signature,JSON.stringify(result),ctx.id]);
   (result as any).workflow={id:Number(activeWorkflow.id),cycleNumber:Number(activeWorkflow.cycle_number)};
   return result;
+ };
+ app.get('/api/admin/issue-taxonomy/issues/:id/communication-gap',{preHandler:issueReader},communicationGap);
+ app.post('/api/admin/issue-taxonomy/issues/:id/communication-gap',{preHandler:manager},async(request,reply)=>{
+   const body=z.object({force:z.boolean().optional().default(false)}).safeParse(request.body||{});
+   const id=z.coerce.number().int().positive().safeParse((request.params as any).id);
+   if(!body.success||!id.success)return reply.code(400).send({error:'INVALID_GAP_ANALYSIS_REQUEST'});
+   request.body=body.data;
+   try{return await withHumasAnalysisLock(pool,'gap:'+id.data,()=>communicationGap(request,reply));}
+   catch(error:any){
+     if(error?.message==='AI_ANALYSIS_ALREADY_RUNNING')return reply.code(409).send({error:'AI_ANALYSIS_ALREADY_RUNNING'});
+     throw error;
+   }
  });
 
  app.get('/api/admin/issue-taxonomy/issues/:id/communication-gap-snapshot',{preHandler:issueReader},async(request,reply)=>{const ctx=request.issueTaxonomyAuth!,organizationId=await resolveOrganizationId(pool,ctx),issueId=Number((request.params as any).id);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});if(!Number.isInteger(issueId)||issueId<=0)return reply.code(400).send({error:'INVALID_ID'});const row=(await pool.query(`SELECT s.result,s.analyzed_at,w.id workflow_id,w.cycle_number FROM issue_workflows w JOIN issue_communication_gap_snapshots s ON s.workflow_id=w.id WHERE w.issue_id=$1 AND s.organization_id=$2 AND w.workflow_status<>'CLOSED' ORDER BY w.cycle_number DESC,w.id DESC LIMIT 1`,[issueId,organizationId])).rows[0];if(!row)return reply.code(404).send({error:'COMMUNICATION_GAP_SNAPSHOT_NOT_FOUND'});return{...row.result,workflow:{id:Number(row.workflow_id),cycleNumber:Number(row.cycle_number)},snapshot:{analyzedAt:row.analyzed_at}}});

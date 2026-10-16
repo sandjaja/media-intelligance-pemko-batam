@@ -2,7 +2,7 @@ import type { Pool } from 'pg';
 import { reserveGeminiDailyRequest } from './ai-gemini-quota-reservation.js';
 import { randomUUID } from 'node:crypto';
 import { reserveAiBudget, settleAiBudgetWithUsage, getAiModelPrice, calculateAiTokenCost } from './ai-budget-reservation.js';
-import { invokeAiProvider, AI_GATEWAY_MAX_OUTPUT_TOKENS, type AiProvider } from './ai-provider-adapters.js';
+import { invokeAiProvider, AI_GATEWAY_MAX_OUTPUT_TOKENS, type AiProvider, type AiMediaPart, AI_MAX_PROMPT_CHARS, countAiInputTokens } from './ai-provider-adapters.js';
 import { decryptIntegrationCredential } from './integration-credentials.js';
 
 export type AiGatewayUsage = { inputTokens: number; outputTokens: number };
@@ -27,14 +27,19 @@ export async function executeBudgetedAi<T>(pool: Pool, input: {
       !Number.isFinite(input.estimatedUsd) || input.estimatedUsd <= 0) {
     throw new Error('AI_GATEWAY_INVALID_CONTEXT');
   }
-  // Validate task/provider/model linkage before committing a budget reservation.
+  // An enabled infrastructure route or the exact saved Humas selection authorizes the model.
+  // Both paths still pass the same budget reservation and token settlement.
   const { rows } = await pool.query(
     `SELECT m.id FROM ai_models m
        JOIN ai_providers p ON p.id=m.provider_id
-       JOIN ai_task_routes r ON r.model_id=m.id AND r.provider_id=p.id
-       JOIN ai_tasks t ON t.id=r.task_id
-      WHERE m.id=$1 AND p.id=$2 AND t.id=$3
-        AND m.enabled=TRUE AND p.enabled=TRUE AND t.enabled=TRUE AND r.enabled=TRUE
+       JOIN ai_tasks t ON t.id=$3
+      WHERE m.id=$1 AND p.id=$2
+        AND m.enabled=TRUE AND p.enabled=TRUE AND t.enabled=TRUE
+        AND (
+          EXISTS(SELECT 1 FROM ai_task_routes r WHERE r.task_id=t.id AND r.provider_id=p.id AND r.model_id=m.id AND r.enabled=TRUE)
+          OR EXISTS(SELECT 1 FROM ai_humas_model_selections s WHERE s.task_code=t.code AND s.model_id=m.id
+            AND t.code IN ('gap_analysis','strakom_analysis','publication_analysis','monitoring_analysis','content_studio_prompting'))
+        )
       LIMIT 1`,
     [input.modelId, input.providerId, input.taskId],
   );
@@ -63,19 +68,24 @@ export async function executeConfiguredAi(pool: Pool, input: {
   provider: AiProvider;
   modelCode: string;
   prompt: string;
+  mediaParts?: AiMediaPart[];
 }): Promise<AiGatewayResult<unknown>> {
-  if (!Number.isSafeInteger(input.userId) || input.userId <= 0 || !input.taskCode || !input.modelCode || !input.prompt || input.prompt.length > 12000) {
+  if (!Number.isSafeInteger(input.userId) || input.userId <= 0 || !input.taskCode || !input.modelCode || !input.prompt || input.prompt.length > AI_MAX_PROMPT_CHARS) {
     throw new Error('AI_GATEWAY_INVALID_REQUEST');
   }
   const { rows } = await pool.query(
-    `SELECT t.id AS task_id, p.id AS provider_id, m.id AS model_id
-       FROM ai_task_routes r
-       JOIN ai_tasks t ON t.id=r.task_id
-       JOIN ai_providers p ON p.id=r.provider_id
-       JOIN ai_models m ON m.id=r.model_id AND m.provider_id=p.id
-      WHERE t.code=$1 AND p.code=$2 AND m.code=$3
-        AND t.enabled=TRUE AND p.enabled=TRUE AND m.enabled=TRUE AND r.enabled=TRUE
-      ORDER BY r.priority LIMIT 1`,
+    `SELECT t.id AS task_id,p.id AS provider_id,m.id AS model_id
+       FROM ai_models m
+       JOIN ai_providers p ON p.id=m.provider_id
+       JOIN ai_tasks t ON t.code=$1
+      WHERE p.code=$2 AND m.code=$3
+        AND t.enabled=TRUE AND p.enabled=TRUE AND m.enabled=TRUE
+        AND (
+          EXISTS(SELECT 1 FROM ai_task_routes r WHERE r.task_id=t.id AND r.provider_id=p.id AND r.model_id=m.id AND r.enabled=TRUE)
+          OR EXISTS(SELECT 1 FROM ai_humas_model_selections s WHERE s.task_code=t.code AND s.model_id=m.id
+            AND t.code IN ('gap_analysis','strakom_analysis','publication_analysis','monitoring_analysis','content_studio_prompting'))
+        )
+      LIMIT 1`,
     [input.taskCode, input.provider, input.modelCode],
   );
   if (!rows.length) throw new Error('AI_GATEWAY_ROUTE_NOT_CONFIGURED');
@@ -97,7 +107,10 @@ export async function executeConfiguredAi(pool: Pool, input: {
   const price = await getAiModelPrice(pool, Number(route.model_id));
   // Estimate the upper bound using UTF-8 bytes (not JavaScript UTF-16 code units).
   // This avoids under-reserving for Indonesian text mixed with emoji or other multibyte characters.
-  const estimatedInputTokens = Math.max(2048, Buffer.byteLength(input.prompt, 'utf8') * 2);
+  const estimatedInputTokens = input.mediaParts?.length
+    ? Math.max(2048, Math.ceil(await countAiInputTokens(inputWithKey()) * 1.1) + 1024)
+    : Math.max(2048, Buffer.byteLength(input.prompt, 'utf8') * 2);
+  function inputWithKey() { return { ...input, model: input.modelCode, apiKey }; }
   if (!Number.isSafeInteger(estimatedInputTokens)) throw new Error('AI_GATEWAY_ESTIMATE_INVALID');
   const estimatedUsd = calculateAiTokenCost(estimatedInputTokens, AI_GATEWAY_MAX_OUTPUT_TOKENS, price);
   if (estimatedUsd <= 0) throw new Error('AI_GATEWAY_ZERO_COST_REQUIRES_FREE_TIER_POLICY');
@@ -116,6 +129,7 @@ export async function executeConfiguredAi(pool: Pool, input: {
         model: input.modelCode,
         apiKey,
         prompt: input.prompt,
+        mediaParts: input.mediaParts,
       });
     },
   });

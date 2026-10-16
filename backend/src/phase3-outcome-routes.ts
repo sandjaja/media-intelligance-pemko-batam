@@ -1,14 +1,10 @@
-import { reserveGeminiDailyRequest } from './ai-gemini-quota-reservation.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
-import { decryptIntegrationCredential } from './integration-credentials.js';
-import { executeConfiguredAi } from './ai-execution-gateway.js';
-import type { AiProvider } from './ai-provider-adapters.js';
+import { loadHumasAiTask, executeHumasAi } from './ai-humas-execution.js';
+import type { AiMediaPart } from './ai-provider-adapters.js';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
-import { extractDynamicIssueClaims } from './issue-dynamic-claim-extractor.js';
-import { matchDynamicOfficialResponseCoverage } from './issue-response-coverage.js';
 import { canTransitionPhase3, type Phase3ActorRole, type Phase3WorkflowStatus } from './phase3-workflow-policy.js';
 import { get, put, del } from '@vercel/blob';
 import { Readable } from 'node:stream';
@@ -47,19 +43,6 @@ async function fetchWebsitePublication(rawUrl:string){
     return cleanPublicationHtml((await r.text()).slice(0,2_000_000));
   }finally{clearTimeout(timer)}
 }
-async function resolveHumasAiSelection(pool:Pool,taskCode:'publication_analysis'|'monitoring_analysis'){
-  // Existing publication/monitoring paths support Gemini only. Fail closed for
-  // selected paid models until their evidence-aware gateway path is connected.
-  const selected=await pool.query(`SELECT p.code AS provider_code,p.enabled AS provider_enabled,
-      m.enabled AS model_enabled,m.code AS model_code
-    FROM ai_humas_model_selections s
-    JOIN ai_models m ON m.id=s.model_id
-    JOIN ai_providers p ON p.id=m.provider_id
-    WHERE s.task_code=$1 LIMIT 1`,[taskCode]);
-  const row=selected.rows[0];
-  if(row && (!row.provider_enabled||!row.model_enabled))throw new Error('AI_HUMAS_SELECTED_MODEL_DISABLED');
-  return row as {provider_code:string;model_code:string}|undefined;
-}
 function validatePublicationEvidenceMime(mimeType:unknown):string{
   const mime=String(mimeType||'').toLowerCase().trim();
   if(mime!=='application/pdf' && mime!=='image/png' && mime!=='image/jpeg' && mime!=='image/webp'){
@@ -89,167 +72,16 @@ async function readPublicationEvidenceLimited(stream:ReadableStream<Uint8Array>,
   }
   return Buffer.concat(chunks,total);
 }
-async function analyzePublicationPackage(pool:Pool,input:any,mediaParts:any[]=[],userId:string=''){
-  const selection=await resolveHumasAiSelection(pool,'publication_analysis');
-  const selectedModel=selection?.model_code;
-  const models=selectedModel ? {rows:[{code:selectedModel}]} :
-    await pool.query("SELECT m.code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 1");
-  if(!models.rows[0])throw new Error('GEMINI_DATABASE_MODEL_MISSING');
-  const model=models.rows[0].code;
-  const promptRows=await pool.query("SELECT prompt_text FROM ai_humas_task_prompts WHERE task_code='publication_analysis' LIMIT 1");
-  if(!promptRows.rows[0]?.prompt_text?.trim())throw new Error('AI_HUMAS_PROMPT_NOT_CONFIGURED');
-  const prompt=(promptRows.rows[0]?.prompt_text||`Anda adalah analis komunikasi pemerintah daerah. Tugas Anda menilai apakah MATERI PUBLIKASI resmi benar-benar mengeksekusi INTI STRATEGI KOMUNIKASI (Strakom) yang sudah disetujui Humas.
-
-PRINSIP WAJIB:
-- Strakom Approved adalah SATU-SATUNYA baseline strategi. Jangan menggunakan Analisis Gap atau Klarifikasi/Respons OPD sebagai baseline tambahan; keduanya sudah dirangkum saat Strakom disusun.
-- Pahami Strakom secara HOLISTIK lebih dahulu. Temukan maksud strategisnya: tujuan komunikasi, perubahan pemahaman yang ingin dicapai, audiens prioritas, pesan/framing yang paling penting, pendekatan/gaya yang diinginkan, kanal/format yang relevan, serta risiko komunikasi utama.
-- JANGAN membandingkan setiap field Strakom satu per satu secara mekanis. Tidak semua unsur strategi harus tertulis literal dalam satu materi publikasi. Nilai substansi, fungsi, prioritas, dan konteksnya.
-- Bedakan unsur ESENSIAL dari unsur PENDUKUNG. Kekurangan unsur pendukung tidak boleh otomatis membuat publikasi dianggap gagal.
-- Bukti publikasi (website/PDF/gambar) adalah realisasi aktual. Jangan mengarang isi yang tidak terlihat/terbaca.
-- Tahap ini menilai KUALITAS EKSEKUSI STRATEGI dalam publikasi, BUKAN dampak publik, perubahan opini, engagement, pickup media, atau keberhasilan monitoring.
-- Kritik harus konkret dan proporsional. Rekomendasi harus menjelaskan apa yang perlu dipertahankan atau diperbaiki pada publikasi berikutnya.
-- achieved hanya berisi PENCAPAIAN TUJUAN STRATEGIS: hasil komunikasi pada level konten yang memang ditargetkan Strakom dan telah diwujudkan publikasi.
-- strengths hanya berisi KEKUATAN EKSEKUSI PUBLIKASI: kualitas framing, struktur, headline, kutipan, data, keterbacaan, konkretisasi manfaat, atau teknik penyampaian. JANGAN mengulang daftar achieved.
-- gaps hanya berisi kekurangan eksekusi yang material terhadap inti Strakom, bukan daftar semua field yang tidak disebut.
-- CLAIM_PERSISTENCE hanya boleh digunakan untuk claim/problem/gap lama yang memang ingin dikoreksi/diredam dan masih perlu dipantau setelah publikasi. Pesan resmi atau narasi yang INGIN diperkuat bukan CLAIM_PERSISTENCE; gunakan MESSAGE_PICKUP.
-- MESSAGE_PICKUP digunakan untuk memantau apakah pesan/framing/fakta strategis yang sengaja dibawa publikasi kemudian muncul dalam evidence media.
-- monitoringFocus HARUS dapat diverifikasi dari data/evidence yang benar-benar tersedia pada 4 sumber sistem: ONLINE, PRINT, SOCIAL, OWNED.
-- Jangan membuat indikator berupa jumlah/tingkat share, retweet, repost, like, komentar, reach, impression, page view, kunjungan portal, atau metrik engagement lain kecuali metrik tersebut secara eksplisit tersedia pada input evidence.
-- Jika metrik engagement tidak tersedia, ubah indikator menjadi sinyal yang dapat dibuktikan dari konten/evidence, misalnya kemunculan ulang pesan, pickup media, publikasi lanjutan, konsistensi framing, atau amplifikasi pesan resmi pada evidence baru.
-- expectedSignal harus berupa kondisi yang dapat diuji oleh mesin monitoring terhadap evidence yang tersimpan, bukan target abstrak seperti "tingginya penyebaran".
-- Jika tidak ada baseline claim/problem lama yang jelas dari Strakom, jangan membuat CLAIM_PERSISTENCE.
-- coordinationRequirements dari Strakom adalah kebutuhan substansi/koordinasi untuk membuat komunikasi lengkap. Saat bukti publikasi belum memuat informasi yang dibutuhkan, nyatakan sebagai "belum tercantum/belum dapat diverifikasi dari bukti publikasi", BUKAN bahwa OPD/kecamatan belum bertindak.
-- expectedCommunicationOutcomes adalah TARGET pemahaman/tindakan audiens. Analisa Publikasi hanya boleh menilai apakah konten menyediakan informasi/pesan yang mendukung target itu; jangan menyatakan outcome masyarakat sudah terjadi.
-- Jika ada kebutuhan koordinasi/substansi yang belum terwakili di publikasi, masukkan coordinationFollowUp. Gunakan pihak yang sudah disebut Strakom; jangan membuat routing OPD/kecamatan baru.
-- coordinationFollowUp.status hanya NONE, NEEDS_CONFIRMATION, NEEDS_COORDINATION, atau FOLLOWUP_PUBLICATION. Rekomendasi harus berupa tindak lanjut komunikasi/informasi, bukan perintah kebijakan operasional.
-
-HASILKAN:
-1. strategyEssence: sintesis singkat tentang inti Strakom, bukan salinan field.
-2. executionAssessment: apakah publikasi secara substansi menjalankan inti tersebut; status ALIGNED|PARTIAL|MISALIGNED|INSUFFICIENT_EVIDENCE, disertai alasan.
-3. achieved: unsur strategis penting yang sudah terealisasi dalam materi publikasi.
-4. gaps: unsur penting yang seharusnya hadir/lebih kuat berdasarkan maksud Strakom tetapi belum cukup terealisasi. Jangan memasukkan detail minor.
-5. communicationStyle: gaya komunikasi aktual publikasi dan kecocokannya dengan kebutuhan strategi.
-6. strengths: kekuatan TEKNIK/EKSEKUSI publikasi yang membuat strategi tersampaikan; jangan mengulang achieved.
-7. audienceAndMessage: apakah framing/pesan dapat dipahami oleh audiens yang dituju secara substantif.
-8. improvements: perbaikan prioritas dan operasional untuk publikasi berikutnya; hindari saran generik.
-9. coordinationFollowUp: tindak lanjut informasi/koordinasi hanya jika ada kebutuhan material dari Strakom yang belum terwakili pada bukti publikasi.
-10. monitoringFocus: turunkan hanya hal yang memang perlu diamati SETELAH publikasi untuk mengetahui pickup/persistensi claim/sinyal baru/sentimen-risiko/amplifikasi. Gunakan evidence yang tersedia di sistem (ONLINE, PRINT, SOCIAL, OWNED), jangan mengandalkan komentar/share/engagement jika tidak tersedia.
-
-Output JSON:
-{"strategyEssence":{"summary":"...","essentialIntent":["..."],"priorityAudience":["..."],"coreMessage":["..."],"intendedApproach":"..."},"executionAssessment":{"status":"ALIGNED|PARTIAL|MISALIGNED|INSUFFICIENT_EVIDENCE","assessment":"..."},"achieved":["..."],"gaps":["..."],"communicationStyle":{"observed":"...","fitAssessment":"..."},"strengths":["..."],"audienceAndMessage":{"assessment":"...","potentialMisunderstanding":["..."]},"improvements":[{"priority":"HIGH|MEDIUM|LOW","recommendation":"...","reason":"..."}],"coordinationFollowUp":{"status":"NONE|NEEDS_CONFIRMATION|NEEDS_COORDINATION|FOLLOWUP_PUBLICATION","missingInformation":["..."],"parties":["..."],"recommendation":"...","reason":"..."},"monitoringFocus":[{"type":"MESSAGE_PICKUP|CLAIM_PERSISTENCE|NEW_CLAIM|SENTIMENT_RISK|OFFICIAL_AMPLIFICATION","target":"...","rationale":"...","expectedSignal":"...","sourceTypes":["ONLINE","PRINT","SOCIAL","OWNED"]}]}`)+'\n\nDATA:\n'+JSON.stringify(input);
-  if(selection && selection.provider_code!=='gemini'){
-    // The text gateway cannot read attached image/PDF parts. Never drop evidence.
-    if(mediaParts.length)throw new Error('AI_PUBLICATION_MULTIMODAL_PAID_GATEWAY_NOT_READY');
-    if(prompt.length>12000)throw new Error('AI_PUBLICATION_PROMPT_TOO_LARGE');
-    const numericUserId=Number(userId);
-    if(!Number.isSafeInteger(numericUserId)||numericUserId<=0)throw new Error('AI_GATEWAY_INVALID_CONTEXT');
-    const result=await executeConfiguredAi(pool,{
-      userId:numericUserId,taskCode:'publication_analysis',
-      provider:selection.provider_code as AiProvider,modelCode:model,prompt
-    });
-    return result.data;
-  }
-  if(prompt.length>12000)throw new Error('GEMINI_ANALYSIS_PROMPT_TOO_LARGE');
-  const credentials=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
-  if(!credentials.rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
-  const key=decryptIntegrationCredential(credentials.rows[0].credential_ciphertext);
-  await reserveGeminiDailyRequest(pool,model,'phase3_outcome');
-  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt},...mediaParts]}],generationConfig:{responseMimeType:'application/json'}})});
-  if(!r.ok)throw new Error(`Gemini HTTP ${r.status}`);
-  const payload=await r.json() as any;
-  const candidate=payload.candidates?.[0];
-  if(payload.promptFeedback?.blockReason || !candidate || candidate.finishReason!=='STOP'){
-    throw new Error('GEMINI_ANALYSIS_RESPONSE_NOT_COMPLETE');
-  }
-  const raw=candidate.content?.parts?.map((x:any)=>x.text||'').join('');
-  if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');
-  let parsed:unknown;
-  try{parsed=JSON.parse(raw);}catch{throw new Error('GEMINI_ANALYSIS_INVALID_JSON');}
-  if(parsed===null||typeof parsed!=='object'||Array.isArray(parsed))throw new Error('GEMINI_ANALYSIS_INVALID_JSON_SHAPE');
-  return parsed;
+async function analyzePublicationPackage(pool:Pool,input:any,mediaParts:AiMediaPart[]=[],userId:string=''){
+  const config=await loadHumasAiTask(pool,'publication_analysis');
+  return executeHumasAi(pool,{userId:Number(userId),taskCode:'publication_analysis',config,
+    prompt:config.prompt+'\n\nDATA:\n'+JSON.stringify(input),mediaParts});
 }
 
 async function analyzeMonitoringAgainstPublication(pool:Pool,input:any,userId:string){
-  const selection=await resolveHumasAiSelection(pool,'monitoring_analysis');
-  const selectedModel=selection?.model_code;
-  const models=selectedModel ? {rows:[{code:selectedModel}]} :
-    await pool.query("SELECT m.code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 1");
-  if(!models.rows[0])throw new Error('GEMINI_DATABASE_MODEL_MISSING');
-  const model=models.rows[0].code;
-  const promptRows=await pool.query("SELECT prompt_text FROM ai_humas_task_prompts WHERE task_code='monitoring_analysis' LIMIT 1");
-  if(!promptRows.rows[0]?.prompt_text?.trim())throw new Error('AI_HUMAS_PROMPT_NOT_CONFIGURED');
-  const prompt=(promptRows.rows[0]?.prompt_text||`Anda adalah analis komunikasi strategis pemerintah daerah pada AKHIR satu siklus respons isu. Monitoring sudah selesai. Tugas Anda bukan sekadar memeriksa apakah fokus monitoring ditemukan, tetapi menyimpulkan apa arti seluruh evidence pascapublikasi bagi langkah komunikasi berikutnya.
-
-Gunakan secara terpadu: konteks issue dan routing OPD/wilayah, Analisis Gap awal, respons final OPD bila ada, Analisa Publikasi beserta monitoringFocus, dan evidence 4 media setelah publikasi. Semua kesimpulan harus dapat ditelusuri ke data yang diberikan. Jangan mengarang fakta, OPD, kecamatan, tindakan lapangan, reaksi audiens, engagement, atau kejadian masa depan.
-
-ATURAN:
-- Pertahankan penilaian setiap monitoringFocus: PROVEN|PARTIAL|NOT_PROVEN|INSUFFICIENT_DATA dan evidenceRefs source:id.
-- evidenceSufficiency SUFFICIENT|LIMITED|INSUFFICIENT tetap wajib. Keterbatasan evidence harus disebut, tetapi tetap berikan arahan berikutnya yang proporsional.
-- issueOutlook bukan ramalan. Pilih MEREDA|BERLANJUT|BERPOTENSI_BERKEMBANG|BELUM_CUKUP_DATA berdasarkan sinyal evidence, claim yang bertahan/baru, pickup pesan, sentimen/risk yang tersedia, dan gap yang tersisa. Jelaskan indikatornya.
-- emergingRisks hanya masalah/claim/celah komunikasi yang mempunyai dasar pada evidence atau baseline. Bedakan fakta yang sudah terlihat dari risiko yang perlu diantisipasi.
-- strengths dan weaknesses menilai HASIL SATU SIKLUS komunikasi: Gap -> keputusan Humas/klarifikasi bila ada -> Strakom/publikasi -> monitoring. Jangan hanya menilai gaya artikel.
-- opdAnticipation hanya menggunakan OPD utama/pendukung yang diberikan. districtAnticipation hanya menggunakan kecamatan/wilayah yang diberikan. Jika konteks tidak cukup, kosongkan; jangan membuat routing baru.
-- nextCommunication harus operasional tetapi tetap dalam ranah komunikasi: NO_FURTHER_ACTION|KEEP_WATCHING|REINFORCE_MESSAGE|ADDITIONAL_CLARIFICATION|FOLLOWUP_PUBLICATION|NEXT_CYCLE_REVIEW. Jangan memerintahkan kebijakan operasional di luar evidence.
-- Untuk SENTIMENT_RISK jangan menyatakan tren membaik/memburuk dari satu evidence saja.
-- sourceType otoritatif: ONLINE=Media Online, PRINT=Media Cetak, SOCIAL=Media Sosial, OWNED=Owned Channel.
-
-DISIPLIN KESIMPULAN:
-- Pisahkan TEMUAN, RISIKO, ANTISIPASI, dan REKOMENDASI. newSignals berisi fakta/sinyal baru yang benar-benar terlihat pada evidence. emergingRisks.signal berisi potensi masalah/claim/celah yang dapat berkembang; JANGAN isi signal dengan kata kerja tindakan seperti "melakukan", "menjaga", "meningkatkan", "menyelesaikan", atau rekomendasi.
-- emergingRisks.basis wajib menyebut dasar evidence/baseline. emergingRisks.anticipation baru berisi tindakan komunikasi untuk mengantisipasi risiko tersebut.
-- Jika tidak ada risiko baru yang didukung evidence, emergingRisks harus [] dan nyatakan keterbatasannya pada remainingGap/watchNext. Jangan menciptakan risiko agar field terisi.
-- opdAnticipation dan districtAnticipation bukan daftar tugas administratif/operasional. Isinya hanya kesiapan INFORMASI/KOMUNIKASI yang relevan dengan sinyal monitoring. Jika tidak ada implikasi komunikasi spesifik untuk OPD/wilayah tersebut, gunakan [].
-- Jangan menyimpulkan "berhasil", "efektif", "komprehensif", "tidak ada risiko", "tidak ada gap", atau "telah tersampaikan dengan baik" sebagai kesimpulan keseluruhan bila evidenceSufficiency LIMITED/INSUFFICIENT. Boleh mengatakan evidence yang tersedia konsisten/mendukung pesan tertentu, lalu nyatakan batas inferensinya.
-- Bila evidenceSufficiency=INSUFFICIENT, issueOutlook harus BELUM_CUKUP_DATA kecuali ada sinyal eskalasi konkret. Bila LIMITED, MEREDA/BERLANJUT/BERPOTENSI_BERKEMBANG hanya boleh dipilih jika ada indikator langsung yang cukup; assessment wajib menyebut bahwa keyakinan terbatas.
-- NO_FURTHER_ACTION hanya layak bila evidence cukup dan tidak ada gap/risiko material. Bila evidence LIMITED/INSUFFICIENT, prioritaskan KEEP_WATCHING atau NEXT_CYCLE_REVIEW sesuai konteks, kecuali data secara eksplisit menunjukkan siklus memang selesai dan keterbatasan evidence tidak memengaruhi keputusan komunikasi.
-- Jangan mengubah fakta lama menjadi "sinyal baru". newSignals harus benar-benar berasal dari evidence monitoring dan relevan terhadap perubahan setelah publikasi.
-- Jangan menilai koordinasi antar-OPD "baik/buruk" kecuali ada evidence proses koordinasi. Jangan mengklaim keberhasilan substansi pelaksanaan kegiatan hanya dari publikasi komunikasi.
-- Bedakan "isu substantif selesai" dari "evidence komunikasi cukup". Event yang sudah selesai dapat membuat isu substantif mereda, tetapi tidak otomatis membuktikan efektivitas komunikasi.
-- cycleConclusion harus menjawab: apa yang dapat disimpulkan dari evidence, apa yang belum dapat disimpulkan, dan konsekuensi komunikasinya berikutnya. Maksimal 3 kalimat substantif.
-- Untuk opdAnticipation/districtAnticipation gunakan UJI KEBUTUHAN: (1) ada sinyal/risiko/gap komunikasi spesifik pada evidence, (2) OPD/wilayah tersebut relevan langsung dengan sinyal itu, dan (3) ada antisipasi INFORMASI/KOMUNIKASI yang konkret. Jika salah satu tidak terpenuhi, JANGAN isi entri. Dokumentasi laporan pertanggungjawaban, kondusifitas wilayah, koordinasi umum, pelaksanaan program, atau tugas administratif bukan antisipasi komunikasi.
-- Jangan mengisi opdAnticipation/districtAnticipation hanya karena OPD/kecamatan tersedia di routing. Array kosong adalah hasil yang valid dan lebih baik daripada rekomendasi generik.
-- Workflow yang dianalisis sudah selesai/CLOSED. nextCommunication tidak boleh menyuruh mempertahankan, melanjutkan, atau membuka kembali monitoring pada siklus yang sama. KEEP_WATCHING berarti hanya mencatat indikator untuk pemantauan isu berikutnya/kemunculan baru, bukan memperpanjang siklus CLOSED.
-- Jika isu substantif sudah selesai/mereda, tidak ada emerging risk material, dan evidence komunikasi LIMITED, bedakan keputusan: siklus saat ini tetap selesai; keterbatasan evidence dicatat sebagai kelemahan metodologis. Jangan membuat rekomendasi yang sekaligus berkata "tetap dipantau" dan "akhiri pemantauan".
-- nextCommunication.recommendation harus konsisten dengan action, issueOutlook, evidenceSufficiency, emergingRisks, dan status CLOSED. Bila tidak diperlukan komunikasi lanjutan pada siklus ini tetapi ada indikator yang layak diperhatikan bila isu muncul kembali, gunakan NO_FURTHER_ACTION untuk siklus ini dan taruh indikator tersebut di watchNext.
-
-HASILKAN JSON:
-{"focusResults":[{"type":"...","target":"...","status":"PROVEN|PARTIAL|NOT_PROVEN|INSUFFICIENT_DATA","assessment":"...","evidenceRefs":["print:38"],"signal":"..."}],
-"evidenceSufficiency":"SUFFICIENT|LIMITED|INSUFFICIENT",
-"cycleConclusion":"kesimpulan strategis akhir siklus",
-"issueOutlook":{"status":"MEREDA|BERLANJUT|BERPOTENSI_BERKEMBANG|BELUM_CUKUP_DATA","assessment":"...","indicators":["..."]},
-"strengths":["..."],"weaknesses":["..."],
-"emergingRisks":[{"signal":"...","basis":"...","anticipation":"..."}],
-"opdAnticipation":[{"opd":"nama dari context","anticipation":"...","reason":"..."}],
-"districtAnticipation":[{"district":"nama dari context","anticipation":"...","reason":"..."}],
-"nextCommunication":{"action":"NO_FURTHER_ACTION|KEEP_WATCHING|REINFORCE_MESSAGE|ADDITIONAL_CLARIFICATION|FOLLOWUP_PUBLICATION|NEXT_CYCLE_REVIEW","priority":"HIGH|MEDIUM|LOW","recommendation":"...","reason":"..."},
-"watchNext":["..."],"remainingGap":["..."],"newSignals":["..."]}.`)+'\n\nDATA:\n'+JSON.stringify(input);
-  if(selection && selection.provider_code!=='gemini') {
-    if(prompt.length>12000)throw new Error('AI_MONITORING_PROMPT_TOO_LARGE');
-    const numericUserId=Number(userId);
-    if(!Number.isSafeInteger(numericUserId)||numericUserId<=0)throw new Error('AI_GATEWAY_INVALID_CONTEXT');
-    const result=await executeConfiguredAi(pool,{
-      userId:numericUserId,taskCode:'monitoring_analysis',
-      provider:selection.provider_code as AiProvider,modelCode:model,prompt
-    });
-    return result.data;
-  }
-  if(prompt.length>12000)throw new Error('GEMINI_ANALYSIS_PROMPT_TOO_LARGE');
-  const credentials=await pool.query("SELECT c.credential_ciphertext FROM ai_provider_credentials c JOIN ai_providers p ON p.id=c.provider_id WHERE p.code='gemini' AND p.enabled=TRUE LIMIT 1");
-  if(!credentials.rows[0])throw new Error('GEMINI_DATABASE_CREDENTIAL_MISSING');
-  const key=decryptIntegrationCredential(credentials.rows[0].credential_ciphertext);
-  await reserveGeminiDailyRequest(pool,model,'phase3_outcome');
-  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}})});
-  if(!r.ok)throw new Error(`Gemini HTTP ${r.status}`);
-  const payload=await r.json() as any;
-  const candidate=payload.candidates?.[0];
-  if(payload.promptFeedback?.blockReason || !candidate || candidate.finishReason!=='STOP'){
-    throw new Error('GEMINI_ANALYSIS_RESPONSE_NOT_COMPLETE');
-  }
-  const raw=candidate.content?.parts?.map((x:any)=>x.text||'').join('');
-  if(!raw)throw new Error('GEMINI_EMPTY_RESPONSE');
-  let parsed:unknown;
-  try{parsed=JSON.parse(raw);}catch{throw new Error('GEMINI_ANALYSIS_INVALID_JSON');}
-  if(parsed===null||typeof parsed!=='object'||Array.isArray(parsed))throw new Error('GEMINI_ANALYSIS_INVALID_JSON_SHAPE');
-  return parsed;
+  const config=await loadHumasAiTask(pool,'monitoring_analysis');
+  return executeHumasAi(pool,{userId:Number(userId),taskCode:'monitoring_analysis',config,
+    prompt:config.prompt+'\n\nDATA:\n'+JSON.stringify(input)});
 }
 
 export async function registerPhase3OutcomeRoutes(app:FastifyInstance,pool:Pool,jwtSecret:string){
@@ -443,11 +275,13 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
     const events=(await pool.query(`SELECT event_type,created_at,note FROM issue_workflow_events WHERE workflow_id=$1 AND event_type IN ('RESPONSE_PUBLISHED','MONITORING_STARTED','ISSUE_CLOSED') ORDER BY created_at ASC,id ASC`,[w.id])).rows;
     const periods:any[]=[];let publishedAt:any=null;for(const e of events){if(e.event_type==='RESPONSE_PUBLISHED')publishedAt=e.created_at;else if(e.event_type==='MONITORING_STARTED')periods.push({number:periods.length+1,started_at:publishedAt||e.created_at,monitoring_started_at:e.created_at,ended_at:null,status:'MONITORING'});else{const open=[...periods].reverse().find(x=>!x.ended_at);if(open)open.ended_at=e.created_at;}}
     const period=periods.find(x=>x.number===periodNo);if(!period)return reply.code(404).send({error:'MONITORING_PERIOD_NOT_FOUND'});const end=period.ended_at||new Date();if(!period.ended_at&&w.workflow_status!=='MONITORING')return reply.code(409).send({error:'MONITORING_MUST_BE_ACTIVE_OR_CLOSED_FOR_ANALYSIS'});const analysisPeriod={...period,ended_at:end,status:period.ended_at?'CLOSED':'CLOSING'};
-    const online=(await pool.query(`SELECT a.id,a.title,a.published_at FROM issue_articles ia JOIN articles a ON a.id=ia.article_id WHERE ia.issue_id=$1 AND a.published_at >= $2 AND a.published_at <= $3 ORDER BY a.published_at ASC`,[issueId,period.started_at,end])).rows;
+    const online=(await pool.query(`SELECT a.id,a.title,a.published_at,a.summary,a.content FROM issue_articles ia JOIN articles a ON a.id=ia.article_id WHERE ia.issue_id=$1 AND a.published_at >= $2 AND a.published_at <= $3 ORDER BY a.published_at ASC`,[issueId,period.started_at,end])).rows;
     const print=(await pool.query(`SELECT pa.id,pa.title,pe.edition_date published_at,pa.body_text content FROM issue_print_articles ipa JOIN print_articles pa ON pa.id=ipa.print_article_id JOIN print_editions pe ON pe.id=pa.edition_id WHERE ipa.issue_id=$1 AND ipa.linkage_status='linked' AND pe.edition_date >= $2::date AND pe.edition_date <= $3::date ORDER BY pe.edition_date ASC,pa.id ASC`,[issueId,period.started_at,end])).rows;
-    const social=(await pool.query(`SELECT sm.id,sm.title,sm.published_at,sm.source_kind FROM social_mention_issues smi JOIN social_mentions sm ON sm.id=smi.mention_id WHERE smi.issue_id=$1 AND sm.published_at >= $2 AND sm.published_at <= $3 ORDER BY sm.published_at ASC`,[issueId,period.started_at,end])).rows;
+    const social=(await pool.query(`SELECT sm.id,sm.title,sm.published_at,sm.source_kind,sm.content FROM social_mention_issues smi JOIN social_mentions sm ON sm.id=smi.mention_id WHERE smi.issue_id=$1 AND sm.published_at >= $2 AND sm.published_at <= $3 ORDER BY sm.published_at ASC`,[issueId,period.started_at,end])).rows;
     const externalSocial=social.filter((x:any)=>x.source_kind==='external'),owned=social.filter((x:any)=>x.source_kind==='owned'),external=[...online.map((x:any)=>({...x,source:'online'})),...print.map((x:any)=>({...x,source:'print'})),...externalSocial.map((x:any)=>({...x,source:'social'}))];
-    const angleResult=await extractDynamicIssueClaims(external,{},pool),coverageResult=await matchDynamicOfficialResponseCoverage(angleResult.angles,owned,pool);
+    const baselineGap=(await pool.query('SELECT result FROM issue_communication_gap_snapshots WHERE workflow_id=$1 LIMIT 1',[w.id])).rows[0]?.result;
+    const baselineData=baselineGap?.data||baselineGap;
+    const angleResult=baselineData?.externalAngles||null,coverageResult=baselineData?.semanticAssessment||null;
     let publicationAnalysis:any=null,focusAssessment:any=null;
     if(external.length+owned.length===0){
       focusAssessment={
@@ -462,28 +296,11 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
       };
     }
     if(!focusAssessment)try{
-      const publicationEvidence=(await pool.query(`SELECT e.* FROM issue_publication_evidence e WHERE e.workflow_id=$1 ORDER BY e.is_primary DESC,e.created_at,e.id`,[w.id])).rows;
-      if(publicationEvidence.length){
-        const materials:any[]=[],mediaParts:any[]=[];let evidenceBytes=0;
-        for(const e of publicationEvidence){
-          if(e.evidence_type==='WEBSITE'&&e.url){
-            const article=await fetchWebsitePublication(String(e.url));
-            materials.push({id:e.id,type:'WEBSITE',channel:e.channel,url:e.url,caption:e.caption,title:article.title,text:article.text});
-            continue;
-          }
-          const files=(await pool.query('SELECT id,storage_key,file_name,mime_type,file_order FROM issue_publication_evidence_files WHERE evidence_id=$1 ORDER BY file_order,id',[e.id])).rows;
-          const fileMeta:any[]=[];
-          for(const file of files){
-            if(evidenceBytes>=16_000_000)throw new Error('PUBLICATION_EVIDENCE_TOTAL_TOO_LARGE');const mime=validatePublicationEvidenceMime(file.mime_type);
-            const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');const buf=await readPublicationEvidenceLimited(result.stream as ReadableStream<Uint8Array>,Math.min(8_000_000,16_000_000-evidenceBytes));validatePublicationEvidenceSignature(mime,buf);evidenceBytes+=buf.length;if(evidenceBytes>16_000_000)throw new Error('PUBLICATION_EVIDENCE_TOTAL_TOO_LARGE');
-            mediaParts.push({inlineData:{mimeType:mime,data:buf.toString('base64')}});
-            fileMeta.push({id:file.id,file_name:file.file_name,mime_type:file.mime_type,file_order:file.file_order});
-          }
-          materials.push({id:e.id,type:e.evidence_type,channel:e.channel,caption:e.caption,files:fileMeta});
-        }
-        const gapForPublication=(await pool.query(`SELECT result FROM issue_communication_gap_snapshots WHERE workflow_id=$1 LIMIT 1`,[w.id])).rows[0]||null;
+      // Publication and Gap are locked baselines; Monitoring never regenerates either.
+      publicationAnalysis=(await pool.query('SELECT result FROM issue_publication_analysis_snapshots WHERE workflow_id=$1 LIMIT 1',[w.id])).rows[0]?.result||null;
+      if(publicationAnalysis){
+        const gapForPublication={result:baselineGap};
         const responseForPublication=(await pool.query(`SELECT s.response_text,s.facts_data,s.key_message,s.supporting_links,o.name opd_name FROM issue_response_submissions s LEFT JOIN opd o ON o.id=s.opd_id WHERE s.workflow_id=$1 AND s.status='APPROVED' ORDER BY s.version DESC,s.updated_at DESC LIMIT 1`,[w.id])).rows[0]||null;
-        publicationAnalysis=await analyzePublicationPackage(pool,{issueTitle:String(w.title||''),gap:gapForPublication?.result||null,finalResponse:responseForPublication,publicationEvidence:materials},mediaParts,ctx.id);
         const evidenceForAi=[
           ...online.map((x:any)=>({ref:`online:${x.id}`,source:'ONLINE',title:x.title||'',text:String(x.summary||x.content||'').slice(0,3500)})),
           ...print.map((x:any)=>({ref:`print:${x.id}`,source:'PRINT',title:x.title||'',text:String(x.content||'').slice(0,3500)})),
@@ -512,35 +329,20 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
     const events=(await pool.query(`SELECT event_type,created_at,note FROM issue_workflow_events WHERE workflow_id=$1 AND event_type IN ('RESPONSE_PUBLISHED','MONITORING_STARTED','ISSUE_CLOSED') ORDER BY created_at ASC,id ASC`,[w.id])).rows;
     const periods:any[]=[];let publishedAt:any=null;for(const e of events){if(e.event_type==='RESPONSE_PUBLISHED')publishedAt=e.created_at;else if(e.event_type==='MONITORING_STARTED')periods.push({number:periods.length+1,started_at:publishedAt||e.created_at,monitoring_started_at:e.created_at,ended_at:null,status:'MONITORING'});else{const open=[...periods].reverse().find(x=>!x.ended_at);if(open)open.ended_at=e.created_at;}}
     const period=periods.find(x=>x.number===periodNo);if(!period)return reply.code(404).send({error:'MONITORING_PERIOD_NOT_FOUND'});if(!period.ended_at)return reply.code(409).send({error:'MONITORING_MUST_BE_CLOSED_BEFORE_ANALYSIS'});const end=period.ended_at;
-    const online=(await pool.query(`SELECT a.id,a.title,a.published_at FROM issue_articles ia JOIN articles a ON a.id=ia.article_id WHERE ia.issue_id=$1 AND a.published_at >= $2 AND a.published_at <= $3 ORDER BY a.published_at ASC`,[issueId,period.started_at,end])).rows;
+    const online=(await pool.query(`SELECT a.id,a.title,a.published_at,a.summary,a.content FROM issue_articles ia JOIN articles a ON a.id=ia.article_id WHERE ia.issue_id=$1 AND a.published_at >= $2 AND a.published_at <= $3 ORDER BY a.published_at ASC`,[issueId,period.started_at,end])).rows;
     const print=(await pool.query(`SELECT pa.id,pa.title,pe.edition_date published_at,pa.body_text content FROM issue_print_articles ipa JOIN print_articles pa ON pa.id=ipa.print_article_id JOIN print_editions pe ON pe.id=pa.edition_id WHERE ipa.issue_id=$1 AND ipa.linkage_status='linked' AND pe.edition_date >= $2::date AND pe.edition_date <= $3::date ORDER BY pe.edition_date ASC,pa.id ASC`,[issueId,period.started_at,end])).rows;
-    const social=(await pool.query(`SELECT sm.id,sm.title,sm.published_at,sm.source_kind FROM social_mention_issues smi JOIN social_mentions sm ON sm.id=smi.mention_id WHERE smi.issue_id=$1 AND sm.published_at >= $2 AND sm.published_at <= $3 ORDER BY sm.published_at ASC`,[issueId,period.started_at,end])).rows;
+    const social=(await pool.query(`SELECT sm.id,sm.title,sm.published_at,sm.source_kind,sm.content FROM social_mention_issues smi JOIN social_mentions sm ON sm.id=smi.mention_id WHERE smi.issue_id=$1 AND sm.published_at >= $2 AND sm.published_at <= $3 ORDER BY sm.published_at ASC`,[issueId,period.started_at,end])).rows;
     const externalSocial=social.filter((x:any)=>x.source_kind==='external'),owned=social.filter((x:any)=>x.source_kind==='owned'),external=[...online.map((x:any)=>({...x,source:'online'})),...print.map((x:any)=>({...x,source:'print'})),...externalSocial.map((x:any)=>({...x,source:'social'}))];
-    const angleResult=await extractDynamicIssueClaims(external,{},pool),coverageResult=await matchDynamicOfficialResponseCoverage(angleResult.angles,owned,pool);
+    const baselineGap=(await pool.query('SELECT result FROM issue_communication_gap_snapshots WHERE workflow_id=$1 LIMIT 1',[w.id])).rows[0]?.result;
+    const baselineData=baselineGap?.data||baselineGap;
+    const angleResult=baselineData?.externalAngles||null,coverageResult=baselineData?.semanticAssessment||null;
     let publicationAnalysis:any=null,focusAssessment:any=null;
     try{
-      const publicationEvidence=(await pool.query(`SELECT e.* FROM issue_publication_evidence e WHERE e.workflow_id=$1 ORDER BY e.is_primary DESC,e.created_at,e.id`,[w.id])).rows;
-      if(publicationEvidence.length){
-        const materials:any[]=[],mediaParts:any[]=[];let evidenceBytes=0;
-        for(const e of publicationEvidence){
-          if(e.evidence_type==='WEBSITE'&&e.url){
-            const article=await fetchWebsitePublication(String(e.url));
-            materials.push({id:e.id,type:'WEBSITE',channel:e.channel,url:e.url,caption:e.caption,title:article.title,text:article.text});
-            continue;
-          }
-          const files=(await pool.query('SELECT id,storage_key,file_name,mime_type,file_order FROM issue_publication_evidence_files WHERE evidence_id=$1 ORDER BY file_order,id',[e.id])).rows;
-          const fileMeta:any[]=[];
-          for(const file of files){
-            if(evidenceBytes>=16_000_000)throw new Error('PUBLICATION_EVIDENCE_TOTAL_TOO_LARGE');const mime=validatePublicationEvidenceMime(file.mime_type);
-            const result=await get(file.storage_key,{access:'private'});if(!result)throw new Error('PUBLICATION_EVIDENCE_FILE_NOT_FOUND');const buf=await readPublicationEvidenceLimited(result.stream as ReadableStream<Uint8Array>,Math.min(8_000_000,16_000_000-evidenceBytes));validatePublicationEvidenceSignature(mime,buf);evidenceBytes+=buf.length;if(evidenceBytes>16_000_000)throw new Error('PUBLICATION_EVIDENCE_TOTAL_TOO_LARGE');
-            mediaParts.push({inlineData:{mimeType:mime,data:buf.toString('base64')}});
-            fileMeta.push({id:file.id,file_name:file.file_name,mime_type:file.mime_type,file_order:file.file_order});
-          }
-          materials.push({id:e.id,type:e.evidence_type,channel:e.channel,caption:e.caption,files:fileMeta});
-        }
-        const gapForPublication=(await pool.query(`SELECT result FROM issue_communication_gap_snapshots WHERE workflow_id=$1 LIMIT 1`,[w.id])).rows[0]||null;
+      // Publication and Gap are locked baselines; Monitoring never regenerates either.
+      publicationAnalysis=(await pool.query('SELECT result FROM issue_publication_analysis_snapshots WHERE workflow_id=$1 LIMIT 1',[w.id])).rows[0]?.result||null;
+      if(publicationAnalysis){
+        const gapForPublication={result:baselineGap};
         const responseForPublication=(await pool.query(`SELECT s.response_text,s.facts_data,s.key_message,s.supporting_links,o.name opd_name FROM issue_response_submissions s LEFT JOIN opd o ON o.id=s.opd_id WHERE s.workflow_id=$1 AND s.status='APPROVED' ORDER BY s.version DESC,s.updated_at DESC LIMIT 1`,[w.id])).rows[0]||null;
-        publicationAnalysis=await analyzePublicationPackage(pool,{issueTitle:String(w.title||''),gap:gapForPublication?.result||null,finalResponse:responseForPublication,publicationEvidence:materials},mediaParts,ctx.id);
         const evidenceForAi=[
           ...online.map((x:any)=>({ref:`online:${x.id}`,source:'ONLINE',title:x.title||'',text:String(x.summary||x.content||'').slice(0,3500)})),
           ...print.map((x:any)=>({ref:`print:${x.id}`,source:'PRINT',title:x.title||'',text:String(x.content||'').slice(0,3500)})),
@@ -552,6 +354,7 @@ pool.query(`SELECT d.name FROM issue_districts x JOIN districts d ON d.id=x.dist
         }
       }
     }catch(error:any){request.log.warn({issueId,reason:String(error?.message||error).slice(0,180)},'publication-package monitoring analysis unavailable');}
+    if(!focusAssessment)return reply.code(503).send({error:'MONITORING_ANALYSIS_UNAVAILABLE'});
     const gapSnapshot=(await pool.query(`SELECT result,analyzed_at FROM issue_communication_gap_snapshots WHERE workflow_id=$1 LIMIT 1`,[w.id])).rows[0]||null;
     const finalResponse=(await pool.query(`SELECT s.id,s.version,s.response_text,s.facts_data,s.key_message,s.supporting_links,s.reviewed_at,s.submitted_at,o.name opd_name FROM issue_response_submissions s LEFT JOIN opd o ON o.id=s.opd_id WHERE s.workflow_id=$1 AND s.status='APPROVED' ORDER BY s.version DESC,s.updated_at DESC LIMIT 1`,[w.id])).rows[0]||null;
     const payload={period,evidence:{total:external.length+owned.length,online:online.length,print:print.length,social:externalSocial.length,owned:owned.length},baseline:{gap:gapSnapshot?.result||null,gapAnalyzedAt:gapSnapshot?.analyzed_at||null,finalResponse},analysis:{externalAngles:angleResult,semanticAssessment:coverageResult,publicationAnalysis,focusAssessment},items:{online,print,social:externalSocial,owned}};
