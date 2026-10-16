@@ -136,6 +136,16 @@ app.post('/api/intelligence/issue-linkage-inbox/batch-h1/validate',{preHandler:a
   error:'H1_BATCH_ALREADY_RECORDED',batchStatus:prior.status,batchId:Number(prior.id),
   ready:false,
  });
+ // Different fingerprints can still share previously analyzed evidence.
+ // Until per-evidence accounting exists, do not permit another batch on this date.
+ const previousBatch=(await pool.query(`SELECT id,status FROM issue_linkage_h1_batches
+  WHERE organization_id=$1 AND news_date=$2::date
+    AND status IN ('completed','failed')
+  ORDER BY created_at DESC LIMIT 1`,[organizationId,plan.date])).rows[0];
+ if(previousBatch)return reply.code(409).send({
+  error:'H1_DAY_ALREADY_PROCESSED_REQUIRES_RECONCILIATION',
+  batchId:Number(previousBatch.id),batchStatus:previousBatch.status,ready:false,
+ });
  const activeBatch=(await pool.query(`SELECT id FROM issue_linkage_h1_batches
   WHERE organization_id=$1 AND news_date=$2::date AND status='running'
   LIMIT 1`,[organizationId,plan.date])).rows[0];
