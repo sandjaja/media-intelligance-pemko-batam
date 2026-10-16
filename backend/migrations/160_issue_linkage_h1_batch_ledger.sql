@@ -20,3 +20,10 @@ CREATE INDEX IF NOT EXISTS idx_issue_linkage_h1_batches_recent
   ON issue_linkage_h1_batches (organization_id, news_date DESC, created_at DESC);
 -- Future execution route must atomically claim a row with a conditional UPDATE,
 -- and must never retry completed fingerprints or active unexpired leases.
+
+-- Prevent overlapping live batches for the same organization and H-1 date,
+-- even if fresh evidence changes the fingerprint between two requests.
+-- Historical completed/failed records remain immutable.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_issue_linkage_h1_one_running_per_day
+  ON issue_linkage_h1_batches (organization_id, news_date)
+  WHERE status = 'running';
