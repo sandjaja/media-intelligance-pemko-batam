@@ -23,7 +23,7 @@ export async function claimIssueLinkageH1Batch(
     `INSERT INTO issue_linkage_h1_batches
        (organization_id, news_date, fingerprint, status, evidence_count, started_at, lease_expires_at)
      VALUES ($1, $2::date, $3, 'running', $4, now(), now() + interval '5 minutes')
-     ON CONFLICT (organization_id, news_date, fingerprint) DO NOTHING
+     ON CONFLICT DO NOTHING
      RETURNING id`,
     [organizationId, newsDate, fingerprint, evidenceCount],
   );
@@ -33,7 +33,15 @@ export async function claimIssueLinkageH1Batch(
      WHERE organization_id=$1 AND news_date=$2::date AND fingerprint=$3`,
     [organizationId, newsDate, fingerprint],
   );
-  return { claimed: false, id: existing.rows[0] ? Number(existing.rows[0].id) : null, status: String(existing.rows[0]?.status || 'unknown') };
+  if (existing.rows[0]) return { claimed: false, id: Number(existing.rows[0].id), status: String(existing.rows[0].status) };
+  const active = await pool.query(
+    `SELECT id FROM issue_linkage_h1_batches
+     WHERE organization_id=$1 AND news_date=$2::date AND status='running'
+     LIMIT 1`,
+    [organizationId, newsDate],
+  );
+  return { claimed: false, id: active.rows[0] ? Number(active.rows[0].id) : null,
+    status: active.rows[0] ? 'another_batch_running' : 'unknown' };
 }
 
 export async function finishIssueLinkageH1Batch(
