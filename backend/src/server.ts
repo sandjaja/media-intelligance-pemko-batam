@@ -15,7 +15,7 @@ import { ingestEnabledSources } from './ingestion.js';
 import { registerAskIntelligence } from './ask-intelligence.js';
 import { readLatestExecutiveBrief } from './executive-brief-cache.js';
 import { generateDailyExecutiveBrief } from './executive-brief-daily.js';
-import { readExecutiveBriefSchedule, saveExecutiveBriefScheduleTime, inspectExecutiveBriefSchedule } from './executive-brief-schedule.js';
+import { readExecutiveBriefSchedule, saveExecutiveBriefScheduleTime, inspectExecutiveBriefSchedule, disableExecutiveBriefSchedule } from './executive-brief-schedule.js';
 import { registerCollectionSchedulerRoutes } from './collection-scheduler-routes.js';
 import { registerAdminRoutes } from './admin-routes.js';
 import { registerDistrictRoutes } from './district-routes.js';
@@ -466,6 +466,17 @@ app.put('/api/admin/executive-brief/schedule',{preHandler:[requireAuth,requireRo
   if(!parsed.success)return reply.code(400).send({error:'INVALID_SCHEDULE_TIME'});
   try{
     return {data:await saveExecutiveBriefScheduleTime(pool,parsed.data.hour_wib,parsed.data.minute_wib),scheduler_connected:false};
+  }catch{
+    return reply.code(503).send({error:'EXECUTIVE_BRIEF_SCHEDULE_UNAVAILABLE'});
+  }
+});
+// Fail closed: an enable request cannot silently promise a cron that is not connected.
+app.put('/api/admin/executive-brief/schedule/activation',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
+  const parsed=z.object({enabled:z.boolean()}).strict().safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:'INVALID_SCHEDULE_ACTIVATION'});
+  if(parsed.data.enabled)return reply.code(409).send({error:'EXECUTIVE_BRIEF_RUNNER_NOT_CONNECTED'});
+  try{
+    return {data:await disableExecutiveBriefSchedule(pool),scheduler_connected:false};
   }catch{
     return reply.code(503).send({error:'EXECUTIVE_BRIEF_SCHEDULE_UNAVAILABLE'});
   }
