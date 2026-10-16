@@ -444,6 +444,28 @@ app.get('/api/incidents/:id/events',{preHandler:requireAuth},async(request,reply
 app.post('/api/incidents/:id/decisions',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{const id=incidentId.safeParse((request.params as any).id);if(!id.success)return reply.code(400).send({error:'INVALID_INCIDENT_ID'});const parsed=z.object({decision:z.string().min(3).max(4000),status:z.enum(['DRAFT','APPROVED','REJECTED']).default('DRAFT')}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_DECISION'});const exists=(await pool.query(`SELECT i.id FROM incidents i WHERE i.id=$1 AND ($2::text IS NULL OR i.opd_id=$2::bigint)`,[id.data,request.user?.role==='admin'?null:request.user?.opdId])).rows[0];if(!exists)return reply.code(404).send({error:'INCIDENT_NOT_FOUND'});const {rows}=await pool.query(`INSERT INTO incident_decisions(incident_id,decision,status,created_by) VALUES($1,$2,$3,$4) RETURNING *`,[id.data,parsed.data.decision,parsed.data.status,request.user?.id]);return reply.code(201).send({data:rows[0]});});
 app.post('/api/incidents/:id/decisions/:decisionId/approve',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{const id=incidentId.safeParse((request.params as any).id);const decision=incidentId.safeParse((request.params as any).decisionId);if(!id.success||!decision.success)return reply.code(400).send({error:'INVALID_ID'});const scope=request.user?.role==='admin'?'':` AND i.opd_id=$4`;const params:unknown[]=[request.user?.id,decision.data,id.data];if(request.user?.role!=='admin')params.push(request.user?.opdId);const {rows}=await pool.query(`UPDATE incident_decisions d SET status='APPROVED',approved_by=$1,approved_at=NOW() FROM incidents i WHERE d.id=$2 AND d.incident_id=$3${scope} RETURNING d.*`,params);if(!rows[0])return reply.code(404).send({error:'DECISION_NOT_FOUND'});return{data:rows[0]};});
 app.post('/api/incidents/:id/escalate',{preHandler:[requireAuth,requireRole('admin','operator')]},async(request,reply)=>{const id=incidentId.safeParse((request.params as any).id);if(!id.success)return reply.code(400).send({error:'INVALID_INCIDENT_ID'});const parsed=z.object({reason:z.string().min(3).max(1000).optional()}).safeParse(request.body);if(!parsed.success)return reply.code(400).send({error:'INVALID_REQUEST'});const scope=request.user?.role==='admin'?'':` AND opd_id=$2`;const params:unknown[]=[id.data];if(request.user?.role!=='admin')params.push(request.user?.opdId);const {rows}=await pool.query(`UPDATE incidents SET status='ESCALATED',updated_at=NOW() WHERE id=$1${scope} RETURNING *`,params);if(!rows[0])return reply.code(404).send({error:'INCIDENT_NOT_FOUND'});await pool.query(`INSERT INTO incident_events(incident_id,event_type,payload,created_by) VALUES($1,'INCIDENT_ESCALATED',$2,$3)`,[id.data,{reason:parsed.data.reason||'Manual escalation'},request.user?.id]);await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'INCIDENT_ESCALATED',$2)`,[request.user?.id,{incidentId:id.data,reason:parsed.data.reason||'Manual escalation'}]);return{data:rows[0]};});
+// Schedule configuration is informational until an audited scheduler runner is wired.
+app.get('/api/admin/executive-brief/schedule',{preHandler:[requireAuth,requireRole('admin')]},async(_request,reply)=>{
+  try{
+    const {rows}=await pool.query('SELECT enabled,hour_wib,minute_wib,timezone,updated_at FROM executive_brief_schedule_settings WHERE id=1');
+    return {data:rows[0]??{enabled:false,hour_wib:6,minute_wib:30,timezone:'Asia/Jakarta'},scheduler_connected:false};
+  }catch{
+    return reply.code(503).send({error:'EXECUTIVE_BRIEF_SCHEDULE_UNAVAILABLE'});
+  }
+});
+app.put('/api/admin/executive-brief/schedule',{preHandler:[requireAuth,requireRole('admin')]},async(request,reply)=>{
+  const parsed=z.object({hour_wib:z.number().int().min(0).max(23),minute_wib:z.number().int().min(0).max(59)}).strict().safeParse(request.body);
+  if(!parsed.success)return reply.code(400).send({error:'INVALID_SCHEDULE_TIME'});
+  try{
+    const {rows}=await pool.query(
+      'UPDATE executive_brief_schedule_settings SET hour_wib=$1,minute_wib=$2,enabled=FALSE,updated_at=now() WHERE id=1 RETURNING enabled,hour_wib,minute_wib,timezone,updated_at',
+      [parsed.data.hour_wib,parsed.data.minute_wib],
+    );
+    return {data:rows[0],scheduler_connected:false};
+  }catch{
+    return reply.code(503).send({error:'EXECUTIVE_BRIEF_SCHEDULE_UNAVAILABLE'});
+  }
+});
 // Explicit Admin-only Preview trigger. No recurring scheduler is registered.
 app.post('/api/admin/executive-brief/generate',{preHandler:[requireAuth,requireRole('admin')]},async(_request,reply)=>{
   const today=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date());
