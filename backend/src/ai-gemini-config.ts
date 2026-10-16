@@ -13,8 +13,8 @@ export async function loadGeminiConfig(pool: Pick<Pool, 'query'>): Promise<{ key
   return { key, model: rows[0].model };
 }
 
-export async function prepareGeminiRequest(pool: Pick<Pool, 'query'>): Promise<{ key: string; model: string }> {
+export async function prepareGeminiRequest(pool: Pick<Pool, 'query'>, featureCode = 'issue_analysis'): Promise<{ key: string; model: string }> {
   const config = await loadGeminiConfig(pool);
-  await reserveGeminiDailyRequest(pool, config.model, 'issue_analysis');
+  await reserveGeminiDailyRequest(pool, config.model, featureCode);
   return config;
 }
