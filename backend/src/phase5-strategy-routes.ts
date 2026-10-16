@@ -68,7 +68,8 @@ async function generateStrategyWithGemini(pool:Pool,input:any,userId:string){
  // Never fall back from a selected provider to another provider after a failure.
  const model=modelRows[0]?.model_code;
  if(!model)throw new Error('AI_STRATEGY_GEMINI_MODEL_NOT_CONFIGURED');
- const promptRow=await pool.query("SELECT prompt_text FROM ai_humas_task_prompts WHERE task_code='strakom_analysis' LIMIT 1").catch(()=>({rows:[]}));
+ const promptRow=await pool.query("SELECT prompt_text FROM ai_humas_task_prompts WHERE task_code='strakom_analysis' LIMIT 1");
+ if(!promptRow.rows[0]?.prompt_text?.trim())throw new Error('AI_STRATEGY_PROMPT_NOT_CONFIGURED');
  const prompt=(promptRow.rows[0]?.prompt_text||`Anda adalah mesin strategi komunikasi Pemerintah Kota Batam. Susun DRAFT strategi komunikasi berbasis data yang diberikan. Jangan mengarang fakta. Bedakan pesan induk Pemko dan arahan kewilayahan. Arahan kecamatan hanya untuk kecamatan yang tercantum dalam input. Pesan lokal harus konsisten dengan pesan induk. Historical learning adalah pembelajaran, bukan fakta kondisi saat ini.
 
 Strakom harus menjawab bukan hanya bagaimana Pemko berkomunikasi, tetapi juga substansi apa yang perlu tersedia agar komunikasi kredibel, koordinasi komunikasi apa yang diperlukan, dan hasil komunikasi apa yang diharapkan pada masyarakat.
