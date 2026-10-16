@@ -32,7 +32,7 @@ async function invoke(method: string, authorization?: string) {
   const response = {
     statusCode: 200,
     setHeader(name: string, value: string) { output.headers[name.toLowerCase()] = value; },
-    end(body: string) { output.status = this.statusCode; output.body = JSON.parse(body); },
+    end(body: string) { output.status = (this as { statusCode: number }).statusCode; output.body = JSON.parse(body); },
   } as unknown as ServerResponse;
   await handler(request, response);
   return output;
