@@ -154,7 +154,7 @@ test('H-1 claim and reservation commits only after every evidence is reserved', 
     release: () => { queries.push('RELEASE'); },
   };
   const pool = { connect: async () => client } as unknown as Pool;
-  const result = await claimAndReserveH1Batch(pool, 1, '2026-10-15', 'fp', [
+  const result = await claimAndReserveH1Batch(pool, 1, '2026-10-15', h1Fingerprint([{ sourceType: 'online', id: 1 }, { sourceType: 'social', id: 2 }]), [
     { sourceType: 'online', id: 1 }, { sourceType: 'social', id: 2 },
   ]);
   assert.equal(result.claimed, true);
@@ -174,7 +174,7 @@ test('H-1 reservation conflict rolls back batch claim', async () => {
     release: () => { queries.push('RELEASE'); },
   };
   const pool = { connect: async () => client } as unknown as Pool;
-  const result = await claimAndReserveH1Batch(pool, 1, '2026-10-15', 'fp', [
+  const result = await claimAndReserveH1Batch(pool, 1, '2026-10-15', h1Fingerprint([{ sourceType: 'online', id: 1 }, { sourceType: 'social', id: 2 }]), [
     { sourceType: 'online', id: 1 }, { sourceType: 'social', id: 2 },
   ]);
   assert.deepEqual(result, { claimed: false, id: null, status: 'evidence_already_reserved' });
@@ -195,7 +195,7 @@ test('H-1 transaction rolls back and releases connection on database failure', a
   };
   const pool = { connect: async () => client } as unknown as Pool;
   await assert.rejects(
-    claimAndReserveH1Batch(pool, 1, '2026-10-15', 'fp', [{ sourceType: 'online', id: 1 }]),
+    claimAndReserveH1Batch(pool, 1, '2026-10-15', h1Fingerprint([{ sourceType: 'online', id: 1 }]), [{ sourceType: 'online', id: 1 }]),
     /database_write_failed/,
   );
   assert.deepEqual(steps.filter(q => ['BEGIN','COMMIT','ROLLBACK','RELEASE'].includes(q)),
@@ -216,8 +216,7 @@ test('H-1 transaction never commits an invalid duplicate evidence plan', async (
   const result = await claimAndReserveH1Batch(pool, 1, '2026-10-15', 'fp', [
     { sourceType: 'online', id: 1 }, { sourceType: 'online', id: 1 },
   ]);
-  assert.equal(result.status, 'evidence_already_reserved');
+  assert.equal(result.status, 'invalid_evidence_plan');
   assert.equal(steps.some(q => q.includes('INSERT INTO issue_linkage_h1_evidence_ledger')), false);
-  assert.deepEqual(steps.filter(q => ['BEGIN','COMMIT','ROLLBACK','RELEASE'].includes(q)),
-    ['BEGIN','ROLLBACK','RELEASE']);
+  assert.deepEqual(steps, []);
 });
