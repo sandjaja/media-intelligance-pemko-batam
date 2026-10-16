@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
-import { h1Fingerprint, validateH1ExecutionPlan, inboxContextFingerprint, selectYesterdayWibEvidence, groupH1Evidence, publicationDateNeedsReview, claimIssueLinkageH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
+import { h1Fingerprint, h1ClassifiedPlanFingerprint, validateH1ExecutionPlan, inboxContextFingerprint, selectYesterdayWibEvidence, groupH1Evidence, publicationDateNeedsReview, claimIssueLinkageH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
 
 test('H-1 fingerprint is independent of evidence ordering and duplicate refs', () => {
   const a = [{ sourceType: 'online' as const, id: 7 }, { sourceType: 'social' as const, id: 3 }];
@@ -95,4 +95,12 @@ test('H-1 execution rejects stale or modified plans before quota usage', () => {
   assert.equal(validateH1ExecutionPlan('2026-10-15', fingerprint, '2026-10-15',
     [{ sourceType: 'online', id: 8 }]).reason, 'H1_PLAN_CHANGED');
   assert.equal(validateH1ExecutionPlan('2026-10-15', h1Fingerprint([]), '2026-10-15', []).reason, 'H1_PLAN_SIZE_INVALID');
+});
+
+test('H-1 classified fingerprint changes with keyword and OPD', () => {
+  const evidence = [{ sourceType: 'online' as const, id: 7 }];
+  const first = h1ClassifiedPlanFingerprint([{ primaryKeyword: 'sampah', opdId: 15, evidence }]);
+  assert.notEqual(first, h1ClassifiedPlanFingerprint([{ primaryKeyword: 'banjir', opdId: 15, evidence }]));
+  assert.notEqual(first, h1ClassifiedPlanFingerprint([{ primaryKeyword: 'sampah', opdId: 16, evidence }]));
+  assert.equal(first, h1ClassifiedPlanFingerprint([{ primaryKeyword: 'sampah', opdId: 15, evidence }]));
 });
