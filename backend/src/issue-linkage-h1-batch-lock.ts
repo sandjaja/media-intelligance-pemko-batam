@@ -52,6 +52,15 @@ export async function finishIssueLinkageH1Batch(
   return (result.rowCount || 0) === 1;
 }
 
+/** Must match the existing Issue Linkage inbox cache lookup exactly.
+ * Unlike the batch claim SHA-256, this includes the primary keyword.
+ */
+export function inboxContextFingerprint(primaryKeyword: string | null, evidence: H1EvidenceRef[]): string {
+  const normalized = String(primaryKeyword || '').toLowerCase().normalize('NFKC')
+    .replace(/[^\\p{L}\\p{N}\\s-]/gu, ' ').replace(/\\s+/g, ' ').trim();
+  return [normalized, ...evidence.map(e => `${e.sourceType}:${e.id}`).sort()].join('|');
+}
+
 /** Store a successful AI-context result under the same fingerprint used by inbox reads.
  * The caller must hold the H-1 batch claim; this function does not invoke Gemini.
  */
