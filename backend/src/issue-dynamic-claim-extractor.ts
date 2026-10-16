@@ -42,13 +42,16 @@ export async function extractDynamicIssueClaims(evidence:IssueAngleEvidence[],co
  const fallback=(reason='UNKNOWN')=>{const r=extractIssueAngles(evidence);return{...r,mode:'deterministic-fallback' as const,fallbackReason:reason,claims:r.angles.map(a=>({...a,claim:a.label,confidence:0,evidenceIds:a.evidence.map(x=>`${x.source}:${x.id}`)}))}};
  if(!evidence.length)return fallback('NO_VALID_EVIDENCE');if(!pool)return fallback('GEMINI_DATABASE_POOL_MISSING');
  let models:Array<{key:string;model:string}>;try{models=[await loadSelectedHumasGeminiModel(pool,'gap_analysis')];if(!models.length)return fallback('GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}catch{return fallback('GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}
+ const basePromptRows=await pool.query("SELECT prompt_text FROM ai_humas_task_prompts WHERE task_code='gap_analysis' LIMIT 1");
+ const basePrompt=String(basePromptRows.rows[0]?.prompt_text||'').trim();
+ if(!basePrompt)throw new Error('AI_GAP_PROMPT_NOT_CONFIGURED');
  const source=evidence.slice(0,40).map(e=>({evidenceId:ref(e),source:e.source,title:clip(e.title,500),text:clip([e.summary,e.content,e.body_text].filter(Boolean).join(' '))}));
  for(let attempt=0;attempt<models.length;attempt++){
  const {key,model}=models[attempt];
  try{await reserveGeminiDailyRequest(pool,model,'issue_claim_extraction');}catch{if(attempt+1<models.length)continue;return fallback('GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}
  const startedAt=Date.now();
  try{
-  const prompt=`Anda adalah Dynamic Communication Angle Extractor untuk analisis komunikasi pemerintah. Analisis evidence media dari SUDUT KOMUNIKASI, bukan hanya mencari masalah. Setiap evidence valid dapat membawa informasi, capaian, concern, risiko, dampak, tuntutan, ketidakpastian, atau sudut komunikasi lain yang relevan.
+  const prompt=`\${basePrompt}\n\nINSTRUKSI TEKNIS SUBANALISIS (wajib mengikuti arahan dasar di atas):\nAnda adalah Dynamic Communication Angle Extractor untuk analisis komunikasi pemerintah. Analisis evidence media dari SUDUT KOMUNIKASI, bukan hanya mencari masalah. Setiap evidence valid dapat membawa informasi, capaian, concern, risiko, dampak, tuntutan, ketidakpastian, atau sudut komunikasi lain yang relevan.
 
 TUJUAN:
 - Representasikan substansi utama pemberitaan yang penting bagi komunikasi pemerintah.
