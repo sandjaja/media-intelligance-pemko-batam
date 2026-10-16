@@ -59,17 +59,16 @@ async function providerBrief(pool: Pool, rows: IntelligenceArticle[]) {
   if (!credential.rows[0]) return null;
   const key = decryptIntegrationCredential(credential.rows[0].credential_ciphertext);
   const models = await pool.query(
-    "SELECT m.code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 1",
+    "SELECT m.code FROM ai_models m JOIN ai_providers p ON p.id=m.provider_id WHERE p.code='gemini' AND p.enabled=TRUE AND m.enabled=TRUE ORDER BY m.id LIMIT 2",
   );
   if (!models.rows[0]) return null;
-  const model = models.rows[0].code as string;
   const input = rows.slice(0, 10).map((r, i) => ({ rank: i + 1, ...r }));
   const prompt = 'Anda adalah analis media intelligence pemerintah daerah. Buat executive brief singkat, faktual, tidak mengarang fakta, pisahkan fakta dan rekomendasi. Kembalikan JSON dengan keys headline, situation, implications, actions (array), key_message, priority. Priority hanya WATCH, MEDIUM, HIGH, IMMEDIATE.\nDATA:\\n' + JSON.stringify(input);
-  // Only retry transient upstream failures; each HTTP attempt reserves its own daily quota.
-  // Keep the total execution bounded for Vercel Hobby and never retry auth/4xx failures.
+  // Fail over at most once to the next enabled Gemini model; reserve and log each attempt.
   let response: Response | undefined;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    await reserveGeminiDailyRequest(pool, model, 'executive_brief');
+  for (let attempt = 0; attempt < Math.min(2, models.rows.length); attempt++) {
+    const model = models.rows[attempt].code as string;
+    try { await reserveGeminiDailyRequest(pool, model, 'executive_brief'); } catch { if (attempt + 1 < models.rows.length) continue; throw new Error('GEMINI_QUOTA_UNAVAILABLE'); }
     const startedAt = Date.now();
     let payload: any;
     try {
@@ -90,9 +89,8 @@ async function providerBrief(pool: Pool, rows: IntelligenceArticle[]) {
       await recordGeminiExecution(pool,{model,feature:'executive_brief',status:'success',startedAt,payload});
       return { ...(parsed as Record<string, unknown>), mode: 'ai', model_code: model, source_count: input.length };
     }
-    if (response.status === 503 && attempt === 0) {
-      await recordGeminiExecution(pool,{model,feature:'executive_brief',status:'failed',startedAt,error:'GEMINI_UPSTREAM_503'});
-      await new Promise(resolve => setTimeout(resolve, 750));
+    if ((response.status === 503 || response.status === 429) && attempt === 0 && models.rows.length > 1) {
+      await recordGeminiExecution(pool,{model,feature:'executive_brief',status:'failed',startedAt,error:'GEMINI_UPSTREAM_'+response.status});
       continue;
     }
     const category = response.status === 401 || response.status === 403 ? 'AUTH'
