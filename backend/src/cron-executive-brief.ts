@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Pool } from 'pg';
 import type { Pool as PoolType } from 'pg';
-import { runScheduledExecutiveBrief } from './executive-brief-runner.js';
+import { runScheduledExecutiveBrief, executeAuthorizedExecutiveBrief } from './executive-brief-runner.js';
 
 export const json = (res: ServerResponse, status: number, body: unknown) => {
   res.statusCode = status;
@@ -16,15 +16,19 @@ export function isAuthorizedExecutiveBriefCron(method: string | undefined, autho
 }
 
 /**
- * Authenticated CRON preflight ONLY.
- * No automatic registration and no Gemini call; production-safe while disabled.
+ * Authenticated scheduler entrypoint. Execution is gated by the database schedule,
+ * with a single daily claim before any AI call. No automatic registration here.
  */
 export function createExecutiveBriefCronHandler(dependencies: {
   createPool: (databaseUrl: string) => Pick<PoolType, 'query' | 'end'>;
   runDryRun: (pool: PoolType, now: Date) => Promise<unknown>;
+  runLive?: (pool: PoolType, now: Date) => Promise<unknown>;
 } = {
   createPool: databaseUrl => new Pool({ connectionString: databaseUrl, max: 1 }),
   runDryRun: (pool, now) => runScheduledExecutiveBrief(pool, now, { dryRun: true }),
+  runLive: (pool, now) => runScheduledExecutiveBrief(pool, now, {
+    dryRun: false, execute: executeAuthorizedExecutiveBrief,
+  }),
 }) {
 return async function handler(req: IncomingMessage, res: ServerResponse) {
   if (req.method !== 'GET') return json(res, 405, { error: 'METHOD_NOT_ALLOWED' });
@@ -36,10 +40,13 @@ return async function handler(req: IncomingMessage, res: ServerResponse) {
   if (!databaseUrl) return json(res, 503, { error: 'DATABASE_URL_REQUIRED' });
   const pool = dependencies.createPool(databaseUrl);
   try {
-    const result = await dependencies.runDryRun(pool as PoolType, new Date());
-    return json(res, 200, { data: result, scheduler_connected: false });
+    const now = new Date();
+    const result = dependencies.runLive
+      ? await dependencies.runLive(pool as PoolType, now)
+      : await dependencies.runDryRun(pool as PoolType, now);
+    return json(res, 200, { data: result, scheduler_connected: !!dependencies.runLive });
   } catch {
-    return json(res, 503, { error: 'EXECUTIVE_BRIEF_CRON_PREFLIGHT_FAILED' });
+    return json(res, 503, { error: 'EXECUTIVE_BRIEF_CRON_FAILED' });
   } finally {
     await pool.end();
   }
