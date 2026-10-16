@@ -29,8 +29,9 @@ export async function generateDailyExecutiveBrief(
     }
     const brief = await getExecutiveBrief(pool, null);
     if (brief.mode !== 'ai' || !isValidBrief(brief)) {
-      const code = typeof brief.provider_error_code === 'string' && /^GEMINI_[A-Z_0-9]{1,65}$/.test(brief.provider_error_code)
-        ? brief.provider_error_code : 'AI_UNAVAILABLE_OR_FALLBACK';
+      const code = typeof brief.provider_error_code === 'string' && /^(?:GEMINI|AI_GEMINI)_[A-Z_0-9]{1,65}$/.test(brief.provider_error_code)
+        ? brief.provider_error_code
+        : brief.mode === 'ai' ? 'EXECUTIVE_BRIEF_INVALID_RESPONSE' : 'AI_UNAVAILABLE_OR_FALLBACK';
       await failExecutiveBriefDay(pool, date, 'city', code);
       return { status: 'failed', date };
     }
