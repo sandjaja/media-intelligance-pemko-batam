@@ -3,7 +3,7 @@ import type { Pool, PoolClient } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
-import { selectYesterdayWibEvidence, h1Fingerprint, groupH1Evidence } from './issue-linkage-h1-batch-lock.js';
+import { selectYesterdayWibEvidence, h1Fingerprint, groupH1Evidence, publicationDateNeedsReview } from './issue-linkage-h1-batch-lock.js';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { checkIssueEvidenceEligibility, type IssueEvidenceSource } from './issue-evidence-eligibility.js';
 import { matchExistingIssues } from './unified-existing-issue-matcher.js';
@@ -79,11 +79,12 @@ const groups:any[]=[];for(const g of consolidatedGroups){if(g.linkedIssue?.issue
   ORDER BY last_detected_at DESC LIMIT 300`,[organizationId])).rows;
  const evidence=rows.flatMap((row:any)=>(Array.isArray(row.snapshot?.evidence)?row.snapshot.evidence:[])
   .map((e:any)=>({sourceType:String(e.sourceType||''),id:Number(e.id),
-   occurredAt:e.occurredAt||null,
+   occurredAt:e.occurredAt||null,title:e.title||null,summary:e.summary||null,
    primaryKeyword:row.snapshot?.primaryKeyword||e.primaryKeyword||null,
    opdId:e.opdId==null?(row.snapshot?.opdId==null?null:Number(row.snapshot.opdId)):Number(e.opdId)})));
  const selected=selectYesterdayWibEvidence(evidence as any[]);
  const fingerprint=h1Fingerprint(selected.evidence as any[]);
+ const dateReviewCount=selected.evidence.filter((e:any)=>publicationDateNeedsReview(e.occurredAt,e.title,e.summary)).length;
  const groups=groupH1Evidence(selected.evidence as any[]);
  const eligibleGroups=groups.filter(g=>g.primaryKeyword&&g.evidence.length>=2);
  const oversizedGroups=eligibleGroups.filter(g=>g.evidence.length>40).length;
@@ -92,6 +93,7 @@ const groups:any[]=[];for(const g of consolidatedGroups){if(g.linkedIssue?.issue
  return {data:{date:selected.date,timezone:'Asia/Jakarta',evidenceCount:selected.evidence.length,
   fingerprint,groupCount:groups.length,eligibleGroupCount:eligibleGroups.length,
   oversizedGroupCount:oversizedGroups,estimatedMinimumGeminiCalls:eligibleGroups.length,
+  publicationDateReviewCount:dateReviewCount,
   ready:false,reason:'EXECUTION_ENDPOINT_NOT_ENABLED',
   warning:'Analisis ini menggunakan kuota Gemini. Gunakan secara bijaksana. Berita yang sudah dianalisis tidak akan diproses ulang.'}};
 });
