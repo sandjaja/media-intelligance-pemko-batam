@@ -269,6 +269,25 @@ export function buildH1BoundedPlan<T extends H1EvidenceRef & {
   };
 }
 
+/**
+ * Pure continuation planner. Completed/reserved refs are excluded BEFORE grouping,
+ * so a second batch can only contain previously unused evidence.
+ * This function is read-only and does not authorize execution.
+ */
+export function buildH1ContinuationPlan<T extends H1EvidenceRef & {
+  occurredAt?: string | null; title?: string | null; summary?: string | null;
+  primaryKeyword?: string | null; opdId?: number | null;
+}>(evidence: T[], reservedRefs: ReadonlySet<string>, now: Date = new Date()) {
+  const remaining = evidence.filter(item => !reservedRefs.has(`${item.sourceType}:${item.id}`));
+  const plan = buildH1BoundedPlan(remaining, now);
+  return {
+    ...plan,
+    alreadyReservedCount: new Set(evidence.filter(item =>
+      reservedRefs.has(`${item.sourceType}:${item.id}`)).map(item => `${item.sourceType}:${item.id}`)).size,
+    continuationMode: true as const,
+  };
+}
+
 /** Include classification in the plan identity: changing a keyword or OPD
  * must invalidate a previously prepared batch even if evidence IDs are unchanged.
  */
