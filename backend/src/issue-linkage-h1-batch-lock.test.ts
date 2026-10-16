@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { Pool } from 'pg';
-import { h1Fingerprint, inboxContextFingerprint, selectYesterdayWibEvidence, groupH1Evidence, publicationDateNeedsReview, claimIssueLinkageH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
+import { h1Fingerprint, validateH1ExecutionPlan, inboxContextFingerprint, selectYesterdayWibEvidence, groupH1Evidence, publicationDateNeedsReview, claimIssueLinkageH1Batch, finishIssueLinkageH1Batch } from './issue-linkage-h1-batch-lock.js';
 
 test('H-1 fingerprint is independent of evidence ordering and duplicate refs', () => {
   const a = [{ sourceType: 'online' as const, id: 7 }, { sourceType: 'social' as const, id: 3 }];
@@ -85,4 +85,14 @@ test('duplicate H-1 snapshots preserve the primary keyword and OPD', () => {
   assert.equal(result.evidence.length, 1);
   assert.equal(result.evidence[0].primaryKeyword, 'pekerja');
   assert.equal(result.evidence[0].opdId, 15);
+});
+
+test('H-1 execution rejects stale or modified plans before quota usage', () => {
+  const evidence = [{ sourceType: 'online' as const, id: 7 }];
+  const fingerprint = h1Fingerprint(evidence);
+  assert.equal(validateH1ExecutionPlan('2026-10-15', fingerprint, '2026-10-15', evidence).valid, true);
+  assert.equal(validateH1ExecutionPlan('2026-10-14', fingerprint, '2026-10-15', evidence).reason, 'H1_DATE_CHANGED');
+  assert.equal(validateH1ExecutionPlan('2026-10-15', fingerprint, '2026-10-15',
+    [{ sourceType: 'online', id: 8 }]).reason, 'H1_PLAN_CHANGED');
+  assert.equal(validateH1ExecutionPlan('2026-10-15', h1Fingerprint([]), '2026-10-15', []).reason, 'H1_PLAN_SIZE_INVALID');
 });
