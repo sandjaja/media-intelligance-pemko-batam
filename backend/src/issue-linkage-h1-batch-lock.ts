@@ -120,6 +120,28 @@ export function publicationDateNeedsReview(
   return Math.abs(stored.getTime() - embedded.getTime()) > 2 * 86400000;
 }
 
+/** Verify that a submitted H-1 plan still matches the server's freshly computed
+ * bounded evidence set before claiming a DB lock or spending Gemini quota.
+ */
+export function validateH1ExecutionPlan(
+  expectedDate: string,
+  expectedFingerprint: string,
+  actualDate: string,
+  plannedEvidence: H1EvidenceRef[],
+): { valid: boolean; reason: string | null; fingerprint: string } {
+  const fingerprint = h1Fingerprint(plannedEvidence);
+  if (!/^20\\d{2}-\\d{2}-\\d{2}$/.test(expectedDate) || expectedDate !== actualDate) {
+    return { valid: false, reason: 'H1_DATE_CHANGED', fingerprint };
+  }
+  if (!/^[a-f0-9]{64}$/.test(expectedFingerprint) || expectedFingerprint !== fingerprint) {
+    return { valid: false, reason: 'H1_PLAN_CHANGED', fingerprint };
+  }
+  if (plannedEvidence.length === 0 || plannedEvidence.length > 200) {
+    return { valid: false, reason: 'H1_PLAN_SIZE_INVALID', fingerprint };
+  }
+  return { valid: true, reason: null, fingerprint };
+}
+
 /** Must match the existing Issue Linkage inbox cache lookup exactly.
  * Unlike the batch claim SHA-256, this includes the primary keyword.
  */
