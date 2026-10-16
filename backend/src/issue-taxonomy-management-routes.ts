@@ -118,6 +118,10 @@ SELECT id,keyword,role,priority FROM ranked WHERE (role='PRIMARY' AND rn=1) OR (
     return reply.code(409).send({error:'AI_GAP_SELECTED_MODEL_DISABLED'});
   if(!['gemini','openai','anthropic'].includes(String(gapModel.provider_code)))
     return reply.code(409).send({error:'AI_GAP_SELECTED_PROVIDER_UNSUPPORTED'});
+  // This GET endpoint also permits read-only roles. Never let a read-only
+  // dashboard visit trigger a chargeable Humas analysis.
+  if(gapModel.provider_code!=='gemini'&&!canManage(ctx))
+    return reply.code(403).send({error:'AI_GAP_PAID_EXECUTION_REQUIRES_HUMAS'});
   const gapUserId=Number(ctx.id);
   if(gapModel.provider_code!=='gemini'&&(!Number.isSafeInteger(gapUserId)||gapUserId<=0))
     return reply.code(409).send({error:'AI_GATEWAY_INVALID_CONTEXT'});
