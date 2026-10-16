@@ -58,7 +58,8 @@ function setupExecutiveBriefControl(){
    const j=await r.json();if(!r.ok)throw Error(j.error||'HTTP '+r.status);
    section.querySelector('#aiExecutiveBriefHour').value=j.data.hour_wib;
    section.querySelector('#aiExecutiveBriefMinute').value=j.data.minute_wib;
-   status.textContent='Tersimpan: '+String(j.data.hour_wib).padStart(2,'0')+':'+String(j.data.minute_wib).padStart(2,'0')+' WIB · NONAKTIF · cron belum terhubung.';
+   activation.checked=!!j.data.enabled;
+   status.textContent='Tersimpan: '+String(j.data.hour_wib).padStart(2,'0')+':'+String(j.data.minute_wib).padStart(2,'0')+' WIB · '+(j.data.enabled?'AKTIF':'NONAKTIF')+' · '+(j.scheduler_connected?'runner terhubung':'aktivasi otomatis belum tersedia')+'.';
   }catch(e){status.textContent='Pengaturan belum tersedia: '+e.message;}
  }
  const activation=section.querySelector('#aiExecutiveBriefEnabled');
