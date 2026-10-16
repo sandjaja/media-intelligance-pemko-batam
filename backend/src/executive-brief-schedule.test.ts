@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readExecutiveBriefSchedule, saveExecutiveBriefScheduleTime, isExecutiveBriefDue, executiveBriefDateWib, inspectExecutiveBriefSchedule } from './executive-brief-schedule.js';
+import { readExecutiveBriefSchedule, saveExecutiveBriefScheduleTime, isExecutiveBriefDue, executiveBriefDateWib, inspectExecutiveBriefSchedule, disableExecutiveBriefSchedule } from './executive-brief-schedule.js';
 
 test('schedule defaults to 06:30 WIB and disabled when no row exists', async () => {
   const db = { query: async () => ({ rows: [] }) };
@@ -86,4 +86,14 @@ test('schedule preflight identifies due run without creating a claim', async () 
   } };
   const decision = await inspectExecutiveBriefSchedule(db as never, new Date('2026-10-16T23:30:00Z'));
   assert.deepEqual(decision, { due: true, date: '2026-10-17', reason: 'due' });
+});
+
+test('Executive Brief activation can be safely disabled without touching collection scheduler', async () => {
+  const db = { query: async (sql: string) => {
+    assert.match(sql, /UPDATE executive_brief_schedule_settings/);
+    assert.match(sql, /enabled=FALSE/);
+    assert.doesNotMatch(sql, /collection_scheduler/);
+    return { rows: [{ enabled: false, hour_wib: 6, minute_wib: 30, timezone: 'Asia/Jakarta' }] };
+  } };
+  assert.equal((await disableExecutiveBriefSchedule(db as never)).enabled, false);
 });
