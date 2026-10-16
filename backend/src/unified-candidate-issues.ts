@@ -92,11 +92,16 @@ const groups:any[]=[];for(const g of consolidatedGroups){if(g.linkedIssue?.issue
  const groups=groupH1Evidence(eligibleEvidence as any[]);
  const eligibleGroups=groups.filter(g=>g.primaryKeyword&&g.evidence.length>=2);
  const oversizedGroups=eligibleGroups.filter(g=>g.evidence.length>40).length;
+ const boundedGroups=eligibleGroups.filter(g=>g.evidence.length<=40);
+ const maximumGroupsPerRun=5;
+ const withinRunLimit=boundedGroups.slice(0,maximumGroupsPerRun);
+ const deferredGroups=Math.max(0,eligibleGroups.length-withinRunLimit.length);
  // Preparation is read-only: no Gemini, no quota reservation, no ledger claim.
  // The eventual execution endpoint must revalidate this fingerprint before claiming.
  return {data:{date:selected.date,timezone:'Asia/Jakarta',evidenceCount:selected.evidence.length,
   fingerprint,groupCount:groups.length,eligibleGroupCount:eligibleGroups.length,
   oversizedGroupCount:oversizedGroups,estimatedMinimumGeminiCalls:eligibleGroups.length,
+  maximumGroupsPerRun,plannedGroupCount:withinRunLimit.length,deferredGroupCount:deferredGroups,
   publicationDateReviewCount:dateReviewCount,excludedFromAnalysisCount:reviewRefs.size,
   ready:false,reason:'EXECUTION_ENDPOINT_NOT_ENABLED',
   warning:'Analisis ini menggunakan kuota Gemini. Gunakan secara bijaksana. Berita yang sudah dianalisis tidak akan diproses ulang.'}};
