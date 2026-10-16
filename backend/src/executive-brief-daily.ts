@@ -1,15 +1,17 @@
 import type { Pool } from 'pg';
 import { getExecutiveBrief } from './intelligence.js';
-import { claimExecutiveBriefDay, completeExecutiveBriefDay, failExecutiveBriefDay } from './executive-brief-cache.js';
+import { claimExecutiveBriefDay, completeExecutiveBriefDay, failExecutiveBriefDay, claimExecutiveBriefRetry, failExecutiveBriefRetry } from './executive-brief-cache.js';
 
 // The scheduler must call this once, after the daily ingestion window.
 // There is deliberately no automatic timer or cron registration here.
 export async function generateDailyExecutiveBrief(
   pool: Pool,
   date: string,
+  manualRetry = false,
 ): Promise<{ status: 'created' | 'already_claimed' | 'failed'; date: string }> {
-  const claimed = await claimExecutiveBriefDay(pool, date, 'city');
+  const claimed = manualRetry ? await claimExecutiveBriefRetry(pool, date) : await claimExecutiveBriefDay(pool, date, 'city');
   if (!claimed) return { status: 'already_claimed', date };
+  const recordFailure = (code: string) => manualRetry ? failExecutiveBriefRetry(pool,date,code) : failExecutiveBriefDay(pool,date,'city',code);
   try {
     // Fail closed before invoking Gemini when all enabled models have no free-tier room.
     const quota = await pool.query(
@@ -28,7 +30,7 @@ export async function generateDailyExecutiveBrief(
        ) AS available`,
     );
     if (!quota.rows[0]?.available) {
-      await failExecutiveBriefDay(pool, date, 'city', 'GEMINI_QUOTA_UNAVAILABLE');
+      await recordFailure('GEMINI_QUOTA_UNAVAILABLE');
       return { status: 'failed', date };
     }
     const brief = await getExecutiveBrief(pool, null);
@@ -36,7 +38,7 @@ export async function generateDailyExecutiveBrief(
       const code = typeof brief.provider_error_code === 'string' && /^(?:GEMINI|AI_GEMINI)_[A-Z_0-9]{1,65}$/.test(brief.provider_error_code)
         ? brief.provider_error_code
         : brief.mode === 'ai' ? 'EXECUTIVE_BRIEF_INVALID_RESPONSE' : 'AI_UNAVAILABLE_OR_FALLBACK';
-      await failExecutiveBriefDay(pool, date, 'city', code);
+      await recordFailure(code);
       return { status: 'failed', date };
     }
     const saved = await completeExecutiveBriefDay(
@@ -47,7 +49,7 @@ export async function generateDailyExecutiveBrief(
     if (!saved) throw new Error('EXECUTIVE_BRIEF_CLAIM_LOST');
     return { status: 'created', date };
   } catch {
-    await failExecutiveBriefDay(pool, date, 'city', 'EXECUTIVE_BRIEF_GENERATION_FAILED');
+    await recordFailure('EXECUTIVE_BRIEF_GENERATION_FAILED');
     return { status: 'failed', date };
   }
 }
