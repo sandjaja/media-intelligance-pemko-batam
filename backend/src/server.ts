@@ -1,3 +1,4 @@
+import { registerKnowledgeEvaluationRoutes } from './knowledge-evaluation-routes.js';
 import {parseApifyActorReference,resolveApifyActorReference,matchingActorAdapter,normalizeApifyActorSettings} from './apify-actor-reference.js';
 import {actorAdapterSchema,validateActorAdapter} from './apify-actor-adapter.js';
 import 'dotenv/config';
@@ -515,5 +516,6 @@ app.get('/api/executive-brief/cached',{preHandler:requireAuth},async(_request,re
 await registerCollectionSchedulerRoutes(app,pool,env.jwtSecret);
 await registerAskIntelligence(app,pool,env.jwtSecret);
 await registerPhase5StrategyRoutes(app,pool,env.jwtSecret);
+await registerKnowledgeEvaluationRoutes(app,pool,env.jwtSecret);
 app.setErrorHandler((error,_request,reply)=>{app.log.error(error);const statusCode=typeof (error as any)?.statusCode==='number'?(error as any).statusCode:500;return reply.code(statusCode).send({error:'INTERNAL_SERVER_ERROR'});});
 app.addHook('onClose',async()=>pool.end()); await app.listen({port:env.port,host:'0.0.0.0'});

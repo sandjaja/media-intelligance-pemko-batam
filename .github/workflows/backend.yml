@@ -6,6 +6,7 @@ on:
     paths:
       - 'backend/**'
       - 'app.js'
+      - 'knowledge-evaluation-ui.js'
       - 'admin-ai-integrations.js'
       - 'admin-ai.js'
       - 'admin-ai-usage.js'
@@ -26,6 +27,7 @@ on:
       - 'backend/**'
       - 'phase3-outcome-ui.js'
       - 'app.js'
+      - 'knowledge-evaluation-ui.js'
       - 'admin-ai-integrations.js'
       - 'admin-ai.js'
       - 'admin-ai-usage.js'
@@ -47,6 +49,7 @@ jobs:
         working-directory: .
         run: |
           node --check app.js
+          node --check knowledge-evaluation-ui.js
           node --check admin-ai-integrations.js
           node --check admin-ai.js
           node --check admin-ai-usage.js
