@@ -384,10 +384,12 @@ export function buildH1GeminiGroupPrompt(group: {
   evidence: Array<H1EvidenceRef & { opdId?: number | null; title?: string | null; summary?: string | null }>;
 }): string {
   if (!isSafeH1Group(group)) throw new Error('H1_UNSAFE_GEMINI_GROUP');
+  // Fit every valid 40-item group within the bounded prompt while retaining
+  // all evidence refs. Shrink excerpts, never silently omit an evidence item.
   const items = group.evidence.map(e => ({
     ref: `${e.sourceType}:${e.id}`,
-    title: String(e.title || '').slice(0, 180),
-    summary: String(e.summary || '').slice(0, 350),
+    title: String(e.title || '').slice(0, 120),
+    summary: String(e.summary || '').slice(0, 180),
   }));
   const prompt = [
     'Analisis kelompok berita H-1 untuk Issue Linkage Pemko Batam.',
