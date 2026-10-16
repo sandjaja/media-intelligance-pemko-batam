@@ -95,7 +95,8 @@ SELECT id,keyword,role,priority FROM ranked WHERE (role='PRIMARY' AND rn=1) OR (
     WHERE w.issue_id=$1 AND s.organization_id=$2 AND w.workflow_status<>'CLOSED'
     ORDER BY w.cycle_number DESC,w.id DESC LIMIT 1`,[issueId,organizationId])).rows[0];
   if(savedGap){
-    const prior=typeof savedGap.signature==='string'?JSON.parse(savedGap.signature):savedGap.signature;
+    let prior:any=null;
+    try{prior=typeof savedGap.signature==='string'?JSON.parse(savedGap.signature):savedGap.signature;}catch{prior=null;}
     const counts=(await pool.query(`SELECT
       (SELECT COUNT(*)::int FROM issue_articles WHERE issue_id=$1) online_count,
       (SELECT COUNT(*)::int FROM issue_print_articles WHERE issue_id=$1 AND linkage_status='linked') print_count,
