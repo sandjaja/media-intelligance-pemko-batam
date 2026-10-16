@@ -105,7 +105,10 @@ SELECT id,keyword,role,priority FROM ranked WHERE (role='PRIMARY' AND rn=1) OR (
     const stale=prior?.external!==undefined&&prior?.owned!==undefined
       ?linkedNow!==Number(prior.external)+Number(prior.owned)
       :true;
-    return {...savedGap.result,workflow:{id:Number(savedGap.workflow_id),cycleNumber:Number(savedGap.cycle_number)},snapshot:{analyzedAt:savedGap.analyzed_at,stale,refreshRequired:stale}};
+    // Count-only signatures cannot establish freshness of changed article text,
+    // verification state or classifications. Mark legacy snapshots conservatively.
+    const freshnessUnverified=!prior?.evidenceFingerprint;
+    return {...savedGap.result,workflow:{id:Number(savedGap.workflow_id),cycleNumber:Number(savedGap.cycle_number)},snapshot:{analyzedAt:savedGap.analyzed_at,stale:stale||freshnessUnverified,refreshRequired:stale||freshnessUnverified}};
   }
   // Never start a paid analysis from an ordinary page read.
   const gapProviderOnRead=(await pool.query("SELECT p.code FROM ai_humas_model_selections s JOIN ai_models m ON m.id=s.model_id JOIN ai_providers p ON p.id=m.provider_id WHERE s.task_code='gap_analysis' LIMIT 1")).rows[0]?.code;
