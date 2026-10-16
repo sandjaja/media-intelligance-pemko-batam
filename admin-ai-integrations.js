@@ -138,7 +138,7 @@ function setupExecutiveBriefControl(){
  const section=document.createElement('details');
  section.id='aiExecutiveBriefSection';
  section.className='border-t border-slate-700 pt-4 mt-4';
- section.innerHTML='<summary class="cursor-pointer font-bold">Executive Brief Harian</summary><p class="text-xs text-slate-400 mt-2">Jadwal yang disarankan: 06.30 WIB. Scheduler otomatis belum diaktifkan. Membuka dashboard hanya membaca hasil tersimpan, tanpa menggunakan kuota Gemini.</p><div id="aiExecutiveBriefStatus" class="text-xs text-slate-400 mt-2">Memuat status...</div><div class="mt-3 flex flex-wrap items-center gap-2 text-xs"><label for="aiExecutiveBriefHour">Jam WIB</label><input id="aiExecutiveBriefHour" type="number" min="0" max="23" value="6" class="w-16 rounded border border-slate-600 bg-transparent px-2 py-1"><span>:</span><input id="aiExecutiveBriefMinute" type="number" min="0" max="59" value="30" aria-label="Menit WIB" class="w-16 rounded border border-slate-600 bg-transparent px-2 py-1"><button type="button" id="aiExecutiveBriefSave" class="rounded-lg border border-cyan-600 px-3 py-2 text-xs">Simpan Jam (Nonaktif)</button></div><div id="aiExecutiveBriefScheduleStatus" class="mt-2 text-xs text-slate-400">Jadwal belum dimuat</div><button type="button" id="aiExecutiveBriefReload" class="mt-2 rounded-lg border border-slate-600 px-3 py-2 text-xs">Perbarui Status</button><p class="text-xs text-amber-400 mt-2">Pembuatan analisis manual belum dibuka melalui UI sampai smoke test pengaman kuota selesai.</p>';
+ section.innerHTML='<summary class="cursor-pointer font-bold">Executive Brief Harian</summary><p class="text-xs text-slate-400 mt-2">Jadwal yang disarankan: 06.30 WIB. Scheduler otomatis belum diaktifkan. Membuka dashboard hanya membaca hasil tersimpan, tanpa menggunakan kuota Gemini.</p><div id="aiExecutiveBriefStatus" class="text-xs text-slate-400 mt-2">Memuat status...</div><div class="mt-3 flex flex-wrap items-center gap-2 text-xs"><label for="aiExecutiveBriefHour">Jam WIB</label><input id="aiExecutiveBriefHour" type="number" min="0" max="23" value="6" class="w-16 rounded border border-slate-600 bg-transparent px-2 py-1"><span>:</span><input id="aiExecutiveBriefMinute" type="number" min="0" max="59" value="30" aria-label="Menit WIB" class="w-16 rounded border border-slate-600 bg-transparent px-2 py-1"><button type="button" id="aiExecutiveBriefSave" class="rounded-lg border border-cyan-600 px-3 py-2 text-xs">Simpan Jam (Nonaktif)</button></div><div id="aiExecutiveBriefScheduleStatus" class="mt-2 text-xs text-slate-400">Jadwal belum dimuat</div><button type="button" id="aiExecutiveBriefReload" class="mt-2 rounded-lg border border-slate-600 px-3 py-2 text-xs">Perbarui Status</button><button type="button" id="aiExecutiveBriefPreflight" class="mt-2 ml-2 rounded-lg border border-cyan-600 px-3 py-2 text-xs">Uji Jadwal (Tanpa AI)</button><div id="aiExecutiveBriefPreflightResult" class="mt-2 text-xs text-slate-400"></div><p class="text-xs text-amber-400 mt-2">Pembuatan analisis manual belum dibuka melalui UI sampai smoke test pengaman kuota selesai.</p>';
  panel.appendChild(section);
  async function reload(){
   const status=section.querySelector('#aiExecutiveBriefStatus');
@@ -175,6 +175,16 @@ function setupExecutiveBriefControl(){
   }catch(e){status.textContent='Gagal menyimpan: '+e.message;}finally{btn.disabled=false;}
  });
  section.addEventListener('toggle',()=>{if(section.open){reload();loadSchedule();}});
+ section.querySelector('#aiExecutiveBriefPreflight').addEventListener('click',async()=>{
+  const status=section.querySelector('#aiExecutiveBriefPreflightResult');
+  status.textContent='Memeriksa jadwal...';
+  try{
+   const r=await fetch('/api/admin/executive-brief/schedule/preflight',{credentials:'include',cache:'no-store'});
+   const j=await r.json();if(!r.ok)throw Error(j.error||'HTTP '+r.status);
+   const labels={disabled:'Jadwal nonaktif',not_due:'Belum waktunya',already_recorded:'Sudah tercatat untuk hari ini',due:'Memenuhi syarat jadwal (simulasi)'};
+   status.textContent='Simulasi '+j.data.date+': '+(labels[j.data.reason]||j.data.reason)+'. Tidak ada pemanggilan Gemini.';
+  }catch(e){status.textContent='Pemeriksaan gagal: '+e.message;}
+ });
  section.querySelector('#aiExecutiveBriefReload').addEventListener('click',reload);
 }
 document.addEventListener('DOMContentLoaded',()=>{setupReconciliation();setupManualBalances();setupGeminiQuotas();setupGeminiFeatureUsage();setupExecutiveBriefControl();load();});
