@@ -5,9 +5,9 @@ export async function recordGeminiExecution(pool: Pick<Pool,'query'>, input: {
   model: string; feature: string; status: 'success'|'failed';
   startedAt: number; payload?: any; error?: string;
 }): Promise<void> {
-  const inputTokens = Number(input.payload?.usageMetadata?.promptTokenCount);
-  const outputTokens = Number(input.payload?.usageMetadata?.candidatesTokenCount);
-  const valid = (n: number) => Number.isSafeInteger(n) && n >= 0 ? n : null;
+  const inputTokens = input.payload?.usageMetadata?.promptTokenCount;
+  const outputTokens = input.payload?.usageMetadata?.candidatesTokenCount;
+  const valid = (n: unknown) => typeof n === 'number' && Number.isSafeInteger(n) && n >= 0 ? n : null;
   try {
     await pool.query(
       `INSERT INTO ai_usage_logs (task_id,provider_id,model_id,status,latency_ms,input_tokens,output_tokens,error_code)
