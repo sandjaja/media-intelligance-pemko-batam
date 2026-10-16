@@ -2,13 +2,17 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Pool } from 'pg';
 import { runScheduledExecutiveBrief } from './executive-brief-runner.js';
 
-const json = (res: ServerResponse, status: number, body: unknown) => {
+export const json = (res: ServerResponse, status: number, body: unknown) => {
   res.statusCode = status;
   res.setHeader('content-type', 'application/json; charset=utf-8');
   res.setHeader('cache-control', 'no-store');
   res.end(JSON.stringify(body));
 };
 export const config = { maxDuration: 30 };
+
+export function isAuthorizedExecutiveBriefCron(method: string | undefined, authorization: string | undefined, secret: string | undefined): boolean {
+  return method === 'GET' && !!secret && authorization === `Bearer ${secret}`;
+}
 
 /**
  * Authenticated CRON preflight ONLY.
@@ -17,7 +21,7 @@ export const config = { maxDuration: 30 };
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   if (req.method !== 'GET') return json(res, 405, { error: 'METHOD_NOT_ALLOWED' });
   const secret = process.env.CRON_SECRET;
-  if (!secret || req.headers.authorization !== `Bearer ${secret}`) {
+  if (!isAuthorizedExecutiveBriefCron(req.method, req.headers.authorization, secret)) {
     return json(res, 401, { error: 'UNAUTHORIZED' });
   }
   const databaseUrl = process.env.DATABASE_URL ?? process.env.POSTGRES_URL ?? '';
