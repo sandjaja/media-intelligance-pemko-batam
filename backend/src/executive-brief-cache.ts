@@ -49,3 +49,14 @@ export async function completeExecutiveBriefDay(
   );
   return rows.length === 1;
 }
+
+export async function failExecutiveBriefDay(
+  pool: Pick<Pool, 'query'>, date: string, scopeKey: string, errorCode: string,
+): Promise<void> {
+  await pool.query(
+    `UPDATE executive_brief_daily_cache
+       SET status='failed',error_code=$3,locked_until=NULL,updated_at=now()
+     WHERE brief_date=$1::date AND scope_key=$2 AND status='running'`,
+    [date,scopeKey,errorCode.slice(0,80)],
+  );
+}
