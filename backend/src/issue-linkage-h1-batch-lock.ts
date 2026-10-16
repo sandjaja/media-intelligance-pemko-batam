@@ -120,6 +120,40 @@ export function publicationDateNeedsReview(
   return Math.abs(stored.getTime() - embedded.getTime()) > 2 * 86400000;
 }
 
+/** Shared, deterministic bounded plan for prepare and eventual execution. */
+export function buildH1BoundedPlan<T extends H1EvidenceRef & {
+  occurredAt?: string | null; title?: string | null; summary?: string | null;
+  primaryKeyword?: string | null; opdId?: number | null;
+}>(evidence: T[], now: Date = new Date()) {
+  const selected = selectYesterdayWibEvidence(evidence, now);
+  const flagged = selected.evidence.filter(e => publicationDateNeedsReview(e.occurredAt, e.title, e.summary));
+  const flaggedRefs = new Set(flagged.map(e => `${e.sourceType}:${e.id}`));
+  const eligible = selected.evidence.filter(e => !flaggedRefs.has(`${e.sourceType}:${e.id}`));
+  const groups = groupH1Evidence(eligible);
+  const eligibleGroups = groups.filter(g => g.primaryKeyword && g.evidence.length >= 2);
+  const boundedGroups = eligibleGroups.filter(g => g.evidence.length <= 40);
+  const plannedGroups = boundedGroups.slice(0, 5);
+  const plannedEvidence = plannedGroups.flatMap(g => g.evidence);
+  const plannedFingerprint = h1ClassifiedPlanFingerprint(plannedGroups);
+  return {
+    date: selected.date,
+    fingerprint: h1Fingerprint(selected.evidence),
+    evidenceCount: selected.evidence.length,
+    groupCount: groups.length,
+    eligibleGroupCount: eligibleGroups.length,
+    oversizedGroupCount: eligibleGroups.length - boundedGroups.length,
+    estimatedMinimumGeminiCalls: eligibleGroups.length,
+    maximumGroupsPerRun: 5,
+    plannedGroupCount: plannedGroups.length,
+    deferredGroupCount: eligibleGroups.length - plannedGroups.length,
+    plannedFingerprint,
+    publicationDateReviewCount: flagged.length,
+    excludedFromAnalysisCount: flaggedRefs.size,
+    planCheck: validateH1ExecutionPlan(selected.date, plannedFingerprint, selected.date, plannedEvidence, plannedFingerprint),
+    plannedGroups,
+  };
+}
+
 /** Include classification in the plan identity: changing a keyword or OPD
  * must invalidate a previously prepared batch even if evidence IDs are unchanged.
  */
