@@ -385,3 +385,20 @@ test('H-1 continuation excludes reserved refs and advances to deferred groups', 
   assert.equal(next.planCheck.valid, true);
   assert.equal(next.plannedGroups.every(g => g.evidence.every(e => !reserved.has(`${e.sourceType}:${e.id}`))), true);
 });
+
+test('H-1 continuation never reuses reserved evidence after keyword or OPD changes', () => {
+  const now = new Date('2026-10-16T04:00:00Z');
+  const evidence = [
+    { sourceType: 'online' as const, id: 1, occurredAt: '2026-10-15T08:00:00Z', primaryKeyword: 'sampah', opdId: 9 },
+    { sourceType: 'social' as const, id: 2, occurredAt: '2026-10-15T08:00:00Z', primaryKeyword: 'sampah', opdId: 9 },
+    { sourceType: 'online' as const, id: 3, occurredAt: '2026-10-15T08:00:00Z', primaryKeyword: 'banjir', opdId: 10 },
+    { sourceType: 'social' as const, id: 4, occurredAt: '2026-10-15T08:00:00Z', primaryKeyword: 'banjir', opdId: 10 },
+  ];
+  const reserved = new Set(['online:1', 'social:2']);
+  const changed = evidence.map(e => e.id <= 2 ? { ...e, primaryKeyword: 'banjir', opdId: 10 } : e);
+  const plan = buildH1ContinuationPlan(changed, reserved, now);
+  assert.equal(plan.alreadyReservedCount, 2);
+  assert.equal(plan.plannedGroupCount, 1);
+  assert.deepEqual(plan.plannedGroups[0].evidence.map(e => e.id).sort(), [3, 4]);
+  assert.equal(plan.planCheck.valid, true);
+});
