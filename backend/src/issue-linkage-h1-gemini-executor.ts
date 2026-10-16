@@ -41,6 +41,9 @@ export async function analyzeReservedH1Groups(
 }>> {
   if (typeof onValidatedGroup !== 'function') throw new Error('H1_RESULT_PERSISTENCE_REQUIRED');
   if (groups.length < 1 || groups.length > 5) throw new Error('H1_INVALID_GROUP_COUNT');
+  // The Vercel API route must process one group per request. Multi-group
+  // execution remains disabled until durable per-group continuation exists.
+  if (groups.length !== 1) throw new Error('H1_SINGLE_GROUP_EXECUTION_REQUIRED');
   // Validate all groups before reserving even one Gemini request.
   const prompts = groups.map(buildH1GeminiGroupPrompt);
   const seen = new Set<string>();
