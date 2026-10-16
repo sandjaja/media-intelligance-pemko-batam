@@ -51,3 +51,23 @@ export async function finishIssueLinkageH1Batch(
   );
   return (result.rowCount || 0) === 1;
 }
+
+/** Store a successful AI-context result under the same fingerprint used by inbox reads.
+ * The caller must hold the H-1 batch claim; this function does not invoke Gemini.
+ */
+export async function persistH1LinkageContext(
+  pool: Pool,
+  organizationId: number,
+  fingerprint: string,
+  issueId: number,
+  candidateKeys: string[],
+  context: { mode: string; groups: unknown[] },
+): Promise<boolean> {
+  if (context.mode !== 'ai-context' || !Array.isArray(context.groups) || context.groups.length === 0) return false;
+  await pool.query(
+    `INSERT INTO audit_logs(user_id,action,metadata)
+     VALUES(NULL,'ISSUE_LINKAGE_CONTEXT_MATCHED',$1::jsonb)`,
+    [JSON.stringify({ organizationId, fingerprint, issueId, candidateKeys, context })],
+  );
+  return true;
+}
