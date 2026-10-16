@@ -49,3 +49,13 @@ export function isExecutiveBriefDue(schedule: ExecutiveBriefSchedule, now: Date)
   const minute = Number(parts.find(p => p.type === 'minute')?.value);
   return hour === schedule.hour_wib && minute === schedule.minute_wib;
 }
+
+/** Date used for daily deduplication is always derived from WIB, never server UTC. */
+export function executiveBriefDateWib(now: Date): string {
+  if (!Number.isFinite(now.getTime())) throw new Error('INVALID_SCHEDULE_NOW');
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(now);
+  const value = (type: string) => parts.find(p => p.type === type)?.value;
+  return `${value('year')}-${value('month')}-${value('day')}`;
+}
