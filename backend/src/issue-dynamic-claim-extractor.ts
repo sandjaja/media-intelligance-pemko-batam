@@ -1,5 +1,6 @@
 import type { Pool } from 'pg';
-import { prepareGeminiRequest } from './ai-gemini-config.js';
+import { listGeminiFallbackModels } from './ai-gemini-config.js';
+import { reserveGeminiDailyRequest } from './ai-gemini-quota-reservation.js';
 import { recordGeminiExecution } from './ai-gemini-execution-log.js';
 import { extractIssueAngles, type IssueAngleEvidence } from './issue-angle-extractor.js';
 
@@ -40,8 +41,11 @@ export async function extractDynamicIssueClaims(evidence:IssueAngleEvidence[],co
 
  const fallback=(reason='UNKNOWN')=>{const r=extractIssueAngles(evidence);return{...r,mode:'deterministic-fallback' as const,fallbackReason:reason,claims:r.angles.map(a=>({...a,claim:a.label,confidence:0,evidenceIds:a.evidence.map(x=>`${x.source}:${x.id}`)}))}};
  if(!evidence.length)return fallback('NO_VALID_EVIDENCE');if(!pool)return fallback('GEMINI_DATABASE_POOL_MISSING');
- let key:string,model:string;try{({key,model}=await prepareGeminiRequest(pool,'issue_claim_extraction'));}catch{return fallback('GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}
+ let models:Array<{key:string;model:string}>;try{models=await listGeminiFallbackModels(pool);if(!models.length)return fallback('GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}catch{return fallback('GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}
  const source=evidence.slice(0,40).map(e=>({evidenceId:ref(e),source:e.source,title:clip(e.title,500),text:clip([e.summary,e.content,e.body_text].filter(Boolean).join(' '))}));
+ for(let attempt=0;attempt<models.length;attempt++){
+ const {key,model}=models[attempt];
+ try{await reserveGeminiDailyRequest(pool,model,'issue_claim_extraction');}catch{if(attempt+1<models.length)continue;return fallback('GEMINI_DATABASE_OR_QUOTA_UNAVAILABLE');}
  const startedAt=Date.now();
  try{
   const prompt=`Anda adalah Dynamic Communication Angle Extractor untuk analisis komunikasi pemerintah. Analisis evidence media dari SUDUT KOMUNIKASI, bukan hanya mencari masalah. Setiap evidence valid dapat membawa informasi, capaian, concern, risiko, dampak, tuntutan, ketidakpastian, atau sudut komunikasi lain yang relevan.
@@ -108,5 +112,7 @@ ${JSON.stringify(source)}`
    scopeEvidenceStatus:['SUPPORTED','PARTIAL','GENERIC','OUTSIDE_SCOPE'].includes(String(ga.scopeEvidenceStatus))?String(ga.scopeEvidenceStatus):'GENERIC'
   }:null;
   await recordGeminiExecution(pool,{model,feature:'issue_claim_extraction',status:'success',startedAt,payload});return{angles:claims,claims,unclassified:[],totalEvidence:evidence.length,mode:'ai-dynamic' as const,fallbackReason:null,geographicAnalysis};
- }catch(error:any){await recordGeminiExecution(pool,{model,feature:'issue_claim_extraction',status:'failed',startedAt,error:String(error?.message||error)});const reason=String(error?.message||error||'UNKNOWN').slice(0,180);console.warn('[communication-gap] dynamic claim fallback:',reason);return fallback(reason)}
+ }catch(error:any){await recordGeminiExecution(pool,{model,feature:'issue_claim_extraction',status:'failed',startedAt,error:String(error?.message||error)});const reason=String(error?.message||error||'UNKNOWN').slice(0,180);if(/^Gemini HTTP (429|503)$/.test(reason)&&attempt+1<models.length)continue;console.warn('[communication-gap] dynamic claim fallback:',reason);return fallback(reason)}
+ }
+ return fallback('GEMINI_MODELS_UNAVAILABLE');
 }
