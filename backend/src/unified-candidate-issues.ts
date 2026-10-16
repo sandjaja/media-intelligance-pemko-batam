@@ -103,7 +103,26 @@ const groups:any[]=[];for(const g of consolidatedGroups){if(g.linkedIssue?.issue
   WHERE organization_id=$1 AND news_date=$2::date`,[organizationId,initial.date])).rows;
  const reservedRefs=new Set<string>(reservedRows.map((e:any)=>`${e.source_type}:${e.source_id}`));
  const plan=buildH1ContinuationPlan(evidence as any[],reservedRefs,now);
- // Preparation is read-only: no Gemini, no quota reservation, no ledger claim.
+ // Preparation is read-only: compare snapshot coverage with original dated news.
+ // This distinguishes missing ingestion from missing Issue Linkage snapshots.
+ const sourceCoverage=(await pool.query(`SELECT
+  (SELECT count(*)::int FROM articles a LEFT JOIN opd o ON o.id=a.opd_id
+   WHERE a.news_classification='UTAMA'
+     AND (o.organization_id=$1 OR (a.opd_id IS NULL AND (SELECT count(*) FROM organizations WHERE active=true)=1))
+     AND (a.published_at AT TIME ZONE 'Asia/Jakarta')::date=$2::date) AS online,
+  (SELECT count(*)::int FROM print_articles pa JOIN opd o ON o.id=pa.opd_id
+   JOIN print_editions pe ON pe.id=pa.edition_id
+   WHERE o.organization_id=$1 AND lower(pa.status)='analyzed'
+     AND pe.edition_date::date=$2::date) AS print,
+  (SELECT count(*)::int FROM social_mentions sm LEFT JOIN opd o ON o.id=sm.opd_id
+   WHERE sm.source_kind='external'
+     AND (o.organization_id=$1 OR (sm.opd_id IS NULL AND (SELECT count(*) FROM organizations WHERE active=true)=1))
+     AND (sm.published_at AT TIME ZONE 'Asia/Jakarta')::date=$2::date) AS social,
+  (SELECT count(*)::int FROM social_mentions sm LEFT JOIN opd o ON o.id=sm.opd_id
+   WHERE sm.source_kind='owned'
+     AND (o.organization_id=$1 OR (sm.opd_id IS NULL AND (SELECT count(*) FROM organizations WHERE active=true)=1))
+     AND (sm.published_at AT TIME ZONE 'Asia/Jakarta')::date=$2::date) AS owned`,
+  [organizationId,plan.date])).rows[0];
  // The eventual execution endpoint must revalidate this fingerprint before claiming.
  return {data:{
   date:plan.date,timezone:'Asia/Jakarta',
@@ -117,6 +136,7 @@ const groups:any[]=[];for(const g of consolidatedGroups){if(g.linkedIssue?.issue
   publicationDateReviewCount:plan.publicationDateReviewCount,
   excludedFromAnalysisCount:plan.excludedFromAnalysisCount,
   diagnostic:{
+   sourcePublishedYesterday:sourceCoverage,
    snapshotEvidenceCount:evidence.length,
    withPublicationDate:evidence.filter((e:any)=>e.occurredAt&&Number.isFinite(new Date(e.occurredAt).getTime())).length,
    withPrimaryKeyword:evidence.filter((e:any)=>String(e.primaryKeyword||'').trim()).length,
