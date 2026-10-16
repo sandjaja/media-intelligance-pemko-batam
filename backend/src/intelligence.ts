@@ -83,7 +83,7 @@ async function providerBrief(pool: Pool, rows: IntelligenceArticle[]) {
       payload = await response.json() as any;
       const raw = payload.candidates?.[0]?.content?.parts?.map((x: any) => x.text || '').join('').trim();
       if (!raw) throw new Error('GEMINI_EMPTY_RESPONSE');
-      const jsonText = raw.replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```$/, '').trim();
+      const jsonText = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
       let parsed: unknown;
       try { parsed = JSON.parse(jsonText); } catch { throw new Error('GEMINI_INVALID_JSON_RESPONSE'); }
       if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('GEMINI_INVALID_JSON_RESPONSE');
