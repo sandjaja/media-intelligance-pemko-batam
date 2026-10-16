@@ -23,7 +23,7 @@ Kembalikan JSON {"groups":[{"groupId":"A","label":"ringkasan konteks singkat","r
 EXISTING ISSUE: ${JSON.stringify(issue)}
 PRIMARY KEYWORD: ${JSON.stringify(primaryKeyword)}
 EVIDENCE: ${JSON.stringify(source)}`;
-  const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}})});
+  const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json'}}),signal:AbortSignal.timeout(10000)});
   if(!response.ok)throw new Error(`Gemini HTTP ${response.status}`);
   const payload=await response.json() as any,raw=payload.candidates?.[0]?.content?.parts?.map((x:any)=>x.text||'').join('');if(!raw)throw new Error('Gemini returned no text');
   const parsed=JSON.parse(raw),valid=new Set(source.map(x=>x.evidenceRef)),seen=new Set<string>(),groups:any[]=[];
