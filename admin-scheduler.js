@@ -59,7 +59,7 @@ async function retryBrief(){
  const button=$('#schedBriefRetry'),status=$('#schedBriefRetryResult');
  button.disabled=true;status.textContent='Menjalankan analisis ulang...';
  try{
-  const result=await api('/admin/executive-brief/retry',{method:'POST'});
+  const result=await api('/admin/executive-brief/retry',{method:'POST',body:'{}'});
   status.textContent=result.data?.status==='created'?'Berhasil. Executive Brief terbaru tersimpan dan dapat dilihat di dashboard.':'Analisis ulang gagal. Tidak ada percobaan otomatis berikutnya.';
  }catch(e){status.textContent='Analisis ulang tidak dapat dijalankan: '+e.message;}
  finally{button.disabled=false;}
