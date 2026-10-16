@@ -126,33 +126,21 @@ app.post('/api/intelligence/issue-linkage-inbox/batch-h1/validate',{preHandler:a
    occurredAt:e.occurredAt||null,title:e.title||null,summary:e.summary||null,
    primaryKeyword:row.snapshot?.primaryKeyword||e.primaryKeyword||null,
    opdId:e.opdId==null?(row.snapshot?.opdId==null?null:Number(row.snapshot.opdId)):Number(e.opdId)})));
- const plan=buildH1BoundedPlan(evidence as any[]);
+ // Ledger must be present before computing a continuation-aware fingerprint.
+ const ledger=(await pool.query(`SELECT to_regclass('public.issue_linkage_h1_batches') IS NOT NULL AND to_regclass('public.issue_linkage_h1_evidence_ledger') IS NOT NULL AS installed`)).rows[0];
+ if(!ledger?.installed)return reply.code(503).send({
+  error:'H1_BATCH_LEDGER_MIGRATION_REQUIRED',migrations:['160_issue_linkage_h1_batch_ledger.sql','161_issue_linkage_h1_evidence_ledger.sql'],ready:false,
+ });
+ const now=new Date();
+ const initial=buildH1BoundedPlan(evidence as any[],now);
+ const reservedRows=(await pool.query(`SELECT source_type,source_id FROM issue_linkage_h1_evidence_ledger
+  WHERE organization_id=$1 AND news_date=$2::date`,[organizationId,initial.date])).rows;
+ const reservedRefs=new Set<string>(reservedRows.map((e:any)=>`${e.source_type}:${e.source_id}`));
+ const plan=buildH1ContinuationPlan(evidence as any[],reservedRefs,now);
  const check=validateH1ExecutionPlan(body.date,body.plannedFingerprint,plan.date,
   plan.plannedGroups.flatMap(g=>g.evidence) as any[],plan.plannedFingerprint);
  if(!check.valid)return reply.code(409).send({error:check.reason,date:plan.date,plannedFingerprint:plan.plannedFingerprint});
- // Never claim or execute until migration 160 is installed.
- const ledger=(await pool.query(`SELECT to_regclass('public.issue_linkage_h1_batches') IS NOT NULL AND to_regclass('public.issue_linkage_h1_evidence_ledger') IS NOT NULL AS installed`)).rows[0];
- if(!ledger?.installed)return reply.code(503).send({
-  error:'H1_BATCH_LEDGER_MIGRATION_REQUIRED',migrations:['160_issue_linkage_h1_batch_ledger.sql','161_issue_linkage_h1_evidence_ledger.sql'],
-  ready:false,
- });
-
- // A previous reservation (including uncertain work) must never be silently reused.
- // Check each planned source ref; same-day evidence may belong to a different fingerprint.
- const plannedRefs=plan.plannedGroups.flatMap(g=>g.evidence);
- if(plannedRefs.length){
-  const reserved=(await pool.query(`SELECT source_type,source_id,status,batch_id
-   FROM issue_linkage_h1_evidence_ledger
-   WHERE organization_id=$1 AND news_date=$2::date
-     AND (source_type,source_id) IN (
-       SELECT * FROM unnest($3::text[],$4::bigint[])
-     ) LIMIT 1`,[organizationId,plan.date,
-    plannedRefs.map(e=>e.sourceType),plannedRefs.map(e=>e.id)])).rows[0];
-  if(reserved)return reply.code(409).send({
-   error:'H1_EVIDENCE_ALREADY_RESERVED',batchId:Number(reserved.batch_id),
-   reservationStatus:reserved.status,ready:false,
-  });
- }
+ // A reservation created after this read must still be rejected atomically by claimAndReserveH1Batch.
  const prior=(await pool.query(`SELECT id,status,request_count,started_at,finished_at
   FROM issue_linkage_h1_batches
   WHERE organization_id=$1 AND news_date=$2::date AND fingerprint=$3
@@ -161,16 +149,8 @@ app.post('/api/intelligence/issue-linkage-inbox/batch-h1/validate',{preHandler:a
   error:'H1_BATCH_ALREADY_RECORDED',batchStatus:prior.status,batchId:Number(prior.id),
   ready:false,
  });
- // Different fingerprints can still share previously analyzed evidence.
- // Until per-evidence accounting exists, do not permit another batch on this date.
- const previousBatch=(await pool.query(`SELECT id,status FROM issue_linkage_h1_batches
-  WHERE organization_id=$1 AND news_date=$2::date
-    AND status IN ('completed','failed')
-  ORDER BY created_at DESC LIMIT 1`,[organizationId,plan.date])).rows[0];
- if(previousBatch)return reply.code(409).send({
-  error:'H1_DAY_ALREADY_PROCESSED_REQUIRES_RECONCILIATION',
-  batchId:Number(previousBatch.id),batchStatus:previousBatch.status,ready:false,
- });
+ // Completed and failed batches retain their reservations; continuation uses only unreserved refs.
+ // A running batch still blocks concurrent execution.
  const activeBatch=(await pool.query(`SELECT id FROM issue_linkage_h1_batches
   WHERE organization_id=$1 AND news_date=$2::date AND status='running'
   LIMIT 1`,[organizationId,plan.date])).rows[0];
@@ -178,7 +158,7 @@ app.post('/api/intelligence/issue-linkage-inbox/batch-h1/validate',{preHandler:a
   error:'H1_ANOTHER_BATCH_RUNNING',batchId:Number(activeBatch.id),ready:false,
  });
  return {data:{valid:true,date:plan.date,plannedFingerprint:plan.plannedFingerprint,
-  plannedGroupCount:plan.plannedGroupCount,evidenceCount:plan.plannedGroups.reduce((n,g)=>n+g.evidence.length,0),
+  plannedGroupCount:plan.plannedGroupCount,alreadyReservedCount:plan.alreadyReservedCount,evidenceCount:plan.plannedGroups.reduce((n,g)=>n+g.evidence.length,0),
   ready:false,reason:'EXECUTION_ENDPOINT_NOT_ENABLED'}};
 });
 // Read-only continuation preview. Ledger reservations are authoritative, including failed/uncertain runs.
