@@ -73,6 +73,42 @@ export async function reserveH1Evidence(
   return { reserved: result.rowCount === evidence.length, count: result.rowCount || 0 };
 }
 
+
+/** Atomically claim a batch and reserve its evidence. Never call Gemini inside
+ * this transaction. Failed reservations roll back the batch claim as well.
+ */
+export async function claimAndReserveH1Batch(
+  pool: Pool,
+  organizationId: number,
+  newsDate: string,
+  fingerprint: string,
+  evidence: H1EvidenceRef[],
+): Promise<{ claimed: boolean; id: number | null; status: string }> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const claim = await claimIssueLinkageH1Batch(client as unknown as Pool,
+      organizationId,newsDate,fingerprint,evidence.length);
+    if (!claim.claimed || claim.id === null) {
+      await client.query('ROLLBACK');
+      return claim;
+    }
+    const reservation = await reserveH1Evidence(client as unknown as Pool,
+      organizationId,newsDate,claim.id,evidence);
+    if (!reservation.reserved) {
+      await client.query('ROLLBACK');
+      return { claimed:false,id:null,status:'evidence_already_reserved' };
+    }
+    await client.query('COMMIT');
+    return claim;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function finishIssueLinkageH1Batch(
   pool: Pool,
   id: number,
