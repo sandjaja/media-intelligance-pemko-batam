@@ -189,12 +189,12 @@ export function publicationDateNeedsReview(
   const stored = new Date(occurredAt);
   if (!Number.isFinite(stored.getTime())) return false;
   const head = [title || '', (summary || '').slice(0,180)].join(' ');
-  const iso = head.match(/\\b(20\\d{2})-(\\d{2})-(\\d{2})\\b/);
+  const iso = head.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
   const months: Record<string, number> = {
     januari:1, februari:2, maret:3, april:4, mei:5, juni:6,
     juli:7, agustus:8, september:9, oktober:10, november:11, desember:12,
   };
-  const indonesian = head.toLowerCase().match(/\\b(\\d{1,2})\\s+(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\\s+(20\\d{2})\\b/);
+  const indonesian = head.toLowerCase().match(/\b(\d{1,2})\s+(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\s+(20\d{2})\b/);
   const year = iso ? Number(iso[1]) : indonesian ? Number(indonesian[3]) : 0;
   const month = iso ? Number(iso[2]) : indonesian ? months[indonesian[2]] : 0;
   const day = iso ? Number(iso[3]) : indonesian ? Number(indonesian[1]) : 0;
@@ -282,7 +282,7 @@ export function validateH1ExecutionPlan(
   classifiedFingerprint?: string,
 ): { valid: boolean; reason: string | null; fingerprint: string } {
   const fingerprint = classifiedFingerprint ?? h1Fingerprint(plannedEvidence);
-  if (!/^20\\d{2}-\\d{2}-\\d{2}$/.test(expectedDate) || expectedDate !== actualDate) {
+  if (!/^20\d{2}-\d{2}-\d{2}$/.test(expectedDate) || expectedDate !== actualDate) {
     return { valid: false, reason: 'H1_DATE_CHANGED', fingerprint };
   }
   if (!/^[a-f0-9]{64}$/.test(expectedFingerprint) || expectedFingerprint !== fingerprint) {
@@ -299,7 +299,7 @@ export function validateH1ExecutionPlan(
  */
 export function inboxContextFingerprint(primaryKeyword: string | null, evidence: H1EvidenceRef[]): string {
   const normalized = String(primaryKeyword || '').toLowerCase().normalize('NFKC')
-    .replace(/[^\\p{L}\\p{N}\\s-]/gu, ' ').replace(/\\s+/g, ' ').trim();
+    .replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
   return [normalized, ...evidence.map(e => `${e.sourceType}:${e.id}`).sort()].join('|');
 }
 
@@ -336,7 +336,7 @@ export function groupH1Evidence<T extends H1EvidenceRef & {
     if (seen.has(ref)) continue;
     seen.add(ref);
     const keyword = String(item.primaryKeyword || '').toLowerCase().normalize('NFKC')
-      .replace(/[^\\p{L}\\p{N}\\s-]/gu, ' ').replace(/\\s+/g, ' ').trim();
+      .replace(/[^\p{L}\p{N}\s-]/gu, ' ').replace(/\s+/g, ' ').trim();
     const opdId = Number.isInteger(item.opdId) && Number(item.opdId) > 0 ? Number(item.opdId) : null;
     const key = keyword ? `${keyword}|opd:${opdId ?? 'none'}` : `unclassified|${ref}`;
     let group = groups.get(key);
