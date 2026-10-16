@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readExecutiveBriefSchedule, saveExecutiveBriefScheduleTime, isExecutiveBriefDue, executiveBriefDateWib, inspectExecutiveBriefSchedule, disableExecutiveBriefSchedule } from './executive-brief-schedule.js';
+import { readExecutiveBriefSchedule, saveExecutiveBriefScheduleTime, isExecutiveBriefDue, executiveBriefDateWib, inspectExecutiveBriefSchedule, enableExecutiveBriefSchedule, disableExecutiveBriefSchedule } from './executive-brief-schedule.js';
 
 test('schedule defaults to 06:30 WIB and disabled when no row exists', async () => {
   const db = { query: async () => ({ rows: [] }) };
@@ -98,4 +98,21 @@ test('Executive Brief activation can be safely disabled without touching collect
     return { rows: [{ enabled: false, hour_wib: 6, minute_wib: 30, timezone: 'Asia/Jakarta' }] };
   } };
   assert.equal((await disableExecutiveBriefSchedule(db as never)).enabled, false);
+});
+
+
+test('Executive Brief activation changes only its own schedule row', async () => {
+  const db = { query: async (sql: string) => {
+    assert.match(sql, /UPDATE executive_brief_schedule_settings/);
+    assert.match(sql, /enabled=TRUE/);
+    assert.match(sql, /timezone='Asia\\/Jakarta'/);
+    assert.doesNotMatch(sql, /collection_scheduler/);
+    return { rows: [{ enabled: true, hour_wib: 6, minute_wib: 30, timezone: 'Asia/Jakarta' }] };
+  } };
+  assert.equal((await enableExecutiveBriefSchedule(db as never)).enabled, true);
+});
+
+test('Executive Brief activation fails closed when configuration is missing', async () => {
+  const db = { query: async () => ({ rows: [] }) };
+  await assert.rejects(enableExecutiveBriefSchedule(db as never), /EXECUTIVE_BRIEF_SCHEDULE_MISSING/);
 });
