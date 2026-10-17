@@ -61,3 +61,12 @@ test('initial session 401 is retried before exposing login; bootstrap uses the a
  for(let i=0;i<25;i++){await Promise.resolve();for(const fn of x.timers.splice(0))fn();}
  assert.equal((await pending).status,200);assert.deepEqual(paths,['/api/auth/session','/api/auth/session']);assert.equal(x.document.body.dataset.auth,'checking');assert.equal(x.elements.has('authGate'),false);
 });
+
+test('typing a long draft updates the server session at most once a minute; idle tabs send no heartbeat',async()=>{
+ const paths:string[]=[];const x=runtime(async input=>{paths.push(String(input));return Response.json({ok:true});});
+ x.document.body.dataset.auth='ok';vm.runInContext('var testNow=100000;Date.now=()=>testNow;',x.context);x.run('auth-session-guard.js');
+ assert.deepEqual(paths,[]);vm.runInContext('testNow+=61000',x.context);x.emit('input');
+ for(let i=0;i<10;i++)await Promise.resolve();assert.deepEqual(paths,['/api/auth/activity']);
+ x.emit('input');x.emit('scroll');for(let i=0;i<10;i++)await Promise.resolve();assert.equal(paths.length,1);
+ vm.runInContext('testNow+=61000',x.context);assert.equal(paths.length,1);x.emit('keydown');for(let i=0;i<10;i++)await Promise.resolve();assert.equal(paths.length,2);
+});

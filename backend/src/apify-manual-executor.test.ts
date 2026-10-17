@@ -236,6 +236,10 @@ test('uncertain provider start and failed quarantine returns explicit non-retrya
 test('repeated executor invocation with same reservation never sends second paid POST',async()=>{
  let status:'RESERVED'|'RUNNING'='RESERVED';
  const pool={query:async(q:string)=>{
+  if(q.includes('FROM organizations WHERE active=true'))return{rows:[{id:1,name:'Pemko Batam',code:'BATAM'}]};
+  if(q.includes('FROM government_branding'))return{rows:[{city_name:'Batam'}]};
+  if(q.includes('FROM districts'))return{rows:[{name:'Sekupang'}]};
+  if(q.includes('FROM villages')||q.includes('FROM organization_area_aliases')||q.includes('FROM opd ')||q.includes('FROM uptd '))return{rows:[]};
   if(q.startsWith('SELECT'))return{rows:[{actor_id:base.actorId,platform:'tiktok',status,reserved_usd:'0.500000'}]};
   if(q.includes("status='RESERVED'")&&q.includes("status='RUNNING'")){
    if(status!=='RESERVED')return{rows:[]};
@@ -317,7 +321,7 @@ test('paid executor fails closed when selected video limit is absent',async()=>{
  const result=await executeClaimedApifyRun(unreachablePool,{
   ...base,explicitlyConfirmed:true,providerChargeCapVerified:true,selectedVideoLimit:undefined
  });
- assert.equal(result.reason,'APIFY_SELECTED_VIDEO_LIMIT_REQUIRED');
+ assert.equal(result.reason,'APIFY_SELECTED_VIDEO_LIMIT_INVALID');
 });
 
 test('direct paid executor never treats UI consent as verified provider cap',async()=>{

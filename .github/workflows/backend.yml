@@ -112,7 +112,7 @@ jobs:
           node --check communication-gap-ui.js
           node --check command-center.js
           node --check executive-brief-status-ui.js
-      - run: npm install
+      - run: npm ci --no-audit --no-fund
       - run: npm run check
       - run: npm test
       - run: npm run build

@@ -53,7 +53,7 @@ test('unknown billing mode cannot be assumed postpaid',()=>{
 });
 
 test('unverified postpaid flag cannot bypass cash balance checks',()=>{
- const result=evaluateApifyManualBudget({...base,billingMode:'POSTPAID',cashBalanceUsd:null});
+ const result=evaluateApifyManualBudget({...base,billingMode:'POSTPAID',billingModeVerified:false,cashBalanceUsd:null});
  assert.equal(result.readyForConfirmation,false);
  assert.ok(result.blockers.includes('APIFY_BILLING_MODE_UNVERIFIED'));
 });

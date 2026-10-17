@@ -1,3 +1,4 @@
+import {safePublicFetch} from './safe-public-fetch.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import type { Pool } from 'pg';
 import { loadHumasAiTask, executeHumasAi } from './ai-humas-execution.js';
@@ -30,18 +31,10 @@ function cleanPublicationHtml(html:string){
   return{title:title.slice(0,500),text:text.slice(0,24000)};
 }
 async function fetchWebsitePublication(rawUrl:string){
-  const u=new URL(rawUrl);
-  if(!['http:','https:'].includes(u.protocol))throw new Error('PUBLICATION_URL_PROTOCOL_NOT_ALLOWED');
-  const host=u.hostname.toLowerCase();
-  if(host==='localhost'||host==='0.0.0.0'||host==='127.0.0.1'||host==='::1'||host.endsWith('.local')||/^10\./.test(host)||/^192\.168\./.test(host)||/^169\.254\./.test(host)||/^172\.(1[6-9]|2\d|3[01])\./.test(host))throw new Error('PUBLICATION_URL_HOST_NOT_ALLOWED');
-  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);
-  try{
-    const r=await fetch(u.toString(),{signal:controller.signal,redirect:'follow',headers:{'user-agent':'MediaIntelligencePemkoBatam/1.0'}});
-    if(!r.ok)throw new Error(`PUBLICATION_FETCH_HTTP_${r.status}`);
-    const type=r.headers.get('content-type')||'';if(!type.includes('text/html'))throw new Error('PUBLICATION_NOT_HTML');
-    const len=Number(r.headers.get('content-length')||0);if(len>2_000_000)throw new Error('PUBLICATION_TOO_LARGE');
-    return cleanPublicationHtml((await r.text()).slice(0,2_000_000));
-  }finally{clearTimeout(timer)}
+  const r=await safePublicFetch(rawUrl,{maxBytes:2_000_000,timeoutMs:10000});
+  if(!r.ok)throw new Error(`PUBLICATION_FETCH_HTTP_${r.status}`);
+  if(!String(r.headers['content-type']||'').includes('text/html'))throw new Error('PUBLICATION_NOT_HTML');
+  return cleanPublicationHtml(r.text);
 }
 function validatePublicationEvidenceMime(mimeType:unknown):string{
   const mime=String(mimeType||'').toLowerCase().trim();

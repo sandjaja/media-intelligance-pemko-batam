@@ -1,3 +1,4 @@
+import {safePublicResponse} from './safe-public-fetch.js';
 import { XMLParser } from 'fast-xml-parser';
 import type { Pool } from 'pg';
 import { ingestSocialBatch, type SocialCandidate } from './social-collector.js';
@@ -13,7 +14,7 @@ const firstString=(...v:unknown[])=>v.map(textValue).find(Boolean);
 const decodeEntities=(v:string)=>v.replace(/&nbsp;/gi,' ').replace(/&amp;/gi,'&').replace(/&quot;/gi,'"').replace(/&#39;|&apos;/gi,"'").replace(/&lt;/gi,'<').replace(/&gt;/gi,'>');
 const stripHtml=(v?:string)=>v?decodeEntities(v).replace(/<script[\s\S]*?<\/script>/gi,' ').replace(/<style[\s\S]*?<\/style>/gi,' ').replace(/<noscript[\s\S]*?<\/noscript>/gi,' ').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim():undefined;
 const safeDate=(v?:string)=>{if(!v)return null;const d=new Date(v);return Number.isNaN(d.getTime())?null:d.toISOString()};
-async function fetchText(url:string,timeoutMs:number){const response=await fetch(url,{headers:{'user-agent':USER_AGENT,accept:'text/html,application/xhtml+xml,application/rss+xml,application/atom+xml,application/xml;q=0.9,*/*;q=0.8','cache-control':'no-cache','pragma':'no-cache'},signal:AbortSignal.timeout(timeoutMs),redirect:'follow'});return{response,body:await response.text()}}
+async function fetchText(url:string,timeoutMs:number){const response=await safePublicResponse(url,{headers:{'user-agent':USER_AGENT,accept:'text/html,application/xhtml+xml,application/rss+xml,application/atom+xml,application/xml;q=0.9,*/*;q=0.8','cache-control':'no-cache','pragma':'no-cache'},signal:AbortSignal.timeout(timeoutMs),redirect:'follow'});return{response,body:await response.text()}}
 function discoverFeedUrl(html:string,baseUrl:string){for(const tag of html.match(/<link\b[^>]*>/gi)??[]){const rel=tag.match(/\brel=["']([^"']+)["']/i)?.[1]?.toLowerCase()??'',type=tag.match(/\btype=["']([^"']+)["']/i)?.[1]?.toLowerCase()??'',href=tag.match(/\bhref=["']([^"']+)["']/i)?.[1];if(!href||!rel.includes('alternate')||(!type.includes('rss')&&!type.includes('atom')&&!type.includes('xml')))continue;try{return new URL(href,baseUrl).toString()}catch{}}return null}
 function cutoffIso(){return new Date(Date.now()-(BACKFILL_DAYS-1)*86400000).toISOString().slice(0,10)}
 function withinBackfill(date:string|null){if(!date)return true;return date.slice(0,10)>=cutoffIso()}

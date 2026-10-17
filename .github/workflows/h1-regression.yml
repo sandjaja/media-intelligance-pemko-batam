@@ -27,7 +27,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install backend dependencies without lockfile writes
-        run: npm install --no-package-lock --ignore-scripts --no-audit --no-fund
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: TypeScript check
         run: npm run check
       - name: H-1 mocked regression suite

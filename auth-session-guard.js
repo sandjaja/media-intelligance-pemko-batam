@@ -91,6 +91,8 @@ const ACTIVITY_KEY='mi.lastActivityAt';
 let idleStarted=false;
 let lastActivityAt=Date.now();
 let lastActivityWrite=0;
+let lastServerActivity=Date.now();
+let activityRequestPending=false;
 let idleWarning=null;
 let idleCheckTimer=null;
 let autoLogoutRunning=false;
@@ -101,6 +103,13 @@ function resetIdleActivity(write=true){
   if(!authenticated()||autoLogoutRunning)return;
   lastActivityAt=Date.now();
   closeIdleWarning();
+  if(write&&!activityRequestPending&&Date.now()-lastServerActivity>=60000){
+    activityRequestPending=true;
+    // Use the normal session-restoring fetch wrapper; never rotate the grant.
+    window.fetch(API+'/auth/activity',{method:'POST',credentials:'include',cache:'no-store'})
+      .then(r=>{if(r.ok)lastServerActivity=Date.now();else if(r.status===401)goLogin('SESSION_EXPIRED');})
+      .catch(()=>{}).finally(()=>{activityRequestPending=false;});
+  }
   if(write&&lastActivityAt-lastActivityWrite>4000){
     lastActivityWrite=lastActivityAt;
     try{localStorage.setItem(ACTIVITY_KEY,String(lastActivityAt))}catch{}

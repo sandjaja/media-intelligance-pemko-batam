@@ -1,3 +1,4 @@
+import {safePublicResponse} from './safe-public-fetch.js';
 import { XMLParser } from 'fast-xml-parser';
 import { organizationScopeTerms, type OrganizationMediaScope } from './organization-media-scope.js';
 import { verifyDiscoveredArticles } from './online-article-verification-gate.js';
@@ -78,7 +79,7 @@ function validArticleItem(item:OnlineArticle){return likelyArticlePath(item.url)
 function articleOnly(items:OnlineArticle[]){return items.filter(validArticleItem)}
 
 async function fetchText(url:string,timeoutMs=8000){
-  const response=await fetch(url,{headers:{
+  const response=await safePublicResponse(url,{headers:{
     'user-agent':USER_AGENT,
     accept:'text/html,application/xhtml+xml,application/rss+xml,application/atom+xml,application/xml;q=0.9,*/*;q=0.8',
     'accept-language':'id-ID,id;q=0.9,en;q=0.7',

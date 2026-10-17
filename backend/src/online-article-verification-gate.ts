@@ -1,3 +1,4 @@
+import {safePublicResponse} from './safe-public-fetch.js';
 import { diagnoseOriginalArticleHtml, verifyOriginalArticleHtml, type ArticleDateEvidence } from './online-article-verification.js';
 
 export type OnlineArticleCandidate={sourceId:string;title:string;url:string;publishedAt?:Date;excerpt?:string;fallbackEvidence?:'GOOGLE_NEWS_RSS';expectedPublisherUrl?:string};
@@ -17,7 +18,7 @@ function trustedFallback(candidate:OnlineArticleCandidate):VerifiedOnlineArticle
   const excerpt=String(candidate.excerpt||'').trim();if(excerpt.length<FALLBACK_EXCERPT_MIN)return null;
   return{sourceId:candidate.sourceId,title:candidate.title.trim().slice(0,1000),url:candidate.url,publishedAt:candidate.publishedAt,excerpt,publishedAtEvidence:'GOOGLE_NEWS_RSS' as ArticleDateEvidence};
 }
-async function fetchOriginal(url:string,timeoutMs=8000){const response=await fetch(url,{headers:{'user-agent':USER_AGENT,accept:'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8','accept-language':'id-ID,id;q=0.9,en;q=0.7','cache-control':'no-cache',pragma:'no-cache',referer:'https://www.google.com/'},signal:AbortSignal.timeout(timeoutMs),redirect:'follow'});const type=response.headers.get('content-type')?.toLowerCase()??'';if(!response.ok)return{html:'',url:response.url||url,status:response.status,type};if(!type.includes('text/html'))return{html:'',url:response.url||url,status:response.status,type};return{html:await response.text(),url:response.url||url,status:response.status,type};}
+async function fetchOriginal(url:string,timeoutMs=8000){const response=await safePublicResponse(url,{headers:{'user-agent':USER_AGENT,accept:'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8','accept-language':'id-ID,id;q=0.9,en;q=0.7','cache-control':'no-cache',pragma:'no-cache',referer:'https://www.google.com/'},signal:AbortSignal.timeout(timeoutMs),redirect:'follow'});const type=response.headers.get('content-type')?.toLowerCase()??'';if(!response.ok)return{html:'',url:response.url||url,status:response.status,type};if(!type.includes('text/html'))return{html:'',url:response.url||url,status:response.status,type};return{html:await response.text(),url:response.url||url,status:response.status,type};}
 
 export async function verifyDiscoveredArticle(candidate:OnlineArticleCandidate):Promise<VerifiedOnlineArticleCandidate|null>{
   try{

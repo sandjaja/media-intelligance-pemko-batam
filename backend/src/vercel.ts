@@ -1,35 +1,35 @@
+import {createBackendStartup} from './backend-startup.js';
+import {waitUntil} from '@vercel/functions';
+import {createBackgroundScope} from './background-tasks.js';
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { isIP } from 'node:net';
 import { bootstrapInitialAdmin } from './bootstrap-admin.js';
 
+// Vercel overwrites x-forwarded-for at its edge. Never accept a client chain;
+// standalone use falls back to the actual socket address.
+export function adapterHeaders(req:IncomingMessage){
+ const {'x-real-ip':ignored,...headers}=req.headers;
+ return {...headers,'x-forwarded-for':adapterClientIp(req)};
+}
+export function adapterClientIp(req:IncomingMessage){
+ const header=process.env.VERCEL==='1'?req.headers['x-forwarded-for']:undefined;
+ const candidate=typeof header==='string'?header.trim():'';
+ return isIP(candidate)?candidate:(req.socket.remoteAddress||'127.0.0.1');
+}
 const INTERNAL_PORT = 18787;
 const BACKEND_BUILD = 'routing-propagation-diagnostic-v2-20260915';
-let backendReady: Promise<void> | null = null;
-
-async function ensureBackend() {
-  if (!backendReady) {
-    backendReady = (async () => {
-      if (!process.env.DATABASE_URL && process.env.POSTGRES_URL) {
-        process.env.DATABASE_URL = process.env.POSTGRES_URL;
-      }
-      process.env.PORT = String(INTERNAL_PORT);
-      await bootstrapInitialAdmin();
-      await import('./server.js');
-    })();
-  }
-  return backendReady;
-}
+const ensureBackend=createBackendStartup(async()=>{
+ if(!process.env.DATABASE_URL&&process.env.POSTGRES_URL)process.env.DATABASE_URL=process.env.POSTGRES_URL;
+ process.env.PORT=String(INTERNAL_PORT);
+ await bootstrapInitialAdmin();
+ await import('./server.js');
+});
 
 export default async function handler(req: IncomingMessage, res: ServerResponse) {
   try {
-    if ((req.url || '').startsWith('/api/ui-diagnostic') && req.method === 'POST') {
-      let body = '';
-      for await (const chunk of req) body += String(chunk);
-      console.error('UI_DIAGNOSTIC', body.slice(0, 4000));
-      res.statusCode = 204;
-      res.setHeader('cache-control', 'no-store');
-      res.end();
-      return;
+    if ((req.url || '').split('?')[0]==='/api/ui-diagnostic') {
+      res.statusCode=404;res.setHeader('cache-control','no-store');res.end();return;
     }
     if ((req.url || '').startsWith('/health/database')) {
       res.statusCode = 404;
@@ -51,14 +51,15 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
 
     await ensureBackend();
 
-    await new Promise<void>((resolve, reject) => {
+    const background=createBackgroundScope();
+    try{await new Promise<void>((resolve, reject) => {
       const proxyReq = http.request(
         {
           hostname: '127.0.0.1',
           port: INTERNAL_PORT,
           path: req.url || '/',
           method: req.method,
-          headers: req.headers,
+          headers: {...adapterHeaders(req),'x-mi-background-scope':background.id},
         },
         (proxyRes) => {
           res.statusCode = proxyRes.statusCode || 500;
@@ -75,7 +76,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       proxyReq.on('error', reject);
       req.on('error', reject);
       req.pipe(proxyReq);
-    });
+    });}finally{waitUntil(background.finish());}
   } catch (error) {
     console.error('Vercel Fastify adapter failed', error);
     if (!res.headersSent) {

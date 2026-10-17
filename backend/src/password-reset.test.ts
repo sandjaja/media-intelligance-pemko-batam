@@ -27,7 +27,7 @@ async function fixture(failMail=false){
  };
  const pool={query,connect:async()=>({query,release(){}})} as any;
  const app=Fastify();await app.register(cookie);await app.register(rateLimit,{max:120,timeWindow:'1 minute'});
- await registerPasswordResetRoutes(app,pool,{baseUrl:()=> 'https://app.example.test',send:async(to,url)=>{assert.equal(to,user.email);sends++;link=url;if(failMail)throw Error('smtp password=secret');}});
+ await registerPasswordResetRoutes(app,pool,{background:false,baseUrl:()=> 'https://app.example.test',send:async(to,url)=>{assert.equal(to,user.email);sends++;link=url;if(failMail)throw Error('smtp password=secret');}});
  const forgot=(email=user.email)=>app.inject({method:'POST',url:'/api/auth/forgot-password',payload:{email}});
  const reset=(value=new URL(link).hash.slice(7))=>app.inject({method:'POST',url:'/api/auth/reset-password',payload:{token:value,password:'new-password-123'}});
  return {app,user,forgot,reset,queries,token:()=>token,link:()=>link,sends:()=>sends,revoked:()=>revoked,tvRevoked:()=>tvRevoked};
@@ -47,20 +47,20 @@ test('unknown account, invalid email and existing account receive identical publ
 test('account cooldown prevents repeat SMTP and route limits abusive requests',async()=>{
  const x=await fixture();try{for(let i=0;i<5;i++)assert.equal((await x.forgot()).statusCode,200);assert.equal(x.sends(),1);assert.equal((await x.forgot()).statusCode,429);}finally{await x.app.close();}
 });
-test('SMTP failure invalidates the link, retains administrator recovery and leaks no credentials',async()=>{
- const x=await fixture(true);try{const r=await x.forgot();assert.equal(r.statusCode,200);assert.ok(x.token().used);assert.ok(x.queries.some(q=>q.sql.startsWith('INSERT INTO password_reset_requests')));assert.ok(!r.body.includes('secret'));assert.equal((await x.reset()).statusCode,400);}finally{await x.app.close();}
+test('SMTP failure invalidates the link, records visible notification failure and leaks no credentials',async()=>{
+ const x=await fixture(true);try{const r=await x.forgot();assert.equal(r.statusCode,200);assert.ok(x.token().used);assert.ok(x.queries.some(q=>q.sql.includes("'PASSWORD_RESET_EMAIL_FAILED'")));assert.ok(!r.body.includes('secret'));assert.equal((await x.reset()).statusCode,400);}finally{await x.app.close();}
 });
 test('reset origin is configured; preview links stay with preview database and unsafe URLs fail',()=>{
  assert.equal(passwordResetBaseUrl({VERCEL_ENV:'preview',VERCEL_URL:'preview.example.test',PUBLIC_APP_URL:'https://production.example.test'}),'https://preview.example.test');
  assert.equal(passwordResetBaseUrl({PUBLIC_APP_URL:'https://app.example.test/'}),'https://app.example.test');
  for(const env of [{},{PUBLIC_APP_URL:'http://unsafe.example.test'},{PUBLIC_APP_URL:'https://user:pass@app.example.test'},{PUBLIC_APP_URL:'https://app.example.test/?token=x'}])assert.throws(()=>passwordResetBaseUrl(env));
 });
-for(const [row,reason] of [[null,'not_generated'],[{status:'ready'},'ready'],[{status:'running'},'running'],[{status:'failed',error_code:'RETRY_FAILED:503'},'retry_used'],[{status:'failed',error_code:'GEMINI_UPSTREAM_503'},'available']] as const){
+for(const [row,reason] of [[null,'not_generated'],[{status:'ready'},'ready'],[{status:'running',locked_until:new Date(Date.now()+120000)},'running'],[{status:'failed',error_code:'RETRY_FAILED:503'},'retry_used'],[{status:'failed',error_code:'GEMINI_UPSTREAM_503'},'available']] as const){
  test('executive retry preflight distinguishes '+reason,async()=>{let sql='';const result=await inspectExecutiveBriefRetry({query:async(q:string)=>{sql=q;return {rows:row?[row]:[]};}} as any,'2026-10-17');assert.equal(result.reason,reason);assert.equal(result.available,reason==='available');assert.ok(sql.startsWith('SELECT'));assert.ok(result.message.length>20);});
 }
 test('atomic retry claim remains restricted to one failed run for today',async()=>{let sql='';assert.equal(await claimExecutiveBriefRetry({query:async(q:string)=>{sql=q;return {rows:[]};}} as any,'2026-10-17'),false);assert.ok(sql.includes("status='failed'"));assert.ok(sql.includes("NOT LIKE 'RETRY_%'"));});
 test('session restores valid root refresh even when stale legacy path cookie appears first',async()=>{
- const old='o'.repeat(64),valid='v'.repeat(64);const app=Fastify();await app.register(cookie);await registerAuthSessionRoutes(app,{query:async(sql:string,p:any[])=>({rows:p[0]===hash(valid)?[{id:'1',email:'user@example.test',role:'viewer',active:true,expires_at:new Date(Date.now()+86400000)}]:[]})} as any,'test-secret');
+ const old='o'.repeat(64),valid='v'.repeat(64);const app=Fastify();await app.register(cookie);await registerAuthSessionRoutes(app,{query:async(sql:string,p:any[])=>({rows:p[0]===hash(valid)?[{session_id:'3',user_id:'1',email:'user@example.test',role:'viewer',active:true,created_at:new Date(),expires_at:new Date(Date.now()+900000)}]:[]})} as any,'test-secret');
  try{const r=await app.inject({url:'/api/auth/session',headers:{cookie:'refresh_token='+old+'; refresh_token='+valid}});assert.equal(r.statusCode,200,r.body);assert.equal(r.json().restored,true);assert.ok(r.cookies.some(c=>c.name==='access_token'));assert.ok(r.cookies.some(c=>c.name==='refresh_token'&&c.path==='/api/auth'&&c.value===''));assert.ok(r.cookies.some(c=>c.name==='refresh_token'&&c.path==='/'&&c.value===valid));}finally{await app.close();}
 });
 test('database outage is a retryable session check, never an invalid-session 401',async()=>{

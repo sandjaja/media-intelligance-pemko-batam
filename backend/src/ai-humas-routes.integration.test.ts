@@ -15,10 +15,10 @@ const secret='test-only-route-jwt';
 const headers={cookie:'access_token='+jwt.sign({sub:'99'},secret)};
 const auth=(role:string)=>({id:99,email:'test@example.invalid',role:role==='super_admin'?'admin':'operator',active:true,opd_id:null,district_id:null,roles:[role],permissions:[]});
 const row=(rows:any[])=>({rows,rowCount:rows.length});
-async function appFor(register:any,query:(sql:string,params?:any[])=>Promise<any>){
+async function appFor(register:any,query:(sql:string,params?:any[])=>Promise<any>,fetchSource?:any){
  const app=Fastify();await app.register(cookie);
  const pool={query,connect:async()=>({query,release(){}})} as unknown as Pool;
- await register(app,pool,secret);await app.ready();return app;
+ await register(app,pool,secret,fetchSource);await app.ready();return app;
 }
 
 test('Gap GET without snapshot never executes an analysis; read-only POST is forbidden',async()=>{
@@ -117,7 +117,7 @@ test('Content Studio source extraction reads the selected model and editable pro
   if(sql.includes('INSERT INTO ai_gemini_quota_feature_audit')||sql.includes('INSERT INTO ai_usage_logs'))return row([{id:1}]);
   if(sql.includes('UPDATE content_project_sources')){assert.equal(JSON.parse(params[1])[0].text,'100 layanan');return row([{id:5,status:'EXTRACTED'}]);}
   throw Error('UNEXPECTED_DB: '+sql);
- });
+ },async(url:string)=>{assert.equal(url,'https://example.invalid/source');return {ok:true,status:200,text:'<p>Tersedia 100 layanan.</p>',headers:{'content-type':'text/html'}};});
  globalThis.fetch=async(url,init)=>{
    if(String(url)==='https://example.invalid/source')return new Response('<p>Tersedia 100 layanan.</p>');
    assert.ok(String(url).includes('humas-studio-model'));generations++;

@@ -1,3 +1,4 @@
+import {queueBackgroundTask} from './background-tasks.js';
 import type {FastifyInstance} from 'fastify';
 import type {Pool} from 'pg';
 import {createHash,randomBytes} from 'node:crypto';
@@ -7,7 +8,7 @@ import {z} from 'zod';
 import {decryptIntegrationCredential} from './integration-credentials.js';
 
 const digest=(value:string)=>createHash('sha256').update(value).digest('hex');
-const generic={ok:true,message:'Jika akun terdaftar, tautan reset password akan dikirim ke email akun. Periksa kotak masuk dan folder spam.'};
+const generic={ok:true,message:'Jika akun terdaftar, tautan reset password akan dikirim ke email akun. Periksa kotak masuk dan folder spam. Jika email tidak diterima, hubungi Administrator.'};
 
 // Never build a reset link from the public request Host/Origin headers.
 export function passwordResetBaseUrl(env:NodeJS.ProcessEnv=process.env){
@@ -30,7 +31,7 @@ export async function sendPasswordResetEmail(pool:Pool,to:string,link:string){
  }finally{transport.close();}
 }
 
-type Options={send?:(to:string,link:string)=>Promise<void>;baseUrl?:()=>string};
+type Options={background?:boolean;send?:(to:string,link:string)=>Promise<void>;baseUrl?:()=>string};
 export async function registerPasswordResetRoutes(app:FastifyInstance,pool:Pool,options:Options={}){
  const send=options.send||((to,link)=>sendPasswordResetEmail(pool,to,link));
  const base=options.baseUrl||(()=>passwordResetBaseUrl());
@@ -38,6 +39,7 @@ export async function registerPasswordResetRoutes(app:FastifyInstance,pool:Pool,
   reply.header('cache-control','no-store');
   const parsed=z.object({email:z.string().trim().email().max(200)}).safeParse(request.body);
   if(!parsed.success)return generic;
+  const work=async()=>{
   const client=await pool.connect();let tokenId:string|undefined,userId:string|undefined,to='',link='';
   try{
    await client.query('BEGIN');
@@ -61,11 +63,16 @@ export async function registerPasswordResetRoutes(app:FastifyInstance,pool:Pool,
    await send(to,link);
    await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'PASSWORD_RESET_EMAIL_SENT','{}'::jsonb)`,[userId]);
   }catch{
-   // Keep the response indistinguishable from an unknown account, queue admin recovery.
+   // Failed delivery is visible in the existing notification history.
    await pool.query(`UPDATE password_reset_email_tokens SET used_at=now() WHERE id=$1`,[tokenId]);
-   await pool.query(`INSERT INTO password_reset_requests(user_id) VALUES($1) ON CONFLICT (user_id) WHERE status='PENDING' DO NOTHING`,[userId]);
-   request.log.error({event:'PASSWORD_RESET_EMAIL_FAILED'},'Pengiriman reset gagal; permintaan diteruskan ke Administrator');
+   await pool.query(`INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,'PASSWORD_RESET_EMAIL_FAILED','{}'::jsonb)`,[userId]);
+   request.log.error({event:'PASSWORD_RESET_EMAIL_FAILED'},'Pengiriman reset gagal; lihat riwayat Notifikasi Administrator');
   }
+  return generic;
+  };
+  if(options.background===false)return work();
+  const pending=work().catch(()=>{request.log.error({event:'PASSWORD_RESET_BACKGROUND_FAILED'},'Pemulihan email belum tersedia');});
+  queueBackgroundTask(request.headers['x-mi-background-scope'],pending);
   return generic;
  });
  app.post('/api/auth/reset-password',{config:{rateLimit:{max:10,timeWindow:'15 minutes'}}},async(request,reply)=>{

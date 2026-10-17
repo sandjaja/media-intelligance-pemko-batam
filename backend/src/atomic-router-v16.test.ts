@@ -6,6 +6,7 @@ function fakePool(mode:'taxonomy'|'opd'){
  return {async query(sql:string,params?:unknown[]){
   if(sql.includes('SELECT id,title,summary,content FROM articles'))return{rows:[{id:'1',title:mode==='opd'?'Dishub meninjau lokasi':'Pelayanan publik menjadi perhatian warga',summary:'Warga meminta tindak lanjut.',content:''}]};
   if(sql.includes('FROM taxonomy_categories tc JOIN classification_sectors cs'))return{rows:[{id:'10',name:'Pelayanan Publik',sector_name:'Pemerintahan'}]};
+  if(sql.includes('FROM article_manual_keywords'))return{rows:[]};
   if(sql.includes('FROM keywords k JOIN keyword_taxonomy kt'))return{rows:[]};
   if(sql.includes('FROM organizations WHERE active=true'))return{rows:[{id:'1',name:'Pemerintah Kota Contoh',code:'PKC'}]};
   if(sql.includes('FROM government_branding WHERE is_active=true'))return{rows:[{government_name:'Pemerintah Kota Contoh',short_name:'Pemko Contoh',aliases:['Pemkot Contoh'],city_name:'Kota Contoh',tagline:null}]};
