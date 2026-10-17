@@ -5,6 +5,7 @@ on:
     branches: [main, 'fix/**']
     paths:
       - 'backend/**'
+      - 'deploy/vps/**'
       - 'app.js'
       - 'theme-runtime.js'
       - 'auth-session-guard.js'
@@ -42,6 +43,7 @@ on:
   pull_request:
     paths:
       - 'backend/**'
+      - 'deploy/vps/**'
       - 'phase3-outcome-ui.js'
       - 'app.js'
       - 'theme-runtime.js'
