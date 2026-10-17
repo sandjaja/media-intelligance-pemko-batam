@@ -20,7 +20,7 @@
       "src": "backend/src/cron-executive-brief.ts",
       "use": "@vercel/node",
       "config": {
-        "maxDuration": 30
+        "maxDuration": 60
       }
     },
     {
@@ -100,7 +100,7 @@
     },
     {
       "path": "/api/cron/executive-brief",
-      "schedule": "10 1 * * *"
+      "schedule": "30 2 * * *"
     }
   ],
   "headers": [

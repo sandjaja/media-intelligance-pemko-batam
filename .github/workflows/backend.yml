@@ -37,6 +37,7 @@ on:
       - 'communication-strategy-ui.js'
       - 'communication-gap-ui.js'
       - 'command-center.js'
+      - 'executive-brief-status-ui.js'
       - '.github/workflows/backend.yml'
   pull_request:
     paths:
@@ -110,6 +111,7 @@ jobs:
           node --check communication-strategy-ui.js
           node --check communication-gap-ui.js
           node --check command-center.js
+          node --check executive-brief-status-ui.js
       - run: npm install
       - run: npm run check
       - run: npm test

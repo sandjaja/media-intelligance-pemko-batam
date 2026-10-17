@@ -93,5 +93,14 @@ export async function inspectExecutiveBriefRetry(pool:Pick<Pool,'query'>,date:st
   const row=rows[0];
   const reason=!row?'not_generated':row.status==='ready'?'ready':row.status==='running'?'running':String(row.error_code||'').startsWith('RETRY_')?'retry_used':'available';
   const messages={not_generated:'Belum ada analisis hari ini. Di Preview, jadwal otomatis hanya berjalan di Production; gunakan Pengujian Executive Brief (Manual) untuk membuat analisis pertama.',ready:'Executive Brief hari ini sudah berhasil tersimpan.',running:'Analisis hari ini sedang berjalan. Perbarui status setelah selesai.',retry_used:'Percobaan ulang hari ini sudah digunakan. Tidak ada panggilan AI tambahan.',available:'Analisis hari ini gagal. Satu percobaan ulang tersedia dan akan menggunakan kuota Gemini.'};
-  return {date,available:reason==='available',reason,message:messages[reason]};
+  return {date,available:reason==='available',reason,message:(row?.status==='failed'&&String(row.error_code||'').includes('503')?'Layanan Gemini sedang sibuk (503). ':'')+messages[reason]};
+}
+
+export async function readExecutiveBriefState(pool:Pick<Pool,'query'>,date:string){
+  const [brief,current]=await Promise.all([readLatestExecutiveBrief(pool),pool.query(`SELECT status,error_code,locked_until FROM executive_brief_daily_cache WHERE brief_date=$1::date AND scope_key='city' LIMIT 1`,[date])]);
+  const today=current.rows[0]||null;
+  const failed=today?.status==='failed',retryAvailable=failed&&!String(today.error_code||'').startsWith('RETRY_');
+  const busy=failed&&String(today.error_code||'').includes('503');
+  const message=busy?'Layanan Gemini sedang sibuk (503). Brief hari ini belum berhasil diperbarui.':failed?'Brief hari ini gagal diperbarui. Hasil terakhir tetap ditampilkan.':today?.status==='running'?'Penyusunan brief hari ini sedang berjalan.':today?.status==='ready'?'Brief hari ini sudah tersimpan.':'Brief hari ini belum dibuat. Jadwal otomatis mengikuti aktivasi Admin.';
+  return {brief,date,status:today?.status||'not_generated',outdated:!!brief&&brief.brief_date!==date,retryAvailable,message:message+(failed?(retryAvailable?' Satu percobaan Analisis Ulang tersedia di menu Scheduler Admin.':' Kesempatan Analisis Ulang hari ini sudah digunakan.'):'')};
 }

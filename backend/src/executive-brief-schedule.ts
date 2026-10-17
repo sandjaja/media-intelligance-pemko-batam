@@ -47,11 +47,11 @@ export function isExecutiveBriefDue(schedule: ExecutiveBriefSchedule, now: Date)
   }).formatToParts(now);
   const hour = Number(parts.find(p => p.type === 'hour')?.value);
   const minute = Number(parts.find(p => p.type === 'minute')?.value);
-  // Allow a delayed cron tick within ten minutes of the configured WIB time.
+  // Allow a delayed cron tick after the configured time on the same WIB day.
   // The daily database claim remains the final duplicate-execution guard.
   const scheduledMinute = schedule.hour_wib * 60 + schedule.minute_wib;
   const currentMinute = hour * 60 + minute;
-  return currentMinute >= scheduledMinute && currentMinute < scheduledMinute + 10;
+  return currentMinute >= scheduledMinute && currentMinute < 24 * 60;
 }
 
 /** Date used for daily deduplication is always derived from WIB, never server UTC. */

@@ -15,9 +15,8 @@ import { z } from 'zod';
 import { ingestEnabledSources } from './ingestion.js';
 import { registerAskIntelligence } from './ask-intelligence.js';
 import { registerPasswordResetRoutes } from './password-reset-routes.js';
-import { inspectExecutiveBriefRetry } from './executive-brief-cache.js';
+import { readExecutiveBriefState,inspectExecutiveBriefRetry } from './executive-brief-cache.js';
 import { executiveBriefDateWib } from './executive-brief-schedule.js';
-import { readLatestExecutiveBrief } from './executive-brief-cache.js';
 import { generateDailyExecutiveBrief } from './executive-brief-daily.js';
 import { readExecutiveBriefSchedule, saveExecutiveBriefScheduleTime, inspectExecutiveBriefSchedule, disableExecutiveBriefSchedule } from './executive-brief-schedule.js';
 import { registerCollectionSchedulerRoutes } from './collection-scheduler-routes.js';
@@ -516,8 +515,9 @@ app.post('/api/admin/executive-brief/retry',{preHandler:[requireAuth,requireRole
 // Read-only cached brief endpoint. Never invokes an AI provider on dashboard reads.
 app.get('/api/executive-brief/cached',{preHandler:requireAuth},async(_request,reply)=>{
   try {
-    const brief=await readLatestExecutiveBrief(pool,'city');
-    return {data:brief,source:brief?'daily-cache':'not-generated'};
+    const {brief,...state}=await readExecutiveBriefState(pool,executiveBriefDateWib(new Date()));
+    reply.header('cache-control','no-store');
+    return {data:brief,state,source:brief?'daily-cache':'not-generated'};
   } catch(error) {
     if((error as {code?:string})?.code==='42P01')return {data:null,source:'cache-migration-pending'};
     return reply.code(503).send({error:'EXECUTIVE_BRIEF_CACHE_UNAVAILABLE'});
