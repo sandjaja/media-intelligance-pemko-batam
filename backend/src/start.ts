@@ -7,4 +7,11 @@ if (!process.env.DATABASE_URL && process.env.POSTGRES_URL) {
   process.env.DATABASE_URL = process.env.POSTGRES_URL;
 }
 
-await import('./server.js');
+if(process.env.DEPLOYMENT_MODE==='vps'){
+  const {loadVpsConfig}=await import('./install-service.js');
+  const installed=await loadVpsConfig();
+  if(!installed&&process.env.INSTALL_ENABLED==='true'){
+    const {startInstaller}=await import('./install-server.js');
+    await startInstaller();
+  }else await import('./server.js');
+}else await import('./server.js');

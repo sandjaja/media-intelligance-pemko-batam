@@ -7,7 +7,7 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 import { canTransitionPhase3, type Phase3ActorRole, type Phase3WorkflowStatus } from './phase3-workflow-policy.js';
-import { get, put, del } from '@vercel/blob';
+import { get, put, del } from './private-storage.js';
 import { Readable } from 'node:stream';
 
 declare module 'fastify' { interface FastifyRequest { phase3OutcomeAuth?: AuthorizationContext } }

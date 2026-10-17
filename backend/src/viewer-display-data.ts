@@ -1,5 +1,5 @@
 import type {Pool} from 'pg';
-import {get} from '@vercel/blob';
+import {get} from './private-storage.js';
 
 export const displayDate=(now=new Date())=>new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Jakarta',year:'numeric',month:'2-digit',day:'2-digit'}).format(now);
 // Only final, locked evidence is eligible, with the same gates as Daily News.

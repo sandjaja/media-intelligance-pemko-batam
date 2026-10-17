@@ -1,0 +1,877 @@
+{
+  "roles": [
+    {
+      "id": 1,
+      "code": "super_admin",
+      "name": "Super Admin",
+      "scope": "system",
+      "active": true
+    },
+    {
+      "id": 3,
+      "code": "humas",
+      "name": "Humas",
+      "scope": "organization",
+      "active": true
+    },
+    {
+      "id": 4,
+      "code": "executive",
+      "name": "Executive",
+      "scope": "organization",
+      "active": true
+    },
+    {
+      "id": 7,
+      "code": "viewer",
+      "name": "Viewer",
+      "scope": "organization",
+      "active": true
+    },
+    {
+      "id": 8,
+      "code": "opd",
+      "name": "OPD",
+      "scope": "opd",
+      "active": true
+    },
+    {
+      "id": 5,
+      "code": "opd_admin",
+      "name": "OPD Admin",
+      "scope": "opd",
+      "active": false
+    },
+    {
+      "id": 6,
+      "code": "opd_analyst",
+      "name": "OPD Analyst",
+      "scope": "opd",
+      "active": false
+    },
+    {
+      "id": 2,
+      "code": "command_center_analyst",
+      "name": "Command Center Analyst",
+      "scope": "organization",
+      "active": false
+    },
+    {
+      "id": 9,
+      "code": "district",
+      "name": "Kecamatan",
+      "scope": "district",
+      "active": true
+    }
+  ],
+  "permissions": [
+    {
+      "id": 1,
+      "code": "platform.admin",
+      "name": "Full platform administration"
+    },
+    {
+      "id": 2,
+      "code": "users.manage",
+      "name": "Create, update and deactivate users"
+    },
+    {
+      "id": 3,
+      "code": "rbac.manage",
+      "name": "Manage roles and permissions"
+    },
+    {
+      "id": 4,
+      "code": "opd.manage",
+      "name": "Manage OPD master data"
+    },
+    {
+      "id": 5,
+      "code": "sources.manage",
+      "name": "Manage media and ingestion sources"
+    },
+    {
+      "id": 6,
+      "code": "keywords.manage",
+      "name": "Manage monitoring keywords"
+    },
+    {
+      "id": 7,
+      "code": "media.read",
+      "name": "Read media intelligence"
+    },
+    {
+      "id": 8,
+      "code": "media.analyze",
+      "name": "Analyze media intelligence"
+    },
+    {
+      "id": 9,
+      "code": "social.read",
+      "name": "Read social intelligence"
+    },
+    {
+      "id": 10,
+      "code": "social.analyze",
+      "name": "Analyze social intelligence"
+    },
+    {
+      "id": 11,
+      "code": "issues.read",
+      "name": "Read issue and narrative intelligence"
+    },
+    {
+      "id": 12,
+      "code": "issues.manage",
+      "name": "Manage issue intelligence"
+    },
+    {
+      "id": 13,
+      "code": "strategy.read",
+      "name": "Read communication strategies"
+    },
+    {
+      "id": 14,
+      "code": "strategy.manage",
+      "name": "Create and manage communication strategies"
+    },
+    {
+      "id": 15,
+      "code": "content.read",
+      "name": "Read AI content packages"
+    },
+    {
+      "id": 16,
+      "code": "content.manage",
+      "name": "Create and manage AI content packages"
+    },
+    {
+      "id": 17,
+      "code": "crisis.read",
+      "name": "Read crisis war room data"
+    },
+    {
+      "id": 18,
+      "code": "crisis.manage",
+      "name": "Manage crisis war room actions"
+    },
+    {
+      "id": 19,
+      "code": "reports.read",
+      "name": "Read reports"
+    },
+    {
+      "id": 20,
+      "code": "reports.export",
+      "name": "Export reports"
+    },
+    {
+      "id": 21,
+      "code": "executive.read",
+      "name": "Read executive command center"
+    },
+    {
+      "id": 22,
+      "code": "opd.read",
+      "name": "Read OPD-scoped intelligence"
+    },
+    {
+      "id": 23,
+      "code": "opd.manage_scoped",
+      "name": "Manage OPD-scoped configuration"
+    },
+    {
+      "id": 47,
+      "code": "media.classify",
+      "name": "Change main/supporting news classification"
+    }
+  ],
+  "role_permissions": [
+    {
+      "role_id": 1,
+      "permission_id": 1
+    },
+    {
+      "role_id": 1,
+      "permission_id": 2
+    },
+    {
+      "role_id": 1,
+      "permission_id": 3
+    },
+    {
+      "role_id": 1,
+      "permission_id": 4
+    },
+    {
+      "role_id": 1,
+      "permission_id": 5
+    },
+    {
+      "role_id": 1,
+      "permission_id": 6
+    },
+    {
+      "role_id": 1,
+      "permission_id": 7
+    },
+    {
+      "role_id": 1,
+      "permission_id": 8
+    },
+    {
+      "role_id": 1,
+      "permission_id": 9
+    },
+    {
+      "role_id": 1,
+      "permission_id": 10
+    },
+    {
+      "role_id": 1,
+      "permission_id": 11
+    },
+    {
+      "role_id": 1,
+      "permission_id": 12
+    },
+    {
+      "role_id": 1,
+      "permission_id": 13
+    },
+    {
+      "role_id": 1,
+      "permission_id": 14
+    },
+    {
+      "role_id": 1,
+      "permission_id": 15
+    },
+    {
+      "role_id": 1,
+      "permission_id": 16
+    },
+    {
+      "role_id": 1,
+      "permission_id": 17
+    },
+    {
+      "role_id": 1,
+      "permission_id": 18
+    },
+    {
+      "role_id": 1,
+      "permission_id": 19
+    },
+    {
+      "role_id": 1,
+      "permission_id": 20
+    },
+    {
+      "role_id": 1,
+      "permission_id": 21
+    },
+    {
+      "role_id": 1,
+      "permission_id": 22
+    },
+    {
+      "role_id": 1,
+      "permission_id": 23
+    },
+    {
+      "role_id": 2,
+      "permission_id": 7
+    },
+    {
+      "role_id": 2,
+      "permission_id": 8
+    },
+    {
+      "role_id": 2,
+      "permission_id": 9
+    },
+    {
+      "role_id": 2,
+      "permission_id": 10
+    },
+    {
+      "role_id": 2,
+      "permission_id": 11
+    },
+    {
+      "role_id": 2,
+      "permission_id": 12
+    },
+    {
+      "role_id": 2,
+      "permission_id": 13
+    },
+    {
+      "role_id": 2,
+      "permission_id": 14
+    },
+    {
+      "role_id": 2,
+      "permission_id": 15
+    },
+    {
+      "role_id": 2,
+      "permission_id": 16
+    },
+    {
+      "role_id": 2,
+      "permission_id": 17
+    },
+    {
+      "role_id": 2,
+      "permission_id": 18
+    },
+    {
+      "role_id": 2,
+      "permission_id": 19
+    },
+    {
+      "role_id": 2,
+      "permission_id": 20
+    },
+    {
+      "role_id": 2,
+      "permission_id": 21
+    },
+    {
+      "role_id": 2,
+      "permission_id": 22
+    },
+    {
+      "role_id": 3,
+      "permission_id": 7
+    },
+    {
+      "role_id": 3,
+      "permission_id": 9
+    },
+    {
+      "role_id": 3,
+      "permission_id": 11
+    },
+    {
+      "role_id": 3,
+      "permission_id": 13
+    },
+    {
+      "role_id": 3,
+      "permission_id": 14
+    },
+    {
+      "role_id": 3,
+      "permission_id": 15
+    },
+    {
+      "role_id": 3,
+      "permission_id": 16
+    },
+    {
+      "role_id": 3,
+      "permission_id": 17
+    },
+    {
+      "role_id": 3,
+      "permission_id": 18
+    },
+    {
+      "role_id": 3,
+      "permission_id": 19
+    },
+    {
+      "role_id": 3,
+      "permission_id": 20
+    },
+    {
+      "role_id": 3,
+      "permission_id": 22
+    },
+    {
+      "role_id": 4,
+      "permission_id": 7
+    },
+    {
+      "role_id": 4,
+      "permission_id": 9
+    },
+    {
+      "role_id": 4,
+      "permission_id": 11
+    },
+    {
+      "role_id": 4,
+      "permission_id": 13
+    },
+    {
+      "role_id": 4,
+      "permission_id": 17
+    },
+    {
+      "role_id": 4,
+      "permission_id": 19
+    },
+    {
+      "role_id": 4,
+      "permission_id": 21
+    },
+    {
+      "role_id": 4,
+      "permission_id": 22
+    },
+    {
+      "role_id": 5,
+      "permission_id": 7
+    },
+    {
+      "role_id": 5,
+      "permission_id": 9
+    },
+    {
+      "role_id": 5,
+      "permission_id": 11
+    },
+    {
+      "role_id": 5,
+      "permission_id": 13
+    },
+    {
+      "role_id": 5,
+      "permission_id": 14
+    },
+    {
+      "role_id": 5,
+      "permission_id": 15
+    },
+    {
+      "role_id": 5,
+      "permission_id": 16
+    },
+    {
+      "role_id": 5,
+      "permission_id": 19
+    },
+    {
+      "role_id": 5,
+      "permission_id": 20
+    },
+    {
+      "role_id": 5,
+      "permission_id": 22
+    },
+    {
+      "role_id": 5,
+      "permission_id": 23
+    },
+    {
+      "role_id": 6,
+      "permission_id": 7
+    },
+    {
+      "role_id": 6,
+      "permission_id": 8
+    },
+    {
+      "role_id": 6,
+      "permission_id": 9
+    },
+    {
+      "role_id": 6,
+      "permission_id": 10
+    },
+    {
+      "role_id": 6,
+      "permission_id": 11
+    },
+    {
+      "role_id": 6,
+      "permission_id": 13
+    },
+    {
+      "role_id": 6,
+      "permission_id": 15
+    },
+    {
+      "role_id": 6,
+      "permission_id": 19
+    },
+    {
+      "role_id": 6,
+      "permission_id": 20
+    },
+    {
+      "role_id": 6,
+      "permission_id": 22
+    },
+    {
+      "role_id": 7,
+      "permission_id": 7
+    },
+    {
+      "role_id": 7,
+      "permission_id": 9
+    },
+    {
+      "role_id": 7,
+      "permission_id": 11
+    },
+    {
+      "role_id": 7,
+      "permission_id": 13
+    },
+    {
+      "role_id": 7,
+      "permission_id": 19
+    },
+    {
+      "role_id": 7,
+      "permission_id": 22
+    },
+    {
+      "role_id": 8,
+      "permission_id": 7
+    },
+    {
+      "role_id": 8,
+      "permission_id": 9
+    },
+    {
+      "role_id": 8,
+      "permission_id": 11
+    },
+    {
+      "role_id": 8,
+      "permission_id": 13
+    },
+    {
+      "role_id": 8,
+      "permission_id": 14
+    },
+    {
+      "role_id": 8,
+      "permission_id": 15
+    },
+    {
+      "role_id": 8,
+      "permission_id": 16
+    },
+    {
+      "role_id": 8,
+      "permission_id": 19
+    },
+    {
+      "role_id": 8,
+      "permission_id": 20
+    },
+    {
+      "role_id": 8,
+      "permission_id": 22
+    },
+    {
+      "role_id": 8,
+      "permission_id": 23
+    },
+    {
+      "role_id": 8,
+      "permission_id": 8
+    },
+    {
+      "role_id": 8,
+      "permission_id": 10
+    },
+    {
+      "role_id": 3,
+      "permission_id": 47
+    },
+    {
+      "role_id": 1,
+      "permission_id": 47
+    },
+    {
+      "role_id": 9,
+      "permission_id": 7
+    },
+    {
+      "role_id": 9,
+      "permission_id": 9
+    },
+    {
+      "role_id": 9,
+      "permission_id": 11
+    },
+    {
+      "role_id": 9,
+      "permission_id": 19
+    }
+  ],
+  "integration_providers": [
+    {
+      "id": 1,
+      "code": "youtube",
+      "name": "YouTube Data API v3",
+      "auth_type": "api_key",
+      "active": true
+    },
+    {
+      "id": 2,
+      "code": "instagram",
+      "name": "Instagram API",
+      "auth_type": "oauth2",
+      "active": true
+    },
+    {
+      "id": 3,
+      "code": "facebook",
+      "name": "Facebook Graph API",
+      "auth_type": "oauth2",
+      "active": true
+    },
+    {
+      "id": 4,
+      "code": "threads",
+      "name": "Threads API",
+      "auth_type": "oauth2",
+      "active": true
+    },
+    {
+      "id": 5,
+      "code": "tiktok",
+      "name": "TikTok Research API",
+      "auth_type": "research_api",
+      "active": true
+    },
+    {
+      "id": 6,
+      "code": "x",
+      "name": "X API",
+      "auth_type": "oauth2",
+      "active": true
+    },
+    {
+      "id": 7,
+      "code": "apify",
+      "name": "Apify — TikTok & Instagram",
+      "auth_type": "api_key",
+      "active": true
+    }
+  ],
+  "ai_providers": [
+    {
+      "id": 2,
+      "code": "openai",
+      "name": "OpenAI",
+      "base_url": null,
+      "enabled": false
+    },
+    {
+      "id": 3,
+      "code": "anthropic",
+      "name": "Claude (Anthropic)",
+      "base_url": null,
+      "enabled": false
+    },
+    {
+      "id": 1,
+      "code": "gemini",
+      "name": "Gemini",
+      "base_url": null,
+      "enabled": false
+    }
+  ],
+  "ai_models": [
+    {
+      "id": 4,
+      "provider_id": 1,
+      "code": "gemini-3.5-flash-lite",
+      "name": "gemini-3.5-flash-lite",
+      "capabilities": {},
+      "enabled": true
+    },
+    {
+      "id": 5,
+      "provider_id": 1,
+      "code": "gemini-3.8-flash",
+      "name": "gemini-3.8-flash",
+      "capabilities": {},
+      "enabled": true
+    },
+    {
+      "id": 6,
+      "provider_id": 2,
+      "code": "gpt-5-mini",
+      "name": "gpt-5-mini",
+      "capabilities": {},
+      "enabled": true
+    },
+    {
+      "id": 7,
+      "provider_id": 2,
+      "code": "gpt-5.1",
+      "name": "gpt-5.1",
+      "capabilities": {},
+      "enabled": true
+    },
+    {
+      "id": 8,
+      "provider_id": 3,
+      "code": "claude-haiku-4-5-20251001",
+      "name": "claude-haiku-4-5-20251001",
+      "capabilities": {},
+      "enabled": true
+    },
+    {
+      "id": 9,
+      "provider_id": 3,
+      "code": "claude-sonnet-4-6",
+      "name": "claude-sonnet-4-6",
+      "capabilities": {},
+      "enabled": true
+    }
+  ],
+  "ai_tasks": [
+    {
+      "id": 6,
+      "code": "gap_analysis",
+      "name": "Analisis Gap",
+      "description": "Optional narrative explanation of deterministic Gap findings",
+      "enabled": true
+    },
+    {
+      "id": 7,
+      "code": "strakom_analysis",
+      "name": "Strakom",
+      "description": "Communication strategy analysis",
+      "enabled": true
+    },
+    {
+      "id": 8,
+      "code": "publication_analysis",
+      "name": "Publikasi",
+      "description": "Approved strategy versus publication evidence",
+      "enabled": true
+    },
+    {
+      "id": 9,
+      "code": "monitoring_analysis",
+      "name": "Monitoring",
+      "description": "Post-publication evidence analysis",
+      "enabled": true
+    },
+    {
+      "id": 10,
+      "code": "content_studio_prompting",
+      "name": "Content Studio",
+      "description": "Basic creative direction for Content Studio prompts",
+      "enabled": true
+    },
+    {
+      "id": 11,
+      "code": "executive_brief",
+      "name": "Executive Brief Otomatis",
+      "description": "Audit Gemini Executive Brief",
+      "enabled": true
+    },
+    {
+      "id": 12,
+      "code": "ask_intelligence",
+      "name": "Ask Intelligence Otomatis",
+      "description": "Audit Gemini Ask Intelligence",
+      "enabled": true
+    },
+    {
+      "id": 13,
+      "code": "issue_linkage_context",
+      "name": "Issue Linkage Context",
+      "description": "Audit Gemini pencocokan konteks isu",
+      "enabled": true
+    },
+    {
+      "id": 14,
+      "code": "issue_response_coverage",
+      "name": "Issue Response Coverage",
+      "description": "Audit Gemini cakupan respons resmi",
+      "enabled": true
+    },
+    {
+      "id": 15,
+      "code": "issue_claim_extraction",
+      "name": "Issue Claim Extraction",
+      "description": "Audit Gemini ekstraksi klaim isu",
+      "enabled": true
+    },
+    {
+      "id": 16,
+      "code": "evaluation_analysis",
+      "name": "Analisis Evaluasi Siklus",
+      "description": "Knowledge & Evaluation synthesis of saved cycle results; uses the Monitoring configuration",
+      "enabled": true
+    }
+  ],
+  "ai_task_routes": null,
+  "notification_templates": [
+    {
+      "event_type": "CONTRIBUTOR_CLARIFICATION_REQUESTED",
+      "title_template": "Permintaan Klarifikasi Baru",
+      "body_template": "Permintaan klarifikasi untuk isu {{issue_title}} dari {{sender_name}}. Batas waktu: {{due_at}}. Silakan memberikan klarifikasi melalui Media Intelligence Pemko Batam.",
+      "enabled": true
+    },
+    {
+      "event_type": "SUPPORTING_OPD_CLARIFICATION_SUBMITTED",
+      "title_template": "Klarifikasi OPD Pendukung Dikirim",
+      "body_template": "{{sender_name}} telah mengirim klarifikasi untuk isu {{issue_title}}. Silakan lakukan review di Media Intelligence Pemko Batam.",
+      "enabled": true
+    },
+    {
+      "event_type": "DISTRICT_CONTRIBUTION_SUBMITTED",
+      "title_template": "Klarifikasi Kecamatan Dikirim",
+      "body_template": "{{sender_name}} telah mengirim klarifikasi untuk isu {{issue_title}}. Silakan lakukan review di Media Intelligence Pemko Batam.",
+      "enabled": true
+    },
+    {
+      "event_type": "CONTRIBUTOR_FOLLOW_UP_REQUESTED",
+      "title_template": "Klarifikasi Lanjutan Diperlukan",
+      "body_template": "Klarifikasi lanjutan diperlukan untuk isu {{issue_title}}. Catatan: {{note}}. Silakan menindaklanjuti melalui Media Intelligence Pemko Batam.",
+      "enabled": true
+    },
+    {
+      "event_type": "RESPONSE_SUBMITTED",
+      "title_template": "Respons OPD Menunggu Review",
+      "body_template": "Respons resmi untuk isu {{issue_title}} telah dikirim oleh {{sender_name}} dan menunggu review Humas.",
+      "enabled": true
+    },
+    {
+      "event_type": "REVISION_REQUESTED",
+      "title_template": "Revisi Respons Diperlukan",
+      "body_template": "Respons untuk isu {{issue_title}} memerlukan revisi. Catatan: {{note}}. Silakan buka Media Intelligence Pemko Batam.",
+      "enabled": true
+    },
+    {
+      "event_type": "EXECUTIVE_NOTE",
+      "title_template": "Tanggapan Executive Baru",
+      "body_template": "Executive memberikan tanggapan pada isu {{issue_title}}. Silakan buka Media Intelligence Pemko Batam untuk melihat tanggapan.",
+      "enabled": true
+    },
+    {
+      "event_type": "RESPONSE_APPROVED",
+      "title_template": "Respons Telah Disetujui",
+      "body_template": "Respons untuk isu {{issue_title}} telah disetujui oleh Humas.",
+      "enabled": true
+    },
+    {
+      "event_type": "ISSUE_ASSIGNED",
+      "title_template": "Penugasan Isu Baru",
+      "body_template": "Anda mendapat penugasan untuk isu {{issue_title}}. Batas waktu: {{due_at}}. Silakan buka Media Intelligence Pemko Batam untuk menindaklanjuti.",
+      "enabled": true
+    },
+    {
+      "event_type": "EARLY_WARNING_ACTIVATED",
+      "title_template": "Early Warning Isu Aktif",
+      "body_template": "Early Warning telah diaktifkan untuk isu {{issue_title}}. Risk: {{risk_score}}/100 ({{risk_level}}), velocity: {{velocity_score}}/100. Status isu: {{issue_status}}. {{cycle_context}} Silakan buka Media Intelligence Pemko Batam untuk melihat detail.",
+      "enabled": true
+    }
+  ]
+}

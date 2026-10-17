@@ -1,3 +1,4 @@
+import {registerVpsRuntime} from './vps-runtime.js';
 import { registerKnowledgeEvaluationRoutes } from './knowledge-evaluation-routes.js';
 import {parseApifyActorReference,resolveApifyActorReference,matchingActorAdapter,normalizeApifyActorSettings} from './apify-actor-reference.js';
 import {actorAdapterSchema,validateActorAdapter} from './apify-actor-adapter.js';
@@ -564,4 +565,7 @@ await registerAskIntelligence(app,pool,env.jwtSecret);
 await registerPhase5StrategyRoutes(app,pool,env.jwtSecret);
 await registerKnowledgeEvaluationRoutes(app,pool,env.jwtSecret);
 app.setErrorHandler((error,_request,reply)=>{app.log.error(error);const statusCode=typeof (error as any)?.statusCode==='number'?(error as any).statusCode:500;return reply.code(statusCode).send({error:statusCode===429?'RATE_LIMITED':statusCode===413?'REQUEST_TOO_LARGE':'INTERNAL_SERVER_ERROR'});});
-app.addHook('onClose',async()=>pool.end()); await app.listen({port:env.port,host:'0.0.0.0'});
+await registerVpsRuntime(app,pool);
+app.addHook('onClose',async()=>pool.end());
+if(process.env.DEPLOYMENT_MODE==='vps')for(const signal of ['SIGTERM','SIGINT'] as const)process.once(signal,()=>{void app.close().then(()=>process.exit(0))});
+await app.listen({port:env.port,host:process.env.HOST||(process.env.DEPLOYMENT_MODE==='vps'?'127.0.0.1':'0.0.0.0')});

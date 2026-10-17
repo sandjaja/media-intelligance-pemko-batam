@@ -4,7 +4,7 @@ import { Pool } from 'pg';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 import { Readable } from 'node:stream';
-import { get, put } from '@vercel/blob';
+import { get, put } from './private-storage.js';
 import { loadAuthorizationContext, type AuthorizationContext } from './rbac.js';
 
 declare module 'fastify' { interface FastifyRequest { printEvidenceRecoveryAuth?: AuthorizationContext } }

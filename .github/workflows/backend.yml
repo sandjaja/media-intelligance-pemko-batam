@@ -84,6 +84,10 @@ jobs:
         run: |
           node --check app.js
           node --check theme-runtime.js
+          node --check branding-runtime.js
+          node --check backend/install/app.js
+          node --check deploy/vps/build-package.mjs
+          bash -n deploy/vps/setup.sh
           node --check auth-session-guard.js
           node --check auth-session-bridge.js
           node --check reset-password.js
@@ -116,3 +120,12 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run build
+      - name: Build VPS distribution
+        run: npm run package:vps
+      - name: Upload VPS distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-intelligence-vps
+          path: release/media-intelligence-vps.tar.gz
+          retention-days: 14
+          if-no-files-found: error
