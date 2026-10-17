@@ -10,14 +10,14 @@ import {collectionResultStatus} from './collection-run-result.js';
 const adapters=JSON.parse(readFileSync(new URL('../config/apify-actor-adapters.json',import.meta.url),'utf8'));
 const kinds=['tiktok_posts','instagram_posts','tiktok_comments','instagram_comments','tiktok_hashtag','instagram_hashtag'];
 const fields=['tiktokActor','instagramActor','tiktokCommentsActor','instagramCommentsActor','tiktokHashtagActor','instagramHashtagActor'];
-function fixture({enabled=true,social=true,onlineFails=false,geographyFails=false}={}){
+function fixture({enabled=true,social=true,onlineFails=false,geographyFails=false,platforms=undefined as string[]|undefined}={}){
  const settings:any={actorAdapters:adapters,actorMaxCostUsd:Object.fromEntries(kinds.map(k=>[k,.1])),maxTiktokPerRun:20,maxInstagramPerRun:10,maxCommentsPerPost:2,monthlyCommentsLimit:1000,tiktokHashtagEnabled:true,instagramHashtagEnabled:true};
  fields.forEach((field,i)=>settings[field]=adapters[kinds[i]].actorId);
  let job:any,run:any;const calls:string[]=[],updates:any[]=[];let inserts=0;
  const query=async(sql:string,params?:any[])=>{
   calls.push(sql);
   if(sql.includes('pg_try_advisory_xact_lock'))return{rows:[{acquired:true}]};
-  if(sql.includes('FROM collection_scheduler_config'))return{rows:[{enabled,timezone:'Asia/Jakarta',run_time:'08:00:00',online_enabled:true,owned_enabled:true,social_enabled:social}]};
+  if(sql.includes('FROM collection_scheduler_config'))return{rows:[{enabled,timezone:'Asia/Jakarta',run_time:'08:00:00',online_enabled:true,owned_enabled:true,social_enabled:social,social_platforms:platforms}]};
   if(sql.includes('SELECT started_at AS'))return{rows:run?[{finished_at:run.started_at}]:[]};
   if(sql.includes('SELECT id FROM collection_scheduler_runs'))return{rows:run?[{id:run.id}]:[]};
   if(sql.startsWith('INSERT INTO collection_scheduler_runs')){inserts++;run={id:'41',started_at:'2026-10-15T01:00:00Z',status:'RUNNING',result:{}};return{rows:[{id:run.id}]};}
@@ -116,4 +116,17 @@ test('preparation failure before a paid start is terminal instead of waiting for
  globalThis.fetch=async()=>{throw Error('No paid request should be sent')};
  try{const f=fixture({geographyFails:true});const result=await runScheduledCollectionIfDue(f.pool,new Date('2026-10-15T01:00:00Z'));assert.ok('status' in result);assert.equal(result.status,'FAILED');assert.equal(f.job().status,'FAILED');assert.equal(f.run().result.apify.status,'FAILED');}
  finally{process.env=before;globalThis.fetch=oldFetch;}
+});
+
+for(const platform of ['instagram','tiktok'] as const)test(`scheduler selecting only ${platform} never prepares the other paid platform or YouTube`,async()=>{
+ const before={...process.env},oldFetch=globalThis.fetch;process.env.INTEGRATION_CREDENTIAL_KEY='fixture';process.env.VERCEL_ENV='preview';process.env.VERCEL_URL='preview.example.com';
+ const f=fixture({platforms:[platform]});let starts=0;
+ globalThis.fetch=async(url,init)=>{if(init?.method==='POST'){starts++;return Response.json({data:{id:'run12345',actId:'actor12345'}});}throw Error('Unexpected request');};
+ try{const result=await runScheduledCollectionIfDue(f.pool,new Date('2026-10-15T01:00:00Z'));assert.ok('result' in result);assert.equal(result.result.social.reason,'YOUTUBE_NOT_SELECTED');assert.equal(starts,1);assert.equal(f.job().steps.length,3);assert.ok(f.job().steps.every((s:any)=>s.platform===platform));}
+ finally{globalThis.fetch=oldFetch;process.env=before;}
+});
+test('YouTube-only schedule never opens or starts a paid Apify job',async()=>{
+ const oldFetch=globalThis.fetch;let requests=0;globalThis.fetch=async()=>{requests++;throw Error('Unexpected provider request');};
+ try{const f=fixture({platforms:['youtube']});await runScheduledCollectionIfDue(f.pool,new Date('2026-10-15T01:00:00Z'));assert.equal(requests,0);assert.equal(f.job(),undefined);}
+ finally{globalThis.fetch=oldFetch;}
 });

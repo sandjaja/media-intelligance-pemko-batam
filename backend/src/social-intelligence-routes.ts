@@ -17,6 +17,8 @@ import { recalculateIssueRisk } from './issue-risk.js';
 
 declare module 'fastify' { interface FastifyRequest { socialAuth?: AuthorizationContext } }
 
+import {socialFeedSchema,socialFeedPredicate} from './social-feed-filter.js';
+
 const platformSchema = z.enum(['instagram','facebook','tiktok','x','youtube','website','threads','other']);
 const sentimentSchema = z.enum(['positive','neutral','negative']);
 
@@ -292,6 +294,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   app.get('/api/social/mentions', { preHandler: [auth, requireRead] }, async (request, reply) => {
     const parsed = z.object({
       platform: platformSchema.optional(),
+      feedType:socialFeedSchema.default('main'),
       opdId: z.string().regex(/^\d+$/).optional(),
       keywordId: z.string().regex(/^\d+$/).optional(),
       sentiment: sentimentSchema.optional(),
@@ -308,9 +311,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
 
     const params: unknown[] = [];
     const where: string[] = [`sm.source_kind='${parsed.data.sourceKind}'`];
-    // Main monitoring feed shows publishable parent content only. Comments/replies stay stored
-    // for conversation context, clustering and analytics, but are not standalone feed cards.
-    where.push(`sm.content_type NOT IN ('comment','reply')`);
+    where.push(socialFeedPredicate(parsed.data.feedType,'sm'));
     if(parsed.data.sourceKind==='external'&&parsed.data.classification!=='SCOPE_REVIEW')where.push(`COALESCE(sm.metadata->'organizationScope'->>'status','RELEVANT')='RELEVANT'`);
     if(parsed.data.sourceKind==='external'&&parsed.data.classification==='SCOPE_REVIEW')where.push(`sm.metadata->'organizationScope'->>'status'='REVIEW'`);
     const bind = (value: unknown) => { params.push(value); return '$' + params.length; };
@@ -493,7 +494,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   const auditConversation=async(client:any,userId:string,action:string,metadata:any)=>client.query('INSERT INTO audit_logs(user_id,action,metadata) VALUES($1,$2,$3::jsonb)',[userId,action,JSON.stringify(metadata)]);
 
   app.get('/api/social/conversation-clusters',{preHandler: [auth, requireRead]},async(request,reply)=>{
-    const parsed=z.object({days:z.coerce.number().int().refine(v=>[1,7,14,30].includes(v)).default(7),platform:platformSchema.optional(),opdId:z.string().regex(/^\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical','high_or_critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional()}).safeParse(request.query);
+    const parsed=z.object({days:z.coerce.number().int().refine(v=>[1,7,14,30].includes(v)).default(7),platform:platformSchema.optional(),feedType:socialFeedSchema.optional(),opdId:z.string().regex(/^\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical','high_or_critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional()}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
     const organizationId=await resolveOrganizationId(request.socialAuth!);if(!organizationId)return reply.code(409).send({error:'ORGANIZATION_UNRESOLVED'});
     const params:unknown[]=[organizationId,parsed.data.days],memberWhere:string[]=["COALESCE(sm.metadata->'organizationScope'->>'status','RELEVANT')='RELEVANT'","COALESCE(sm.published_at,sm.captured_at)>=NOW()-($2::int*INTERVAL '1 day')"];
@@ -504,6 +505,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     if(parsed.data.sentiment)memberWhere.push(`sm.sentiment=${bind(parsed.data.sentiment)}`);
     if(parsed.data.riskLevel)memberWhere.push(parsed.data.riskLevel==='high_or_critical'?`sm.risk_level IN ('high','critical')`:`sm.risk_level=${bind(parsed.data.riskLevel)}`);
     if(parsed.data.classification){const cp=bind(parsed.data.classification);memberWhere.push(`CASE WHEN COALESCE(sm.metadata->'manualClassification'->>'locked','false')='true' THEN 'MANUAL' WHEN COALESCE(sm.metadata->'v16Routing'->>'routingStatus','UNROUTED')='AMBIGUOUS' THEN 'AMBIGU' ELSE COALESCE(sm.metadata->'v16Routing'->>'newsClassification',CASE WHEN COALESCE(sm.metadata->'v16Routing'->>'routingStatus','UNROUTED')='ROUTED' THEN 'UTAMA' ELSE 'PENDUKUNG' END) END=${cp}`)}
+    if(parsed.data.feedType)memberWhere.push(socialFeedPredicate(parsed.data.feedType,'sm'));
     const memberFilter=memberWhere.join(' AND ');
     // Keep cluster cards on the same filtered evidence scope used by cluster
     // Issue Linkage: count, platform count and members all follow the active
@@ -564,7 +566,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   });
 
   app.get('/api/social/conversation-insights', { preHandler: [auth, requireRead] }, async (request, reply) => {
-    const parsed=z.object({days:z.coerce.number().int().refine(v=>[1,7,14,30].includes(v)).default(7),platform:platformSchema.optional(),opdId:z.string().regex(/^\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical','high_or_critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional()}).safeParse(request.query);
+    const parsed=z.object({days:z.coerce.number().int().refine(v=>[1,7,14,30].includes(v)).default(7),platform:platformSchema.optional(),feedType:socialFeedSchema.optional(),opdId:z.string().regex(/^\d+$/).optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical','high_or_critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional()}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
     const params:unknown[]=[parsed.data.days],where:string[]=["source_kind='external'","COALESCE(metadata->'organizationScope'->>'status','RELEVANT')='RELEVANT'","COALESCE(published_at,captured_at) >= NOW() - ($1::int * INTERVAL '1 day')"];
     const bind=(value:unknown)=>{params.push(value);return '$'+params.length;};
@@ -574,6 +576,7 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
     if(parsed.data.sentiment)where.push(`sentiment=${bind(parsed.data.sentiment)}`);
     if(parsed.data.riskLevel)where.push(parsed.data.riskLevel==='high_or_critical'?`risk_level IN ('high','critical')`:`risk_level=${bind(parsed.data.riskLevel)}`);
     if(parsed.data.classification){const cp=bind(parsed.data.classification);where.push(`CASE WHEN COALESCE(metadata->'manualClassification'->>'locked','false')='true' THEN 'MANUAL' WHEN COALESCE(metadata->'v16Routing'->>'routingStatus','UNROUTED')='AMBIGUOUS' THEN 'AMBIGU' ELSE COALESCE(metadata->'v16Routing'->>'newsClassification',CASE WHEN COALESCE(metadata->'v16Routing'->>'routingStatus','UNROUTED')='ROUTED' THEN 'UTAMA' ELSE 'PENDUKUNG' END) END=${cp}`)}
+    if(parsed.data.feedType)where.push(socialFeedPredicate(parsed.data.feedType));
     const filter='WHERE '+where.join(' AND ');
     const mentions=await pool.query(`SELECT id::text,platform,title,content,published_at,captured_at,sentiment,risk_level,risk_score,metadata FROM social_mentions ${filter} ORDER BY COALESCE(published_at,captured_at) ASC,id ASC`,params);
     const trends=await pool.query(`SELECT date_trunc('day',COALESCE(published_at,captured_at))::date AS day,COUNT(*)::int AS mentions,COUNT(*) FILTER(WHERE sentiment='positive')::int positive,COUNT(*) FILTER(WHERE sentiment='neutral')::int neutral,COUNT(*) FILTER(WHERE sentiment='negative')::int negative,COUNT(*) FILTER(WHERE risk_level IN ('high','critical'))::int high_risk FROM social_mentions ${filter} GROUP BY 1 ORDER BY 1`,params);
@@ -586,9 +589,9 @@ export async function registerSocialIntelligenceRoutes(app: FastifyInstance, poo
   });
 
   app.get('/api/social/summary', { preHandler: [auth, requireRead] }, async (request, reply) => {
-    const parsed=z.object({opdId:z.string().regex(/^\d+$/).optional(),platform:platformSchema.optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical','high_or_critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional(),from:z.string().optional(),to:z.string().optional(),days:z.coerce.number().int().refine(v=>[1,7,14,30].includes(v)).default(7)}).safeParse(request.query);
+    const parsed=z.object({opdId:z.string().regex(/^\d+$/).optional(),platform:platformSchema.optional(),feedType:socialFeedSchema.optional(),sentiment:sentimentSchema.optional(),riskLevel:z.enum(['low','medium','high','critical','high_or_critical']).optional(),classification:z.enum(['UTAMA','AMBIGU','PENDUKUNG','MANUAL']).optional(),from:z.string().optional(),to:z.string().optional(),days:z.coerce.number().int().refine(v=>[1,7,14,30].includes(v)).default(7)}).safeParse(request.query);
     if(!parsed.success)return reply.code(400).send({error:'INVALID_QUERY'});
-    const params:unknown[]=[],where:string[]=[`source_kind='external'`,`content_type NOT IN ('comment','reply')`,`COALESCE(metadata->'organizationScope'->>'status','RELEVANT')='RELEVANT'`];
+    const params:unknown[]=[],where:string[]=[`source_kind='external'`,socialFeedPredicate(parsed.data.feedType??'main'),`COALESCE(metadata->'organizationScope'->>'status','RELEVANT')='RELEVANT'`];
     const ctx=request.socialAuth!,globalReader=ctx.legacyRole==='admin'||ctx.roles.some(role=>role==='super_admin'||role==='humas'||role==='executive'),opdId=scopedOpd(ctx,parsed.data.opdId);
     const bind=(value:unknown)=>{params.push(value);return '$'+params.length;};
     if(globalReader){

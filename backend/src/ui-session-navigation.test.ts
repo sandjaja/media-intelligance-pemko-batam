@@ -53,3 +53,11 @@ test('late dashboard refresh on another menu cannot reveal scope or fetch dashbo
  let calls=0;const x=runtime(async()=>{calls++;return Response.json({data:[]});});const box=x.node('commandCenterFilters');x.elements.set(box.id,box);x.document.body.dataset.auth='ok';x.document.body.dataset.activeTab='highlights';x.run('command-center.js');
  await x.window.renderCommandCenter();assert.equal(calls,0);assert.equal(box.classList.contains('hidden'),true);
 });
+
+test('initial session 401 is retried before exposing login; bootstrap uses the authoritative session endpoint',async()=>{
+ let calls=0;const paths:string[]=[];const x=runtime(async(input)=>{paths.push(String(input));calls++;return Response.json({user:{id:'1'}},{status:calls===1?401:200});});
+ const source=readFileSync(new URL('../../auth-ui.js',import.meta.url),'utf8').replace('async function init(){','window.checkSessionForTest=checkSession;async function init(){');
+ vm.runInContext(source,x.context);const pending=x.window.checkSessionForTest();
+ for(let i=0;i<25;i++){await Promise.resolve();for(const fn of x.timers.splice(0))fn();}
+ assert.equal((await pending).status,200);assert.deepEqual(paths,['/api/auth/session','/api/auth/session']);assert.equal(x.document.body.dataset.auth,'checking');assert.equal(x.elements.has('authGate'),false);
+});

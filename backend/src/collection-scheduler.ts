@@ -10,12 +10,14 @@ import { getExternalSocialProvider, loadExternalSocialProviderContext } from './
 import { loadOrganizationMediaScope } from './organization-media-scope.js';
 import { persistSocialConversationClusters } from './social-conversation-clustering.js';
 
+import {scheduledSocialPlatforms,type ScheduledSocialPlatform} from './social-scheduler-platforms.js';
+
 export type CollectionSource='online'|'owned'|'social';
 export type CollectionTrigger='SCHEDULED'|'MANUAL';
 
 export async function getCollectionConfig(pool:Pool){
-  const {rows}=await pool.query(`SELECT id,enabled,timezone,run_time,online_enabled,owned_enabled,social_enabled,last_run_at,next_run_at,updated_at FROM collection_scheduler_config WHERE id=1`);
-  return rows[0]??null;
+  const {rows}=await pool.query(`SELECT id,enabled,timezone,run_time,online_enabled,owned_enabled,social_enabled,last_run_at,next_run_at,updated_at,to_jsonb(collection_scheduler_config)->'social_platforms' AS social_platforms FROM collection_scheduler_config WHERE id=1`);
+  return rows[0]?{...rows[0],social_platforms:scheduledSocialPlatforms(rows[0].social_platforms)}:null;
 }
 
 async function collectOnline(pool:Pool){
@@ -113,7 +115,8 @@ function summarizeOnline(batch:{results:Record<string,unknown>[],clustering:any}
   };
 }
 
-export async function runCollection(pool:Pool,trigger:CollectionTrigger,requestedBy:string|null,sources:CollectionSource[],options:{includeApify?:boolean;now?:Date}={}){
+export async function runCollection(pool:Pool,trigger:CollectionTrigger,requestedBy:string|null,sources:CollectionSource[],options:{includeApify?:boolean;now?:Date;socialPlatforms?:ScheduledSocialPlatform[]}={}){
+  const platforms=scheduledSocialPlatforms(options.socialPlatforms??(trigger==='MANUAL'&&!options.includeApify?['youtube']:undefined));
   const lockClient=await pool.connect();
   let lock;
   try{await lockClient.query('BEGIN');lock=await lockClient.query(`SELECT pg_try_advisory_xact_lock(78124599) acquired`);}catch(e){await lockClient.query('ROLLBACK').catch(()=>undefined);lockClient.release();throw e;}
@@ -124,20 +127,20 @@ export async function runCollection(pool:Pool,trigger:CollectionTrigger,requeste
       const existing=(await pool.query(`SELECT id FROM collection_scheduler_runs WHERE trigger_type='SCHEDULED' AND (started_at AT TIME ZONE 'Asia/Jakarta')::date=($1::timestamptz AT TIME ZONE 'Asia/Jakarta')::date LIMIT 1`,[(options.now??new Date()).toISOString()])).rows[0];
       if(existing)return {ok:true,skipped:true,reason:'ALREADY_RAN_TODAY',runId:String(existing.id)};
     }
-    const run=await pool.query(`INSERT INTO collection_scheduler_runs(trigger_type,status,requested_by,sources) VALUES($1,'RUNNING',$2,$3::jsonb) RETURNING id`,[trigger,requestedBy,JSON.stringify({selected:sources})]);
+    const run=await pool.query(`INSERT INTO collection_scheduler_runs(trigger_type,status,requested_by,sources) VALUES($1,'RUNNING',$2,$3::jsonb) RETURNING id`,[trigger,requestedBy,JSON.stringify({selected:sources,socialPlatforms:sources.includes('social')?platforms:[]})]);
     runId=String(run.rows[0].id);
     const result:any={};
     // Start Apify first: its webhook can run while the other sources collect.
     // The Media Sosial YouTube button still calls this runner without includeApify.
-    if(sources.includes('social')&&(trigger==='SCHEDULED'||options.includeApify)){
-      try{result.apify=await startScheduledApifyCollection(pool,runId,trigger,options.now)}
+    if(sources.includes('social')&&(trigger==='SCHEDULED'||options.includeApify)&&platforms.some(p=>p!=='youtube')){
+      try{result.apify=await startScheduledApifyCollection(pool,runId,trigger,options.now,platforms.filter((p):p is 'instagram'|'tiktok'=>p!=='youtube'))}
       catch(error){result.apify={status:'FAILED',error:error instanceof Error&&/^APIFY_[A-Z0-9_]+$/.test(error.message)?error.message:'APIFY_SCHEDULE_FAILED'}}
     }
     for(const source of sources){
       try{
         if(source==='online')result.online=summarizeOnline(await collectOnline(pool));
         if(source==='owned')result.owned=await collectOwned(pool);
-        if(source==='social')result.social=await collectSocial(pool,trigger);
+        if(source==='social')result.social=platforms.includes('youtube')?await collectSocial(pool,trigger):{succeeded:0,failed:0,skipped:true,reason:'YOUTUBE_NOT_SELECTED'};
       }catch(error){result[source]={succeeded:0,failed:1,error:error instanceof Error?error.message:'COLLECTION_SOURCE_FAILED'}}
     }
     result.baseComplete=true;
@@ -176,7 +179,7 @@ export async function runScheduledCollectionIfDue(pool:Pool,now=new Date()){
   const sources:CollectionSource[]=[];
   if(config.online_enabled)sources.push('online');
   if(config.owned_enabled)sources.push('owned');
-  if(config.social_enabled)sources.push('social');
+  if(config.social_enabled&&config.social_platforms.length)sources.push('social');
   if(!sources.length)return {ok:true,skipped:true,reason:'NO_SOURCE_ENABLED'};
-  return runCollection(pool,'SCHEDULED',null,sources,{now});
+  return runCollection(pool,'SCHEDULED',null,sources,{now,socialPlatforms:config.social_platforms});
 }
