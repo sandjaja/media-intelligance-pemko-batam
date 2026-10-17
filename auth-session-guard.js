@@ -21,14 +21,14 @@ function ensureForcedLogin(){
 }
 function requestUrl(input){try{return new URL(typeof input==='string'?input:input?.url||'',location.origin)}catch{return null}}
 function isApi(url){return !!url&&(url.origin===location.origin||url.pathname.startsWith('/api/'))&&url.pathname.includes('/api/')}
-function excluded(url){return /\/api\/auth\/(?:login|refresh|logout)(?:\/|$)/.test(url?.pathname||'')}
+function excluded(url){return /\/api\/auth\/(?:login|refresh|logout|session)(?:\/|$)/.test(url?.pathname||'')}
 async function refreshAccess(){
   if(refreshPromise)return refreshPromise;
   refreshPromise=(async()=>{
     try{
-      const r=await originalFetch(API+'/auth/refresh',{method:'POST',credentials:'include',cache:'no-store',headers:{'Cache-Control':'no-cache'}});
-      return r.ok;
-    }catch{return false}
+      const r=await originalFetch(API+'/auth/session',{method:'GET',credentials:'include',cache:'no-store',headers:{'Cache-Control':'no-cache'}});
+      return r.status===401?false:r.ok?true:null;
+    }catch{return null}
   })();
   refreshPromise.finally(()=>setTimeout(()=>{refreshPromise=null},1500));
   return refreshPromise;
@@ -40,6 +40,7 @@ window.fetch=async function(input,init={}){
   if(response.status!==401||!isApi(url)||excluded(url)||forceLogin())return response;
 
   const refreshed=await refreshAccess();
+  if(refreshed===null)return new Response(JSON.stringify({error:'SESSION_CHECK_UNAVAILABLE'}),{status:503,headers:{'Content-Type':'application/json'}});
   if(!refreshed)return response;
 
   for(const delay of [80,180,350]){

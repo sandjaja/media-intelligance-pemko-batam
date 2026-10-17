@@ -62,10 +62,11 @@ function activateNav(){
   });
 }
 function openPage(){
-  ensureSection();window.__petaSituasiOpen=true;
+  ensureSection();window.__petaSituasiOpen=true;window.rememberMediaTab?.('petaSituasi');
   document.querySelectorAll('main > section').forEach(s=>{if(s.id!=='commandCenterFilters')s.classList.add('hidden')});
   $('commandCenterFilters')?.classList.add('hidden');$('petaSituasi').classList.remove('hidden');ensureNav();activateNav();loadMap();
 }
+window.openMediaSituationMap=openPage;
 function closePage(){window.__petaSituasiOpen=false;loadVersion++;destroyMap();$('petaSituasi')?.classList.add('hidden');activateNav();}
 function patchDashboard(){
   const root=$('dashboard');if(!root)return;

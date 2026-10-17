@@ -22,7 +22,8 @@
  }
  const changed=()=>window.dispatchEvent(new CustomEvent('command-center-scope-changed'));
  if(opdGroupSelect)opdGroupSelect.addEventListener('change',async()=>{state.opd='all';renderOpdOptions();changed();await refresh()});opdSelect.addEventListener('change',async e=>{state.opd=e.target.value;changed();await refresh()});districtSelect.addEventListener('change',async e=>{state.district=e.target.value;changed();await refresh()});
- window.addEventListener('media-branding-ready',()=>void options());
+ window.addEventListener('media-branding-ready',()=>{if(document.body.dataset.auth==='ok')void options().catch(e=>console.warn('Scope options failed',e))});
  const centerAdmin=()=>{const a=document.getElementById('adminNavBtn');if(a){a.style.textAlign='center';a.style.justifyContent='center';a.style.alignItems='center';a.style.display='flex'}};centerAdmin();new MutationObserver(centerAdmin).observe(document.body,{childList:true,subtree:true});
- options().then(refresh).catch(e=>console.warn('Scope init failed',e));
+ const initScope=()=>options().catch(e=>console.warn('Scope init failed',e));
+ window.addEventListener('media:authenticated',initScope);if(document.body.dataset.auth==='ok')initScope();
 })();

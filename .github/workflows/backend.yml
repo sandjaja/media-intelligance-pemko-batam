@@ -6,6 +6,15 @@ on:
     paths:
       - 'backend/**'
       - 'app.js'
+      - 'theme-runtime.js'
+      - 'auth-session-guard.js'
+      - 'auth-session-bridge.js'
+      - 'auth-ui.js'
+      - 'global-scope.js'
+      - 'peta-situasi.js'
+      - 'print-keyword-search-ui.js'
+      - 'print-keyword-state-sync.js'
+      - 'index.html'
       - 'knowledge-evaluation-ui.js'
       - 'knowledge-evaluation-print.js'
       - 'admin-ai-integrations.js'
@@ -28,6 +37,15 @@ on:
       - 'backend/**'
       - 'phase3-outcome-ui.js'
       - 'app.js'
+      - 'theme-runtime.js'
+      - 'auth-session-guard.js'
+      - 'auth-session-bridge.js'
+      - 'auth-ui.js'
+      - 'global-scope.js'
+      - 'peta-situasi.js'
+      - 'print-keyword-search-ui.js'
+      - 'print-keyword-state-sync.js'
+      - 'index.html'
       - 'knowledge-evaluation-ui.js'
       - 'knowledge-evaluation-print.js'
       - 'admin-ai-integrations.js'
@@ -51,6 +69,14 @@ jobs:
         working-directory: .
         run: |
           node --check app.js
+          node --check theme-runtime.js
+          node --check auth-session-guard.js
+          node --check auth-session-bridge.js
+          node --check auth-ui.js
+          node --check global-scope.js
+          node --check peta-situasi.js
+          node --check print-keyword-search-ui.js
+          node --check print-keyword-state-sync.js
           node --check knowledge-evaluation-ui.js
           node --check knowledge-evaluation-print.js
           node --check admin-ai-integrations.js
