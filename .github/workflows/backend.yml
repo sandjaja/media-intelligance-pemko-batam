@@ -21,6 +21,11 @@ on:
       - 'admin-ai.js'
       - 'admin-ai-usage.js'
       - 'admin-scheduler.js'
+      - 'tv.html'
+      - 'tv-display.css'
+      - 'tv-display.js'
+      - 'tv-mode-entry.js'
+      - 'admin-tv-devices.js'
       - 'social-intelligence.js'
       - 'admin.html'
       - 'phase3-outcome-ui.js'
@@ -53,6 +58,11 @@ on:
       - 'admin-ai.js'
       - 'admin-ai-usage.js'
       - 'admin-scheduler.js'
+      - 'tv.html'
+      - 'tv-display.css'
+      - 'tv-display.js'
+      - 'tv-mode-entry.js'
+      - 'admin-tv-devices.js'
       - 'social-intelligence.js'
       - 'admin.html'
       - '.github/workflows/backend.yml'
@@ -89,6 +99,9 @@ jobs:
           node --check issue-management-v2.js
           node --check social-intelligence.js
           node --check admin-scheduler.js
+          node --check tv-display.js
+          node --check tv-mode-entry.js
+          node --check admin-tv-devices.js
           node --check owned-channel-intelligence.js
           node --check owned-channel-submenu.js
           node --check admin-integrations.js
