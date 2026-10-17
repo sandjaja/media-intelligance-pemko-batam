@@ -75,6 +75,16 @@ button[aria-busy="true"]::before{content:"";display:inline-block;width:12px;heig
 @keyframes miButtonSpin{to{transform:rotate(360deg)}}
 html:not(.dark) button[class~="bg-cyan-600"]:not(:disabled){background-color:#0e7490!important}
 html:not(.dark) button[class~="bg-emerald-600"]:not(:disabled){background-color:#047857!important}
+/* KPI filters: one restrained selection treatment with readable labels. */
+.mi-kpi-card{cursor:pointer;transition-property:border-color,box-shadow!important;transition-duration:.15s!important}
+html:not(.dark) .mi-kpi-card{background:#fff!important;border:1px solid #cbd5e1!important;color:#172033!important;box-shadow:none!important}
+html:not(.dark) .mi-kpi-card:hover{background:#f0f9ff!important;border-color:#0284c7!important}
+html:not(.dark) .mi-kpi-card[aria-pressed="true"],html:not(.dark) .mi-kpi-card[aria-pressed="true"] .glass{background:#e0f2fe!important;border-color:#0369a1!important;color:#0c4a6e!important;box-shadow:inset 0 0 0 1px #0369a1!important}
+html:not(.dark) .mi-kpi-card[aria-pressed="true"] *{color:#0c4a6e!important}
+html.dark .mi-kpi-card[aria-pressed="true"],html.dark .mi-kpi-card[aria-pressed="true"] .glass{background:#164e63!important;border-color:#22d3ee!important;color:#ecfeff!important;box-shadow:inset 0 0 0 1px #22d3ee!important}
+html.dark .mi-kpi-card[aria-pressed="true"] *{color:#ecfeff!important}
+.mi-kpi-status{font-size:12px;line-height:1.5;margin:10px 0;color:#475569}
+html.dark .mi-kpi-status{color:#cbd5e1}
 @media print{html:not(.dark),html:not(.dark) body{background:#fff!important;color:#111827!important}}
 `;document.head.appendChild(css);
 function addButton(){if(document.getElementById('themeToggleBtn'))return;const host=document.getElementById('headerActions');if(!host)return;const b=document.createElement('button');b.id='themeToggleBtn';b.type='button';b.className='px-3 py-2 rounded-lg border border-slate-700 bg-slate-800 text-slate-200 text-xs font-black';b.style.cssText='display:inline-flex;align-items:center;gap:7px;white-space:nowrap';b.onclick=()=>applyTheme(readTheme()==='dark'?'light':'dark');host.prepend(b);applyTheme(readTheme())}
