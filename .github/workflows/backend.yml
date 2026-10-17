@@ -85,6 +85,7 @@ jobs:
           node --check theme-runtime.js
           node --check auth-session-guard.js
           node --check auth-session-bridge.js
+          node --check reset-password.js
           node --check auth-ui.js
           node --check global-scope.js
           node --check peta-situasi.js

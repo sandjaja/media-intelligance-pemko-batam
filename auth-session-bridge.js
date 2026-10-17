@@ -19,20 +19,6 @@ window.fetch=async function(input,init={}){
 
   const response=await previousFetch(input,init);
 
-  try{
-    const url=new URL(raw||((typeof input==='string'?input:(input?.url||''))),location.origin);
-    if(method==='POST'&&url.pathname==='/api/auth/login'&&response.ok){
-      const remember=Boolean(document.getElementById('rememberLogin')?.checked);
-      await previousFetch(API+'/auth/persist',{
-        method:'POST',
-        credentials:'include',
-        cache:'no-store',
-        headers:{'Content-Type':'application/json','Cache-Control':'no-cache'},
-        body:JSON.stringify({rememberMe:remember}),
-      });
-    }
-  }catch{}
-
   return response;
 };
 })();

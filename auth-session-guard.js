@@ -67,7 +67,7 @@ async function sessionCheck(){
   }catch{}
 }
 
-ensureForcedLogin();
+// Server session validation decides login on startup; local markers may be stale.
 document.addEventListener('submit',e=>{
   if(e.target?.id!=='loginForm')return;
   localStorage.removeItem(LOGOUT_KEY);
