@@ -9,7 +9,7 @@ import {registerPasswordResetRoutes,passwordResetBaseUrl} from './password-reset
 import {registerAuthSessionRoutes} from './auth-session-routes.js';
 import {inspectExecutiveBriefRetry,claimExecutiveBriefRetry} from './executive-brief-cache.js';
 const hash=(s:string)=>createHash('sha256').update(s).digest('hex');
-async function fixture(failMail=false){
+async function fixture(failMail=false, deliveryGate?:Promise<void>){
  const user={id:'1',email:'user@example.test',password_hash:await argon2.hash('initial-password')};
  let token:any=null,revoked=false,tvRevoked=false,sends=0,link='';const queries:any[]=[];
  const query=async(sql:string,params:any[]=[])=>{
@@ -27,7 +27,7 @@ async function fixture(failMail=false){
  };
  const pool={query,connect:async()=>({query,release(){}})} as any;
  const app=Fastify();await app.register(cookie);await app.register(rateLimit,{max:120,timeWindow:'1 minute'});
- await registerPasswordResetRoutes(app,pool,{background:false,baseUrl:()=> 'https://app.example.test',send:async(to,url)=>{assert.equal(to,user.email);sends++;link=url;if(failMail)throw Error('smtp password=secret');}});
+ await registerPasswordResetRoutes(app,pool,{baseUrl:()=> 'https://app.example.test',send:async(to,url)=>{assert.equal(to,user.email);sends++;link=url;await deliveryGate;if(failMail)throw Error('smtp password=secret');}});
  const forgot=(email=user.email)=>app.inject({method:'POST',url:'/api/auth/forgot-password',payload:{email}});
  const reset=(value=new URL(link).hash.slice(7))=>app.inject({method:'POST',url:'/api/auth/reset-password',payload:{token:value,password:'new-password-123'}});
  return {app,user,forgot,reset,queries,token:()=>token,link:()=>link,sends:()=>sends,revoked:()=>revoked,tvRevoked:()=>tvRevoked};
@@ -82,3 +82,20 @@ test('inactive SMTP is never used for password reset',async()=>{
  const {sendPasswordResetEmail}=await import('./password-reset-routes.js');
  await assert.rejects(()=>sendPasswordResetEmail({query:async()=>({rows:[{status:'INACTIVE'}]})} as any,'user@example.test','https://app.example.test'),/NOT_READY/);
 });
+
+ test('default forgot-password waits for SMTP and audit before finishing the response',async()=>{
+  let release!:()=>void;const gate=new Promise<void>(resolve=>{release=resolve;});
+  const x=await fixture(false,gate);let finished=false;
+  try{
+   const response=x.forgot().then(r=>{finished=true;return r;});
+   for(let i=0;i<100&&x.sends()===0;i++)await new Promise(resolve=>setTimeout(resolve,5));
+   assert.equal(x.sends(),1);assert.equal(finished,false);
+   assert.ok(!x.queries.some(q=>q.sql.includes("'PASSWORD_RESET_EMAIL_SENT'")));
+   release();assert.equal((await response).statusCode,200);
+   assert.ok(x.queries.some(q=>q.sql.includes("'PASSWORD_RESET_EMAIL_SENT'")));
+  }finally{release();await x.app.close();}
+ });
+ test('database connection failure keeps reset response generic',async()=>{
+  const app=Fastify();await registerPasswordResetRoutes(app,{connect:async()=>{throw Error('database-secret');}} as any);
+  try{const r=await app.inject({method:'POST',url:'/api/auth/forgot-password',payload:{email:'user@example.test'}});assert.equal(r.statusCode,200);assert.equal(r.json().ok,true);assert.ok(!r.body.includes('database-secret'));}finally{await app.close();}
+ });

@@ -1,4 +1,3 @@
-import {queueBackgroundTask} from './background-tasks.js';
 import type {FastifyInstance} from 'fastify';
 import type {Pool} from 'pg';
 import {createHash,randomBytes} from 'node:crypto';
@@ -31,7 +30,7 @@ export async function sendPasswordResetEmail(pool:Pool,to:string,link:string){
  }finally{transport.close();}
 }
 
-type Options={background?:boolean;send?:(to:string,link:string)=>Promise<void>;baseUrl?:()=>string};
+type Options={send?:(to:string,link:string)=>Promise<void>;baseUrl?:()=>string};
 export async function registerPasswordResetRoutes(app:FastifyInstance,pool:Pool,options:Options={}){
  const send=options.send||((to,link)=>sendPasswordResetEmail(pool,to,link));
  const base=options.baseUrl||(()=>passwordResetBaseUrl());
@@ -70,10 +69,12 @@ export async function registerPasswordResetRoutes(app:FastifyInstance,pool:Pool,
   }
   return generic;
   };
-  if(options.background===false)return work();
-  const pending=work().catch(()=>{request.log.error({event:'PASSWORD_RESET_BACKGROUND_FAILED'},'Pemulihan email belum tersedia');});
-  queueBackgroundTask(request.headers['x-mi-background-scope'],pending);
-  return generic;
+  // SMTP is transactional work: do not return before delivery and its audit
+  // finish. A detached loopback task can outlive the serverless invocation.
+  try{return await work();}catch{
+   request.log.error({event:'PASSWORD_RESET_PROCESS_FAILED'},'Pemulihan email belum tersedia');
+   return generic;
+  }
  });
  app.post('/api/auth/reset-password',{config:{rateLimit:{max:10,timeWindow:'15 minutes'}}},async(request,reply)=>{
   reply.header('cache-control','no-store');
