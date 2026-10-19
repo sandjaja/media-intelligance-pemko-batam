@@ -38,15 +38,27 @@ test('Telegram recognizes operational questions and Jakarta periods without an L
 test('news uses validated sources, exact window totals and Jakarta yesterday; no AI or write queries',async()=>{
  const x=db([{title:'Berita terverifikasi',channel:'online',risk_score:80,total:137}]);let calls=0;globalThis.fetch=async()=>{calls++;throw Error('No outbound calls allowed');};
  const text=await answerTelegramAsk(x.pool,user(),'Berapa berita negatif kemarin?');assert.match(text,/137/);assert.match(text,/tanpa AI/);assert.equal(calls,0);
+ assert.match(text,/Waktu: \d{2}[.:]\d{2} WIB\./);
  const q=x.queries.at(-1)!;assert.match(q.sql,/Asia\/Jakarta/);assert.match(q.sql,/::date-1/);assert.match(q.sql,/COUNT\(\*\) OVER/);assert.match(q.sql,/ARTICLE_CLASSIFICATION_VERIFIED/);assert.match(q.sql,/keywordVerification/);assert.match(q.sql,/socialVerification/);assert.ok(!x.queries.some(q=>/INSERT|UPDATE|DELETE|ai_provider|ai_usage|ai_free_tier/.test(q.sql)));
  assert.deepEqual(q.params,[1,'negative']);
 });
 for(const role of ['humas','executive','opd','district'])test(`${role} operational query always preserves organization and role scope`,async()=>{
  const x=db([{id:21,title:'Sampah',status:'active',risk_level:'high',cycle_number:1,total:1}]);
  const text=await answerTelegramAsk(x.pool,user(role),'Bagaimana status isu sampah?');assert.match(text,/Sampah/);
+ assert.match(text,new RegExp('Akses: '+({humas:'Humas',executive:'Executive',opd:'OPD',district:'Kecamatan'} as Record<string,string>)[role]));
+ if(role==='humas'||role==='executive')assert.doesNotMatch(text,/Scope:/);
+ if(role==='opd')assert.match(text,/Scope: Dinas A\./);
+ if(role==='district')assert.match(text,/Scope: Batam Kota\./);
  const q=x.queries.at(-1)!;assert.match(q.sql,/i.organization_id=\$1/);assert.equal(q.params[0],1);assert.match(q.sql,/i.title ILIKE/);
  if(role==='opd'){assert.ok(q.params.includes('7'));assert.match(q.sql,/io.opd_id=\$2/);}
  if(role==='district'){assert.ok(q.params.includes('8'));assert.match(q.sql,/d.district_id=\$2/);}
+});
+test('global access shows scope only when the question names an OPD or kecamatan',async()=>{
+ const x=db([{id:21,title:'Sampah',status:'active',risk_level:'high',cycle_number:1,total:1}]);
+ const opd=await answerTelegramAsk(x.pool,user('humas'),'Berapa isu di Dinas A?');
+ assert.match(opd,/Akses: Humas\. Scope: Dinas A\./);
+ const district=await answerTelegramAsk(x.pool,user('executive'),'Berapa isu di Batam Kota?');
+ assert.match(district,/Akses: Executive\. Scope: Batam Kota\./);
 });
 test('out-of-scope unit requests and viewer accounts never run an operational query',async()=>{
  for(const [role,question]of [['opd','Berita Dinas B kemarin'],['district','Berita Sagulung kemarin'],['viewer','Apa isu aktif?']]){

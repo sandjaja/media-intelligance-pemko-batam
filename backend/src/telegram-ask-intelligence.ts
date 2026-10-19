@@ -66,8 +66,10 @@ export async function answerTelegramAsk(pool:Pool,user:AuthorizationContext,ques
  for(const row of [requestedOpd,requestedDistrict])if(row)for(const word of [row.name,row.code])subject=subject.replace(norm(word),' ');
  subject=subject.replace(/\b(semua|seluruh|tampilkan|lihat|tolong|mohon|tentang|hasil|ringkasan|analisis|analisa|kesimpulan|pelajaran|rekomendasi|pesan|utama|jelaskan|isi|pustaka|pembelajaran|knowledge|evaluasi|evaluation|riwayat|timeline|siklus|gap|kesenjangan|content|konten|studio|prompt|produksi|kandidat|candidate|internal|owned|channel|kanal|resmi|apa|berapa|bagaimana|status|jumlah|total|daftar|sebutkan|saja|yang|dan|di|untuk|dari|dengan|ke|ada|sudah|belum|menunggu|tertunda|disetujui|approved|selesai|ditutup|resolved|closed|aktif|active|watch|berisiko|risiko|risk|tinggi|high|kritis|critical|negatif|positif|hari|ini|kemarin|7|terakhir|minggu|pekan|bulan|lalu|isu|issue|masalah|berita|media|pemberitaan|artikel|kliping|evidence|klarifikasi|penugasan|tanggapan|respons|respon|strakom|strategi|komunikasi|publikasi|tayang|dipublikasikan|monitoring|pantauan|pemantauan|online|cetak|sosial|opd|kecamatan)\b/g,' ').trim().replace(/\s+/g,' ');
  const term=subject?bind('%'+subject.replace(/[\\%_]/g,'\\$&').split(' ').join('%')+'%'):null;
- const scopeName=[opds.find(r=>String(r.id)===String(opdId))?.name,districts.find(r=>String(r.id)===String(districtId))?.name].filter(Boolean).join(' · ')||'organisasi Anda';
- const footer=`\n\nScope: ${scopeName}. Data aplikasi, tanpa AI. Waktu: WIB.`;
+ const scopeName=[opds.find(r=>String(r.id)===String(opdId))?.name,districts.find(r=>String(r.id)===String(districtId))?.name].filter(Boolean).join(' · ');
+ const accessLabel=opdRole?'OPD':districtRole?'Kecamatan':user.roles.includes('humas')?'Humas':user.roles.includes('executive')?'Executive':'Super Admin';
+ const answeredAt=new Intl.DateTimeFormat('id-ID',{timeZone:'Asia/Jakarta',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date());
+ const footer=`\n\nAkses: ${accessLabel}.${scopeName?' Scope: '+scopeName+'.':''} Data aplikasi, tanpa AI. Waktu: ${answeredAt} WIB.`;
  if(intent.domain==='candidate'){
   const where=['organization_id=$1',"status='PENDING'"];if(term)where.push('suggested_title ILIKE '+term);if(intent.pending)where.push("status='PENDING'");where.push(periodSql('updated_at',intent.period));
   const rows=(await pool.query(`SELECT suggested_title,status,COUNT(*) OVER()::int total FROM unified_candidate_issues WHERE ${where.join(' AND ')} ORDER BY updated_at DESC,id DESC LIMIT 5`,params)).rows;
