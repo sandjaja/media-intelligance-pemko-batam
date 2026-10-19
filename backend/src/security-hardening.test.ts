@@ -99,13 +99,18 @@ test('authentication attempts are shared across instances and account/IP limits 
  assert.equal(await claimAuthAttempt(db,{path:'/api/auth/login',ip:'9.9.9.9',email:'other@example.test',secret}),true);
  assert.ok(!JSON.stringify(events).includes('user@example.test'));assert.ok(!JSON.stringify(events).includes('8.8.8.'));
 });
-test('password reset returns uniform response before registered or unknown account lookup completes',async()=>{
+test('password reset waits for account lookup while keeping the public response generic',async()=>{
  const {registerPasswordResetRoutes}=await import('./password-reset-routes.js');
- const {createBackgroundScope}=await import('./background-tasks.js');
- let release!:()=>void;const blocked=new Promise<void>(r=>release=r);let queried=false;
- const pool={connect:async()=>{await blocked;return{query:async()=>{queried=true;return{rows:[]};},release(){}};}} as any;
- const app=Fastify();await app.register(cookie);await registerPasswordResetRoutes(app,pool);const scope=createBackgroundScope();
- try{const r=await app.inject({method:'POST',url:'/api/auth/forgot-password',headers:{'x-mi-background-scope':scope.id},payload:{email:'someone@example.test'}});assert.equal(r.statusCode,200);assert.equal(queried,false);assert.match(r.json().message,/hubungi Administrator/);release();await scope.finish();assert.equal(queried,true);}finally{release();await app.close();}
+ let release!:()=>void,started!:()=>void;
+ const blocked=new Promise<void>(r=>release=r),connected=new Promise<void>(r=>started=r);let queried=false,finished=false;
+ const pool={connect:async()=>{started();await blocked;return{query:async()=>{queried=true;return{rows:[]};},release(){}};}} as any;
+ const app=Fastify();await app.register(cookie);await registerPasswordResetRoutes(app,pool);
+ try{
+  const response=app.inject({method:'POST',url:'/api/auth/forgot-password',payload:{email:'someone@example.test'}}).then(r=>{finished=true;return r;});
+  await connected;assert.equal(finished,false);assert.equal(queried,false);
+  release();const r=await response;assert.equal(r.statusCode,200);assert.equal(queried,true);assert.match(r.json().message,/hubungi Administrator/);
+  assert.ok(!r.body.includes('someone@example.test'));
+ }finally{release();await app.close();}
 });
 
 // Execute the actual legacy server handlers, not a duplicated policy helper.
