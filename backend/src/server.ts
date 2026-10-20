@@ -22,6 +22,7 @@ import { generateDailyExecutiveBrief } from './executive-brief-daily.js';
 import { readExecutiveBriefSchedule, saveExecutiveBriefScheduleTime, inspectExecutiveBriefSchedule, disableExecutiveBriefSchedule } from './executive-brief-schedule.js';
 import { registerCollectionSchedulerRoutes } from './collection-scheduler-routes.js';
 import { registerAdminRoutes } from './admin-routes.js';
+import {registerDatabaseBackupRoutes} from './database-backup.js';
 import { registerDistrictRoutes } from './district-routes.js';
 import { registerPhase5StrategyRoutes } from './phase5-strategy-routes.js';
 import { runYouTubeShortsCollection } from './youtube-shorts-runner.js';
@@ -561,6 +562,7 @@ app.get('/api/executive-brief/cached',{preHandler:[requireAuth,requireGlobalRead
   }
 });
 await registerCollectionSchedulerRoutes(app,pool,env.jwtSecret);
+await registerDatabaseBackupRoutes(app,pool);
 await registerAskIntelligence(app,pool,env.jwtSecret);
 await registerPhase5StrategyRoutes(app,pool,env.jwtSecret);
 await registerKnowledgeEvaluationRoutes(app,pool,env.jwtSecret);
