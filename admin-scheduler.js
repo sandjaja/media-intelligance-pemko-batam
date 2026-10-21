@@ -77,6 +77,9 @@ async function runBriefManual(){
  try{
   const result=await api(action==='generate'?'/admin/executive-brief/generate':'/admin/executive-brief/retry',{method:'POST',body:'{}'});
   status.textContent=result.data?.status==='created'?'Berhasil. Executive Brief hari ini tersimpan; periksa dashboard.':result.data?.status==='already_claimed'?'Analisis hari ini sudah tercatat. Perbarui status.':'Analisis gagal. Perbarui status untuk melihat kesempatan ulang.';
+  if(result.data?.status==='created'){
+   try{localStorage.setItem('media-intelligence-executive-brief-updated',String(Date.now()));}catch(e){console.warn('Sinyal pembaruan dashboard tidak tersedia',e)}
+  }
   toast(status.textContent,result.data?.status==='created');
  }catch(e){status.textContent='Analisis tidak dapat dijalankan: '+e.message;}
  finally{await loadBriefStatus();}
