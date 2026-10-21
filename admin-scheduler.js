@@ -20,7 +20,7 @@ function ensureUI(){
  <label class="rounded-xl border border-slate-800 p-4 flex gap-3"><input id="schedOnline" type="checkbox" class="w-5 h-5 mt-1"><div><b>Media Online</b><div class="text-xs text-slate-500 mt-1">Portal berita/media eksternal.</div></div></label>
  <label class="rounded-xl border border-slate-800 p-4 flex gap-3"><input id="schedOwned" type="checkbox" class="w-5 h-5 mt-1"><div><b>Owned Channel</b><div class="text-xs text-slate-500 mt-1">Website resmi Pemko/OPD/Kecamatan.</div></div></label>
  <div id="schedSocialCard" class="rounded-xl border border-slate-800 p-4"><label class="flex gap-3"><input id="schedSocial" type="checkbox" class="w-5 h-5 mt-1"><b>Media Sosial</b></label><div class="mt-3 space-y-2" id="schedSocialPlatforms"><label class="flex items-center gap-2 text-sm"><input id="schedYoutube" type="checkbox" value="youtube">YouTube</label><label class="flex items-center gap-2 text-sm"><input id="schedInstagram" type="checkbox" value="instagram">Instagram</label><label class="flex items-center gap-2 text-sm"><input id="schedTiktok" type="checkbox" value="tiktok">TikTok</label></div><p id="schedSocialNote" class="text-xs text-slate-500 mt-3">Hanya platform yang dicentang akan ditarik. Instagram/TikTok memakai Actor aktif serta batas biaya Admin; data kemarin WIB.</p></div>
- <div class="rounded-xl border border-slate-800 p-4"><label class="flex gap-3"><input id="schedExecutiveBrief" type="checkbox" class="w-5 h-5 mt-1"><div><b>Executive Brief</b><div class="text-xs text-slate-500 mt-1">Gemini otomatis pukul 09.30 WIB, setelah jadwal pengumpulan. Waktu dapat bergeser dalam satu jam pada Vercel Hobby. Maksimal sekali sehari.</div></div></label><div class="mt-4 border-t border-slate-800 pt-4"><button id="schedBriefRetry" type="button" disabled class="rounded-lg border border-amber-600 px-4 py-2.5 font-bold">Analisis Ulang Executive Brief</button><p class="text-xs text-amber-400 mt-2">Hanya jika analisis hari ini gagal. Satu percobaan ulang manual; memakai dan mengurangi kuota harian Gemini.</p><button id="schedBriefStatusReload" type="button" class="mt-2 rounded-lg border border-slate-600 px-3 py-2 text-xs">Perbarui Status Analisis</button><p id="schedBriefRetryResult" class="text-xs text-slate-400 mt-2" aria-live="polite"></p></div></div></div>
+ <div class="rounded-xl border border-slate-800 p-4"><label class="flex gap-3"><input id="schedExecutiveBrief" type="checkbox" class="w-5 h-5 mt-1"><div><b>Executive Brief</b><div class="text-xs text-slate-500 mt-1">Gemini otomatis pukul 09.30 WIB, setelah jadwal pengumpulan. Waktu dapat bergeser dalam satu jam pada Vercel Hobby. Maksimal sekali sehari.</div></div></label><div class="mt-4 border-t border-slate-800 pt-4"><button id="schedBriefRetry" type="button" disabled class="rounded-lg border border-amber-600 px-4 py-2.5 font-bold">Memeriksa Executive Brief...</button><p class="text-xs text-amber-400 mt-2">Jika belum ada, Admin dapat membuat analisis pertama hari ini secara manual. Jika gagal, tersedia satu percobaan ulang pada hari yang sama. Keduanya memakai kuota Gemini.</p><button id="schedBriefStatusReload" type="button" class="mt-2 rounded-lg border border-slate-600 px-3 py-2 text-xs">Perbarui Status Analisis</button><p id="schedBriefRetryResult" class="text-xs text-slate-400 mt-2" aria-live="polite"></p></div></div></div>
  <div class="flex flex-wrap gap-2"><button type="submit" class="px-4 py-2.5 rounded-lg bg-cyan-400 text-slate-950 font-black">Simpan Pengaturan</button><button id="schedRunNow" type="button" class="px-4 py-2.5 rounded-lg bg-slate-800 border border-slate-700 font-bold">Jalankan Sekarang</button></div></form></details>
  <details id="schedHistoryDetails" class="glass rounded-2xl p-5"><summary class="cursor-pointer font-black text-lg mb-3">Riwayat Pengumpulan</summary><p id="schedLast" class="text-xs text-slate-500 mt-1">Belum pernah dijalankan.</p><div id="schedHistory" class="mt-4 space-y-2"></div></details></section>`);
  // Each source card collapses independently; the checkbox remains accessible in its header.
@@ -61,17 +61,18 @@ async function runNow(){const sources=[];if($('#schedOnline').checked)sources.pu
 async function loadRetryStatus(){
  const button=$('#schedBriefRetry'),status=$('#schedBriefRetryResult');if(!button)return;
  button.disabled=true;status.textContent='Memeriksa status analisis hari ini...';
- try{const result=await api('/admin/executive-brief/retry-status');button.disabled=!result.data?.available;status.textContent=result.data?.message||'Status belum tersedia.';}
+ try{const result=await api('/admin/executive-brief/retry-status');const reason=result.data?.reason;button.dataset.briefAction=reason==='not_generated'?'generate':reason==='available'?'retry':'';button.textContent=reason==='not_generated'?'Buat Executive Brief Hari Ini':reason==='available'?'Analisis Ulang Executive Brief':'Analisis Executive Brief Tidak Tersedia';button.disabled=!button.dataset.briefAction;status.textContent=reason==='not_generated'?'Belum ada analisis hari ini. Anda dapat membuatnya sekali secara manual. Jadwal otomatis tidak berjalan pada deployment Preview.':result.data?.message||'Status belum tersedia.';}
  catch{status.textContent='Status analisis belum dapat dimuat. Tekan Perbarui Status Analisis.';}
 }
 async function retryBrief(){
- if(!confirm('Analisis ulang Executive Brief yang gagal hari ini? Ini akan memanggil Gemini dan MENGURANGI kuota AI harian. Hanya satu percobaan ulang.'))return;
  const button=$('#schedBriefRetry'),status=$('#schedBriefRetryResult');
- button.disabled=true;status.textContent='Menjalankan analisis ulang...';
+ const action=button.dataset.briefAction;if(!['generate','retry'].includes(action))return;
+ if(!confirm(action==='generate'?'Buat Executive Brief hari ini? Ini akan memanggil Gemini dan memakai kuota AI harian. Analisis pertama hanya sekali sehari.':'Analisis ulang Executive Brief yang gagal hari ini? Ini akan memanggil Gemini dan memakai kuota AI harian. Hanya satu percobaan ulang.'))return;
+ button.disabled=true;status.textContent=action==='generate'?'Membuat analisis hari ini...':'Menjalankan analisis ulang...';
  try{
-  const result=await api('/admin/executive-brief/retry',{method:'POST',body:'{}'});
-  status.textContent=result.data?.status==='created'?'Berhasil. Executive Brief terbaru tersimpan dan dapat dilihat di dashboard.':'Analisis ulang gagal. Tidak ada percobaan otomatis berikutnya.';
- }catch(e){status.textContent='Analisis ulang tidak dapat dijalankan: '+e.message;}
+  const result=await api(action==='generate'?'/admin/executive-brief/generate':'/admin/executive-brief/retry',{method:'POST',body:'{}'});
+  status.textContent=result.data?.status==='created'?'Berhasil. Executive Brief hari ini tersimpan dan dapat dilihat di dashboard.':result.data?.status==='already_claimed'?'Analisis hari ini sudah tercatat. Perbarui status.':'Analisis gagal. Perbarui status untuk melihat apakah satu percobaan ulang tersedia.';
+  }catch(e){status.textContent='Analisis tidak dapat dijalankan: '+e.message;}
  finally{await loadRetryStatus();}
 }
 function setupExecutiveBriefControl(){
@@ -81,7 +82,7 @@ function setupExecutiveBriefControl(){
  section.id='aiExecutiveBriefSection';
  section.className='glass rounded-2xl p-5 space-y-3';
  section.innerHTML='<summary class="cursor-pointer font-bold text-lg">Pengujian Executive Brief (Manual)</summary><p class="text-xs text-slate-400 mt-2">Executive Brief otomatis diatur melalui checkbox Scheduler utama, pukul 09.30 WIB. Membuka dashboard hanya membaca hasil tersimpan.</p><div id="aiExecutiveBriefStatus" class="text-xs text-slate-400 mt-2">Memuat status...</div><div id="aiExecutiveBriefScheduleStatus" class="mt-2 text-xs text-slate-400">Jadwal belum dimuat</div><button type="button" id="aiExecutiveBriefReload" class="mt-2 rounded-lg border border-slate-600 px-3 py-2 text-xs">Perbarui Status</button><button type="button" id="aiExecutiveBriefPreflight" class="mt-2 ml-2 rounded-lg border border-cyan-600 px-3 py-2 text-xs">Uji Jadwal (Tanpa AI)</button><div id="aiExecutiveBriefPreflightResult" class="mt-2 text-xs text-slate-400"></div><button type="button" id="aiExecutiveBriefRunOnce" class="mt-2 rounded-lg border border-amber-600 px-3 py-2 text-xs">Smoke Test AI Sekali (Manual)</button><div id="aiExecutiveBriefRunOnceResult" class="mt-2 text-xs text-slate-400"></div><p class="text-xs text-amber-400 mt-2">Smoke test manual memakai kuota AI dan dibatasi sekali per hari.</p>';
- panel.appendChild(section);
+ panel.insertBefore(section,document.getElementById('schedHistoryDetails'));
  async function reload(){
   const status=section.querySelector('#aiExecutiveBriefStatus');
   status.textContent='Memuat status...';
@@ -131,5 +132,5 @@ function setupExecutiveBriefControl(){
  });
  section.querySelector('#aiExecutiveBriefReload').addEventListener('click',reload);
 }
-const start=()=>{ensureUI();load()};if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(start,300));else setTimeout(start,300);
+const start=()=>{ensureUI();setupExecutiveBriefControl();load()};if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',()=>setTimeout(start,300));else setTimeout(start,300);
 })();
