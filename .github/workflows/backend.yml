@@ -70,6 +70,10 @@ on:
       - 'admin.html'
       - '.github/workflows/backend.yml'
 
+concurrency:
+  group: backend-ci-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -81,6 +85,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
       - name: Check critical frontend syntax
         working-directory: .
         run: |
