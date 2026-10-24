@@ -1,0 +1,93 @@
+(()=>{'use strict';
+const KEY='mi.colorTheme';
+function readTheme(){try{return localStorage.getItem(KEY)==='dark'?'dark':'light'}catch{return'light'}}
+function applyTheme(theme){const dark=theme==='dark';document.documentElement.classList.toggle('dark',dark);document.documentElement.dataset.theme=theme;document.body?.setAttribute('data-theme',theme);const b=document.getElementById('themeToggleBtn');if(b){b.innerHTML=dark?'<i class="fa-solid fa-sun"></i> <span>Light Mode</span>':'<i class="fa-solid fa-moon"></i> <span>Dark Mode</span>';b.dataset.shortLabel=dark?'Terang':'Gelap';b.setAttribute('aria-label',dark?'Aktifkan Light Mode':'Aktifkan Dark Mode');b.title=dark?'Beralih ke Light Mode':'Beralih ke Dark Mode'}try{localStorage.setItem(KEY,theme)}catch{}}
+const css=document.createElement('style');css.id='miThemeStyles';css.textContent=`
+html:not(.dark),html:not(.dark) body{background:#f3f6fb!important;color:#172033!important;color-scheme:light}
+html:not(.dark) header.glass,html:not(.dark) .glass{background:rgba(255,255,255,.94)!important;border-color:#d9e1ec!important;color:#172033!important;box-shadow:0 4px 16px rgba(15,23,42,.045)}
+html:not(.dark) nav{background:rgba(255,255,255,.97)!important;border-color:#d9e1ec!important}
+html:not(.dark) main{color:#172033}
+html:not(.dark) [class*="bg-slate-950"],html:not(.dark) [class*="bg-slate-900"],html:not(.dark) [class*="bg-slate-800"]{background-color:#fff!important}
+html:not(.dark) [class*="bg-slate-700"]{background-color:#edf2f8!important}
+html:not(.dark) [class*="border-slate-800"],html:not(.dark) [class*="border-slate-700"],html:not(.dark) [class*="border-slate-600"]{border-color:#d5deea!important}
+html:not(.dark) [class*="text-slate-100"],html:not(.dark) [class*="text-slate-200"],html:not(.dark) [class*="text-slate-300"]{color:#253247!important}
+html:not(.dark) [class*="text-slate-400"],html:not(.dark) [class*="text-slate-500"]{color:#59677b!important}
+html:not(.dark) .text-white{color:#172033!important}
+html:not(.dark) .tab{color:#526176!important}
+html:not(.dark) .tab:hover{color:#0f172a!important;background:#e8eef6!important}
+html:not(.dark) .tab.active,html:not(.dark) .active{background:#0891b2!important;color:#fff!important;border-color:#0891b2!important}
+html:not(.dark) input:not([type="checkbox"]):not([type="radio"]),html:not(.dark) textarea,html:not(.dark) select{background:#fff!important;color:#172033!important;border-color:#cbd5e1!important;color-scheme:light}
+html:not(.dark) select option{background:#fff!important;color:#172033!important}
+html:not(.dark) input::placeholder,html:not(.dark) textarea::placeholder{color:#77849a!important}
+html:not(.dark) table{color:#253247}
+html:not(.dark) [class*="hover:bg-slate-"]:hover{background-color:#e8eef6!important}
+html:not(.dark) .bg-cyan-950,html:not(.dark) [class*="bg-cyan-950"]{background-color:#ecfeff!important}
+html:not(.dark) [style*="background:#020617"],html:not(.dark) [style*="background: #020617"],html:not(.dark) [style*="background:#0f172a"],html:not(.dark) [style*="background: #0f172a"]{background:#fff!important}
+html:not(.dark) [style*="color:#f8fafc"],html:not(.dark) [style*="color: #f8fafc"],html:not(.dark) [style*="color:#e2e8f0"]{color:#172033!important}
+html:not(.dark) #authSessionChecking{background:#f3f6fb!important;color:#253247!important}
+
+html.dark{color-scheme:dark}
+html.dark [class~="text-slate-500"]{color:#94a3b8!important}
+#executiveTicker.hidden{display:none!important}
+/* Shared layout: constrain flexible/grid children instead of clipping the page. */
+main,main > section,#aiAdminPanel,#aiUsagePanel,#aiAdminProviders,#aiAdminProviders > *{min-width:0;max-width:100%}
+#aiUsagePanel article,#aiGeminiFeatureResults{overflow-wrap:anywhere}
+body[data-active-tab]:not([data-active-tab="dashboard"]) #commandCenterFilters{display:none!important}
+button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #0891b2;outline-offset:3px}
+button:disabled{cursor:not-allowed}
+html:not(.dark) button:disabled{opacity:1!important;background-color:#e2e8f0!important;color:#64748b!important;border-color:#cbd5e1!important;box-shadow:none!important}
+html.dark button:disabled{opacity:1!important;background-color:#1e293b!important;color:#94a3b8!important;border-color:#475569!important}
+html:not(.dark) button[class*="bg-slate-800"],html:not(.dark) button[class*="bg-slate-900"],html:not(.dark) button[class*="bg-slate-950"]{border:1px solid #cbd5e1!important;background-color:#f8fafc!important;color:#334155!important}
+html:not(.dark) #authGate{background:#f3f6fb;color:#172033}
+html:not(.dark) #authGate .mi-title{color:#172033;text-shadow:none}
+html:not(.dark) #authGate .mi-gov,html:not(.dark) #authGate .mi-tagline,html:not(.dark) #authGate .mi-row{color:#475569}
+html:not(.dark) #authGate .mi-login-card{background:white;border-color:#cbd5e1;box-shadow:0 16px 50px #0f172a15}
+html:not(.dark) #authGate .mi-login-btn{color:white}
+@media(max-width:767px){
+ #headerActions{width:100%;display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr))!important;gap:6px!important}
+ #headerActions > button{display:flex!important;flex-direction:column;align-items:center;justify-content:center;gap:4px!important;min-width:0;min-height:52px;padding:7px 2px!important;font-size:10px!important;line-height:1.25!important;white-space:nowrap}
+ #headerActions > button > span{display:none}
+ #headerActions > button::after{content:attr(data-short-label);font-size:12px;letter-spacing:0}
+ #headerActions > button > i{font-size:14px;margin:0!important}
+}
+html:not(.dark) [class~="text-cyan-300"],html:not(.dark) [class~="text-cyan-400"],html:not(.dark) [class~="text-cyan-500"]{color:#0e7490!important}
+html:not(.dark) [class~="text-teal-300"],html:not(.dark) [class~="text-teal-400"],html:not(.dark) [class~="text-teal-500"]{color:#0f766e!important}
+html:not(.dark) [class~="text-emerald-300"],html:not(.dark) [class~="text-emerald-400"],html:not(.dark) [class~="text-emerald-500"]{color:#047857!important}
+html:not(.dark) [class~="text-green-300"],html:not(.dark) [class~="text-green-400"],html:not(.dark) [class~="text-green-500"]{color:#15803d!important}
+html:not(.dark) [class~="text-amber-300"],html:not(.dark) [class~="text-amber-400"],html:not(.dark) [class~="text-amber-500"]{color:#92400e!important}
+html:not(.dark) [class~="text-yellow-300"],html:not(.dark) [class~="text-yellow-400"],html:not(.dark) [class~="text-yellow-500"]{color:#854d0e!important}
+html:not(.dark) [class~="text-orange-300"],html:not(.dark) [class~="text-orange-400"],html:not(.dark) [class~="text-orange-500"]{color:#9a3412!important}
+html:not(.dark) [class~="text-violet-300"],html:not(.dark) [class~="text-violet-400"],html:not(.dark) [class~="text-violet-500"]{color:#6d28d9!important}
+html:not(.dark) [class~="text-purple-300"],html:not(.dark) [class~="text-purple-400"],html:not(.dark) [class~="text-purple-500"]{color:#7e22ce!important}
+html:not(.dark) [class~="text-rose-300"],html:not(.dark) [class~="text-rose-400"],html:not(.dark) [class~="text-rose-500"]{color:#be123c!important}
+html:not(.dark) [class~="text-red-300"],html:not(.dark) [class~="text-red-400"],html:not(.dark) [class~="text-red-500"]{color:#b91c1c!important}
+html:not(.dark) [class~="text-blue-300"],html:not(.dark) [class~="text-blue-400"],html:not(.dark) [class~="text-blue-500"]{color:#1d4ed8!important}
+html:not(.dark) [class~="text-sky-300"],html:not(.dark) [class~="text-sky-400"],html:not(.dark) [class~="text-sky-500"]{color:#0369a1!important}
+html:not(.dark) [class~="text-indigo-300"],html:not(.dark) [class~="text-indigo-400"],html:not(.dark) [class~="text-indigo-500"]{color:#4338ca!important}
+html:not(.dark) button[class~="bg-cyan-600"]:not(:disabled),html:not(.dark) a[class~="bg-cyan-600"],html:not(.dark) button[class~="bg-cyan-700"]:not(:disabled),html:not(.dark) a[class~="bg-cyan-700"],html:not(.dark) button[class~="bg-cyan-800"]:not(:disabled),html:not(.dark) a[class~="bg-cyan-800"],html:not(.dark) button[class~="bg-cyan-900"]:not(:disabled),html:not(.dark) a[class~="bg-cyan-900"],html:not(.dark) button[class~="bg-teal-600"]:not(:disabled),html:not(.dark) a[class~="bg-teal-600"],html:not(.dark) button[class~="bg-teal-700"]:not(:disabled),html:not(.dark) a[class~="bg-teal-700"],html:not(.dark) button[class~="bg-teal-800"]:not(:disabled),html:not(.dark) a[class~="bg-teal-800"],html:not(.dark) button[class~="bg-teal-900"]:not(:disabled),html:not(.dark) a[class~="bg-teal-900"],html:not(.dark) button[class~="bg-emerald-600"]:not(:disabled),html:not(.dark) a[class~="bg-emerald-600"],html:not(.dark) button[class~="bg-emerald-700"]:not(:disabled),html:not(.dark) a[class~="bg-emerald-700"],html:not(.dark) button[class~="bg-emerald-800"]:not(:disabled),html:not(.dark) a[class~="bg-emerald-800"],html:not(.dark) button[class~="bg-emerald-900"]:not(:disabled),html:not(.dark) a[class~="bg-emerald-900"],html:not(.dark) button[class~="bg-green-600"]:not(:disabled),html:not(.dark) a[class~="bg-green-600"],html:not(.dark) button[class~="bg-green-700"]:not(:disabled),html:not(.dark) a[class~="bg-green-700"],html:not(.dark) button[class~="bg-green-800"]:not(:disabled),html:not(.dark) a[class~="bg-green-800"],html:not(.dark) button[class~="bg-green-900"]:not(:disabled),html:not(.dark) a[class~="bg-green-900"],html:not(.dark) button[class~="bg-amber-600"]:not(:disabled),html:not(.dark) a[class~="bg-amber-600"],html:not(.dark) button[class~="bg-amber-700"]:not(:disabled),html:not(.dark) a[class~="bg-amber-700"],html:not(.dark) button[class~="bg-amber-800"]:not(:disabled),html:not(.dark) a[class~="bg-amber-800"],html:not(.dark) button[class~="bg-amber-900"]:not(:disabled),html:not(.dark) a[class~="bg-amber-900"],html:not(.dark) button[class~="bg-yellow-600"]:not(:disabled),html:not(.dark) a[class~="bg-yellow-600"],html:not(.dark) button[class~="bg-yellow-700"]:not(:disabled),html:not(.dark) a[class~="bg-yellow-700"],html:not(.dark) button[class~="bg-yellow-800"]:not(:disabled),html:not(.dark) a[class~="bg-yellow-800"],html:not(.dark) button[class~="bg-yellow-900"]:not(:disabled),html:not(.dark) a[class~="bg-yellow-900"],html:not(.dark) button[class~="bg-orange-600"]:not(:disabled),html:not(.dark) a[class~="bg-orange-600"],html:not(.dark) button[class~="bg-orange-700"]:not(:disabled),html:not(.dark) a[class~="bg-orange-700"],html:not(.dark) button[class~="bg-orange-800"]:not(:disabled),html:not(.dark) a[class~="bg-orange-800"],html:not(.dark) button[class~="bg-orange-900"]:not(:disabled),html:not(.dark) a[class~="bg-orange-900"],html:not(.dark) button[class~="bg-violet-600"]:not(:disabled),html:not(.dark) a[class~="bg-violet-600"],html:not(.dark) button[class~="bg-violet-700"]:not(:disabled),html:not(.dark) a[class~="bg-violet-700"],html:not(.dark) button[class~="bg-violet-800"]:not(:disabled),html:not(.dark) a[class~="bg-violet-800"],html:not(.dark) button[class~="bg-violet-900"]:not(:disabled),html:not(.dark) a[class~="bg-violet-900"],html:not(.dark) button[class~="bg-purple-600"]:not(:disabled),html:not(.dark) a[class~="bg-purple-600"],html:not(.dark) button[class~="bg-purple-700"]:not(:disabled),html:not(.dark) a[class~="bg-purple-700"],html:not(.dark) button[class~="bg-purple-800"]:not(:disabled),html:not(.dark) a[class~="bg-purple-800"],html:not(.dark) button[class~="bg-purple-900"]:not(:disabled),html:not(.dark) a[class~="bg-purple-900"],html:not(.dark) button[class~="bg-rose-600"]:not(:disabled),html:not(.dark) a[class~="bg-rose-600"],html:not(.dark) button[class~="bg-rose-700"]:not(:disabled),html:not(.dark) a[class~="bg-rose-700"],html:not(.dark) button[class~="bg-rose-800"]:not(:disabled),html:not(.dark) a[class~="bg-rose-800"],html:not(.dark) button[class~="bg-rose-900"]:not(:disabled),html:not(.dark) a[class~="bg-rose-900"],html:not(.dark) button[class~="bg-red-600"]:not(:disabled),html:not(.dark) a[class~="bg-red-600"],html:not(.dark) button[class~="bg-red-700"]:not(:disabled),html:not(.dark) a[class~="bg-red-700"],html:not(.dark) button[class~="bg-red-800"]:not(:disabled),html:not(.dark) a[class~="bg-red-800"],html:not(.dark) button[class~="bg-red-900"]:not(:disabled),html:not(.dark) a[class~="bg-red-900"],html:not(.dark) button[class~="bg-blue-600"]:not(:disabled),html:not(.dark) a[class~="bg-blue-600"],html:not(.dark) button[class~="bg-blue-700"]:not(:disabled),html:not(.dark) a[class~="bg-blue-700"],html:not(.dark) button[class~="bg-blue-800"]:not(:disabled),html:not(.dark) a[class~="bg-blue-800"],html:not(.dark) button[class~="bg-blue-900"]:not(:disabled),html:not(.dark) a[class~="bg-blue-900"],html:not(.dark) button[class~="bg-sky-600"]:not(:disabled),html:not(.dark) a[class~="bg-sky-600"],html:not(.dark) button[class~="bg-sky-700"]:not(:disabled),html:not(.dark) a[class~="bg-sky-700"],html:not(.dark) button[class~="bg-sky-800"]:not(:disabled),html:not(.dark) a[class~="bg-sky-800"],html:not(.dark) button[class~="bg-sky-900"]:not(:disabled),html:not(.dark) a[class~="bg-sky-900"],html:not(.dark) button[class~="bg-indigo-600"]:not(:disabled),html:not(.dark) a[class~="bg-indigo-600"],html:not(.dark) button[class~="bg-indigo-700"]:not(:disabled),html:not(.dark) a[class~="bg-indigo-700"],html:not(.dark) button[class~="bg-indigo-800"]:not(:disabled),html:not(.dark) a[class~="bg-indigo-800"],html:not(.dark) button[class~="bg-indigo-900"]:not(:disabled),html:not(.dark) a[class~="bg-indigo-900"]{color:#fff!important}
+button[class~="bg-cyan-300"]:not(:disabled),button[class~="bg-cyan-400"]:not(:disabled),button[class~="bg-cyan-500"]:not(:disabled),button[class~="bg-emerald-300"]:not(:disabled),button[class~="bg-emerald-400"]:not(:disabled),button[class~="bg-emerald-500"]:not(:disabled),button[class~="bg-amber-300"]:not(:disabled),button[class~="bg-amber-400"]:not(:disabled),button[class~="bg-amber-500"]:not(:disabled),button[class~="bg-yellow-300"]:not(:disabled),button[class~="bg-yellow-400"]:not(:disabled),button[class~="bg-yellow-500"]:not(:disabled),button[class~="bg-teal-300"]:not(:disabled),button[class~="bg-teal-400"]:not(:disabled),button[class~="bg-teal-500"]:not(:disabled),button[class~="bg-sky-300"]:not(:disabled),button[class~="bg-sky-400"]:not(:disabled),button[class~="bg-sky-500"]:not(:disabled){color:#082f49!important}
+html:not(.dark) [style*="color:#22d3ee"],html:not(.dark) [style*="color: #22d3ee"],html:not(.dark) [style*="color:#67e8f9"],html:not(.dark) [style*="color: #67e8f9"],html:not(.dark) [style*="color:#a5f3fc"],html:not(.dark) [style*="color: #a5f3fc"]{color:#0e7490!important}
+html:not(.dark) [style*="color:#86efac"],html:not(.dark) [style*="color: #86efac"],html:not(.dark) [style*="color:#6ee7b7"],html:not(.dark) [style*="color: #6ee7b7"]{color:#047857!important}
+html:not(.dark) [style*="color:#fda4af"],html:not(.dark) [style*="color: #fda4af"],html:not(.dark) [style*="color:#fecaca"],html:not(.dark) [style*="color: #fecaca"]{color:#be123c!important}
+html:not(.dark) [style*="color:#cbd5e1"],html:not(.dark) [style*="color: #cbd5e1"],html:not(.dark) [style*="color:#94a3b8"],html:not(.dark) [style*="color: #94a3b8"],html:not(.dark) [style*="color:#64748b"],html:not(.dark) [style*="color: #64748b"]{color:#526176!important}
+html:not(.dark) button[style*="background:#450a0a"]{background:#fff1f2!important;color:#be123c!important;border-color:#fda4af!important}
+button[aria-busy="true"]::before{content:"";display:inline-block;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;margin-right:6px;animation:miButtonSpin .7s linear infinite}
+@keyframes miButtonSpin{to{transform:rotate(360deg)}}
+html:not(.dark) button[class~="bg-cyan-600"]:not(:disabled){background-color:#0e7490!important}
+html:not(.dark) button[class~="bg-emerald-600"]:not(:disabled){background-color:#047857!important}
+/* KPI filters: one restrained selection treatment with readable labels. */
+.mi-kpi-card{cursor:pointer;transition-property:border-color,box-shadow!important;transition-duration:.15s!important}
+html:not(.dark) .mi-kpi-card{background:#fff!important;border:1px solid #cbd5e1!important;color:#172033!important;box-shadow:none!important}
+html:not(.dark) .mi-kpi-card:hover{background:#f0f9ff!important;border-color:#0284c7!important}
+html:not(.dark) .mi-kpi-card[aria-pressed="true"],html:not(.dark) .mi-kpi-card[aria-pressed="true"] .glass{background:#e0f2fe!important;border-color:#0369a1!important;color:#0c4a6e!important;box-shadow:inset 0 0 0 1px #0369a1!important}
+html:not(.dark) .mi-kpi-card[aria-pressed="true"] *{color:#0c4a6e!important}
+html.dark .mi-kpi-card[aria-pressed="true"],html.dark .mi-kpi-card[aria-pressed="true"] .glass{background:#164e63!important;border-color:#22d3ee!important;color:#ecfeff!important;box-shadow:inset 0 0 0 1px #22d3ee!important}
+html.dark .mi-kpi-card[aria-pressed="true"] *{color:#ecfeff!important}
+.mi-kpi-status{font-size:12px;line-height:1.5;margin:10px 0;color:#475569}
+html.dark .mi-kpi-status{color:#cbd5e1}
+@media print{html:not(.dark),html:not(.dark) body{background:#fff!important;color:#111827!important}}
+`;document.head.appendChild(css);
+function addButton(){if(document.getElementById('themeToggleBtn'))return;const host=document.getElementById('headerActions');if(!host)return;const b=document.createElement('button');b.id='themeToggleBtn';b.type='button';b.className='px-3 py-2 rounded-lg border border-slate-700 bg-slate-800 text-slate-200 text-xs font-black';b.style.cssText='display:inline-flex;align-items:center;gap:7px;white-space:nowrap';b.onclick=()=>applyTheme(readTheme()==='dark'?'light':'dark');host.prepend(b);applyTheme(readTheme())}
+applyTheme(readTheme());window.addEventListener('media:authenticated',addButton);if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',addButton,{once:true});else addButton();
+const observer=new MutationObserver(()=>{if(document.body?.dataset.auth==='ok')addButton()});observer.observe(document.documentElement,{subtree:true,childList:true,attributes:true,attributeFilter:['data-auth']});
+})();

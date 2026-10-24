@@ -1,0 +1,139 @@
+name: Backend CI
+
+on:
+  push:
+    branches: [main, 'fix/**']
+    paths:
+      - 'backend/**'
+      - 'deploy/vps/**'
+      - 'app.js'
+      - 'theme-runtime.js'
+      - 'auth-session-guard.js'
+      - 'auth-session-bridge.js'
+      - 'auth-ui.js'
+      - 'global-scope.js'
+      - 'peta-situasi.js'
+      - 'print-keyword-search-ui.js'
+      - 'print-keyword-state-sync.js'
+      - 'index.html'
+      - 'knowledge-evaluation-ui.js'
+      - 'knowledge-evaluation-print.js'
+      - 'admin-ai-integrations.js'
+      - 'admin-ai.js'
+      - 'admin-ai-usage.js'
+      - 'admin-scheduler.js'
+      - 'tv.html'
+      - 'tv-display.css'
+      - 'tv-display.js'
+      - 'tv-mode-entry.js'
+      - 'admin-tv-devices.js'
+      - 'social-intelligence.js'
+      - 'admin.html'
+      - 'phase3-outcome-ui.js'
+      - 'issue-management-v2.js'
+      - 'owned-channel-intelligence.js'
+      - 'owned-channel-submenu.js'
+      - 'admin-integrations.js'
+      - 'online-latest-news.js'
+      - 'communication-strategy-ui.js'
+      - 'communication-gap-ui.js'
+      - 'command-center.js'
+      - 'executive-brief-status-ui.js'
+      - '.github/workflows/backend.yml'
+  pull_request:
+    paths:
+      - 'backend/**'
+      - 'deploy/vps/**'
+      - 'phase3-outcome-ui.js'
+      - 'app.js'
+      - 'theme-runtime.js'
+      - 'auth-session-guard.js'
+      - 'auth-session-bridge.js'
+      - 'auth-ui.js'
+      - 'global-scope.js'
+      - 'peta-situasi.js'
+      - 'print-keyword-search-ui.js'
+      - 'print-keyword-state-sync.js'
+      - 'index.html'
+      - 'knowledge-evaluation-ui.js'
+      - 'knowledge-evaluation-print.js'
+      - 'admin-ai-integrations.js'
+      - 'admin-ai.js'
+      - 'admin-ai-usage.js'
+      - 'admin-scheduler.js'
+      - 'tv.html'
+      - 'tv-display.css'
+      - 'tv-display.js'
+      - 'tv-mode-entry.js'
+      - 'admin-tv-devices.js'
+      - 'social-intelligence.js'
+      - 'admin.html'
+      - '.github/workflows/backend.yml'
+
+concurrency:
+  group: backend-ci-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Check critical frontend syntax
+        working-directory: .
+        run: |
+          node --check app.js
+          node --check theme-runtime.js
+          node --check branding-runtime.js
+          node --check backend/install/app.js
+          node --check deploy/vps/build-package.mjs
+          bash -n deploy/vps/setup.sh
+          node --check auth-session-guard.js
+          node --check auth-session-bridge.js
+          node --check reset-password.js
+          node --check auth-ui.js
+          node --check global-scope.js
+          node --check peta-situasi.js
+          node --check print-keyword-search-ui.js
+          node --check print-keyword-state-sync.js
+          node --check knowledge-evaluation-ui.js
+          node --check knowledge-evaluation-print.js
+          node --check admin-ai-integrations.js
+          node --check admin-ai.js
+          node --check admin-ai-usage.js
+          node --check phase3-outcome-ui.js
+          node --check issue-management-v2.js
+          node --check social-intelligence.js
+          node --check admin-scheduler.js
+          node --check tv-display.js
+          node --check tv-mode-entry.js
+          node --check admin-tv-devices.js
+          node --check owned-channel-intelligence.js
+          node --check owned-channel-submenu.js
+          node --check admin-integrations.js
+          node --check online-latest-news.js
+          node --check communication-strategy-ui.js
+          node --check communication-gap-ui.js
+          node --check command-center.js
+          node --check executive-brief-status-ui.js
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+      - name: Build VPS distribution
+        run: npm run package:vps
+      - name: Upload VPS distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: media-intelligence-vps
+          path: release/media-intelligence-vps.tar.gz
+          retention-days: 14
+          if-no-files-found: error

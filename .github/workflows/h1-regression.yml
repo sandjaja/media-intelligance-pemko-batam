@@ -1,0 +1,40 @@
+name: H-1 regression (no Gemini)
+on:
+  push:
+    branches:
+      - fix/media-intelligence-v2
+    paths:
+      - 'backend/src/issue-linkage-h1-batch-lock.ts'
+      - 'backend/src/issue-linkage-h1-batch-lock.test.ts'
+      - 'backend/src/unified-candidate-issues.ts'
+      - 'backend/package.json'
+      - '.github/workflows/h1-regression.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: h1-regression-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  h1-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - name: Install backend dependencies without lockfile writes
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: TypeScript check
+        run: npm run check
+      - name: H-1 mocked regression suite
+        run: npm run test:h1
