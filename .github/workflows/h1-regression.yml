@@ -11,6 +11,10 @@ on:
       - '.github/workflows/h1-regression.yml'
   workflow_dispatch:
 
+concurrency:
+  group: h1-regression-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
@@ -26,6 +30,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
       - name: Install backend dependencies without lockfile writes
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: TypeScript check
