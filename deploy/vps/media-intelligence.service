@@ -1,0 +1,22 @@
+[Unit]
+Description=Media Intelligence API and first-install wizard
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=simple
+User=media-intelligence
+Group=media-intelligence
+WorkingDirectory=/opt/media-intelligence/backend
+EnvironmentFile=/etc/media-intelligence.env
+ExecStart=/usr/bin/node dist/start.js
+Restart=always
+RestartSec=3
+TimeoutStopSec=90
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/media-intelligence
+[Install]
+WantedBy=multi-user.target
