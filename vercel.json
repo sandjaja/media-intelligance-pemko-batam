@@ -86,11 +86,11 @@
       "dest": "/backend/src/vercel.ts"
     },
     {
-      "handle": "filesystem"
+      "src": "/",
+      "dest": "/landing.html"
     },
     {
-      "src": "/",
-      "dest": "/index.html"
+      "handle": "filesystem"
     }
   ],
   "crons": [
